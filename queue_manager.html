@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo Upload Queue Manager</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0c0c0e;
+  --surface: #16161a;
+  --surface2: #1e1e24;
+  --surface3: #26262e;
+  --border: #2e2e38;
+  --text: #e8e8f0;
+  --muted: #7a7a90;
+  --accent: #5b8dee;
+  --accent-hover: #7aa3f5;
+  --success: #28c76f;
+  --warning: #f8a020;
+  --error: #ea5455;
+  --purple: #9f79e8;
+  --teal: #00cfb4;
+  --radius: 7px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* ── HEADER ── */
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 54px;
+  position: sticky; top: 0; z-index: 100;
+}
+.logo { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14.5px; letter-spacing: -0.3px; }
+.logo svg { color: var(--accent); flex-shrink: 0; }
+.logo span { color: var(--muted); font-weight: 400; margin-left: 2px; }
+.sep { flex: 1; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  font-family: inherit;
+}
+.btn:hover { background: var(--surface3); border-color: #3e3e50; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-success { background: var(--success); border-color: var(--success); color: #fff; }
+.btn-success:hover { opacity: 0.85; }
+.btn-danger { background: var(--error); border-color: var(--error); color: #fff; }
+.btn-danger:hover { opacity: 0.85; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn-ghost:hover { background: var(--surface2); color: var(--text); border-color: var(--border); }
+.btn-sm { padding: 4px 10px; font-size: 11.5px; }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--muted); cursor: pointer; transition: all 0.15s;
+  font-size: 14px; line-height: 1;
+}
+.icon-btn:hover { color: var(--text); background: var(--surface3); }
+
+/* ── STATS BAR ── */
+.stats-bar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 8px 20px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+}
+.stat { display: flex; align-items: center; gap: 6px; }
+.stat-count { font-size: 19px; font-weight: 700; line-height: 1; }
+.stat-label { color: var(--muted); font-size: 11px; }
+.stat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.file-label { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+/* ── FILTER BAR ── */
+.filter-bar {
+  padding: 9px 20px; display: flex; gap: 8px; align-items: center;
+  flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.filter-bar input, .filter-bar select {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text);
+  padding: 5px 10px; font-size: 12.5px; outline: none; font-family: inherit;
+  transition: border-color 0.15s;
+}
+.filter-bar input:focus, .filter-bar select:focus { border-color: var(--accent); }
+.filter-bar input[type="text"] { width: 200px; }
+.filter-bar select { cursor: pointer; }
+.filter-sep { flex: 1; }
+.filter-bar input[type="date"] { cursor: pointer; }
+
+/* ── MAIN LAYOUT ── */
+.layout {
+  display: flex;
+  height: calc(100vh - 54px - 48px - 47px);
+  overflow: hidden;
+}
+.table-pane { flex: 1; overflow: auto; }
+.detail-pane {
+  width: 340px; min-width: 340px; max-width: 340px;
+  background: var(--surface); border-left: 1px solid var(--border);
+  display: none; flex-direction: column; overflow: hidden;
+}
+.detail-pane.open { display: flex; }
+
+/* ── TABLE ── */
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+thead th {
+  background: var(--surface2); color: var(--muted); font-weight: 600;
+  padding: 8px 12px; text-align: left; position: sticky; top: 0; z-index: 10;
+  border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap;
+}
+thead th:hover { color: var(--text); }
+.sort-arrow { opacity: 0.3; font-size: 10px; }
+th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+tbody tr { border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr.selected { background: rgba(91,141,238,0.12); }
+tbody td { padding: 8px 12px; vertical-align: middle; }
+
+/* EMPTY STATE */
+.empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; padding: 60px; text-align: center; color: var(--muted);
+}
+.empty h2 { font-size: 18px; color: var(--text); margin: 16px 0 8px; font-weight: 600; }
+.empty p { font-size: 12.5px; line-height: 1.7; margin-bottom: 20px; }
+
+/* BADGES */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 100px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.2px;
+}
+.b-pending { background: rgba(248,160,32,.15); color: var(--warning); }
+.b-approved { background: rgba(91,141,238,.15); color: var(--accent); }
+.b-uploaded { background: rgba(40,199,111,.15); color: var(--success); }
+.b-failed { background: rgba(234,84,85,.15); color: var(--error); }
+.b-skipped { background: rgba(122,122,144,.15); color: var(--muted); }
+.b-partial { background: rgba(159,121,232,.15); color: var(--purple); }
+.b-auto {
+  background: rgba(91,141,238,.1); color: var(--accent);
+  border: 1px dashed rgba(91,141,238,.4); padding: 1px 6px; font-size: 10px;
+}
+.pb {
+  display: inline-flex; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; margin-right: 2px;
+}
+.pb-da { background: rgba(0,230,118,.12); color: #00e676; }
+.pb-500px { background: rgba(91,141,238,.12); color: #5b8dee; }
+.pb-fb { background: rgba(24,119,242,.12); color: #1877f2; }
+.pb-35p { background: rgba(255,80,80,.12); color: #ff5050; }
+
+/* ── DETAIL PANE ── */
+.dp-header {
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.dp-header h3 { font-size: 13.5px; font-weight: 600; }
+.dp-scroll { flex: 1; overflow-y: auto; }
+.dp-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.dp-section-title {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+}
+.dp-field { margin-bottom: 8px; }
+.dp-label { font-size: 10.5px; color: var(--muted); margin-bottom: 2px; }
+.dp-value { font-size: 12.5px; word-break: break-all; }
+.dp-value.mono { font-family: monospace; font-size: 11px; color: var(--teal); }
+.dp-value.pre { white-space: pre-wrap; }
+.dp-link {
+  color: var(--accent); text-decoration: none; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.dp-link:hover { text-decoration: underline; }
+.dp-actions { padding: 12px 16px; flex-shrink: 0; }
+.dp-row { display: flex; gap: 6px; margin-bottom: 6px; }
+
+/* PREVIEW AREA */
+.preview-area {
+  background: var(--surface2); border: 1px dashed var(--border);
+  border-radius: var(--radius); min-height: 140px; max-height: 200px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative; margin-top: 8px; cursor: pointer;
+}
+.preview-area img { max-width: 100%; max-height: 200px; object-fit: contain; }
+.preview-placeholder { text-align: center; color: var(--muted); padding: 16px; }
+.preview-placeholder small { font-size: 11px; display: block; margin-top: 6px; }
+
+/* ── MODAL ── */
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.72);
+  z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; width: 680px; max-width: 100%;
+  max-height: 90vh; display: flex; flex-direction: column; box-shadow: var(--shadow);
+}
+.modal-head {
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.modal-head h2 { font-size: 15px; font-weight: 700; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-foot {
+  padding: 14px 20px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-shrink: 0;
+}
+
+/* FORM */
+.fg { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.fg label { font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.fg input, .fg select, .fg textarea {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); padding: 7px 10px;
+  font-size: 12.5px; outline: none; font-family: inherit;
+  transition: border-color 0.15s; width: 100%;
+}
+.fg input:focus, .fg select:focus, .fg textarea:focus { border-color: var(--accent); }
+.fg textarea { resize: vertical; min-height: 70px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.form-full { grid-column: 1/-1; }
+.form-section {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+  color: var(--muted); padding: 14px 0 8px; border-bottom: 1px solid var(--border);
+  margin-bottom: 14px; grid-column: 1/-1;
+}
+.auto-row { display: flex; gap: 6px; align-items: flex-start; }
+.auto-row .fg { flex: 1; margin-bottom: 0; }
+.auto-row .fg input, .auto-row .fg textarea { margin: 0; }
+.platform-checks { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+.platform-checks label {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 12.5px; color: var(--text);
+}
+.platform-checks input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.chk-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.chk-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.stash-hint { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+
+/* ── TOAST ── */
+.toasts { position: fixed; bottom: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 14px; font-size: 12.5px;
+  box-shadow: var(--shadow); display: flex; align-items: flex-start; gap: 10px;
+  animation: slide-in .18s ease; max-width: 300px;
+}
+.toast.success { border-left: 3px solid var(--success); }
+.toast.error { border-left: 3px solid var(--error); }
+.toast.info { border-left: 3px solid var(--accent); }
+@keyframes slide-in { from { transform: translateX(16px); opacity: 0; } }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3e3e50; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="logo">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/>
+      <polyline points="21 15 16 10 5 21"/>
+    </svg>
+    Photo Upload Queue <span>· v2 Sta.sh</span>
+  </div>
+  <div class="sep"></div>
+  <button class="btn" onclick="loadCSV()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    Load CSV
+  </button>
+  <button class="btn" id="btn-save" onclick="saveCSV()" disabled>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+    Save CSV
+  </button>
+  <button class="btn btn-primary" onclick="openAddModal()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Add Photo
+  </button>
+</header>
+
+<!-- STATS -->
+<div class="stats-bar">
+  <div class="stat"><div class="stat-dot" style="background:#fff;opacity:.25"></div><div class="stat-count" id="s-total">0</div><div class="stat-label">Total</div></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--warning)"></div><div class="stat-count" id="s-pending">0</div><div class="stat-label">Pending</div></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--accent)"></div><div class="stat-count" id="s-approved">0</div><div class="stat-label">Approved</div></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--success)"></div><div class="stat-count" id="s-uploaded">0</div><div class="stat-label">Uploaded</div></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--error)"></div><div class="stat-count" id="s-failed">0</div><div class="stat-label">Failed</div></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--muted)"></div><div class="stat-count" id="s-skipped">0</div><div class="stat-label">Skipped</div></div>
+  <div class="file-label" id="file-label"></div>
+</div>
+
+<!-- FILTERS -->
+<div class="filter-bar">
+  <input type="text" id="f-search" placeholder="Search title, ID, notes…" oninput="applyFilters()">
+  <select id="f-status" onchange="applyFilters()">
+    <option value="">All Statuses</option>
+    <option>Pending</option><option>Approved</option>
+    <option>Uploaded</option><option>Failed</option>
+    <option>Partial</option><option>Skipped</option>
+  </select>
+  <select id="f-platform" onchange="applyFilters()">
+    <option value="">All Platforms</option>
+    <option value="DA">DeviantArt</option>
+    <option value="500PX">500px</option>
+    <option value="FB">Facebook</option>
+    <option value="35P">35photo</option>
+  </select>
+  <input type="date" id="f-from" onchange="applyFilters()" title="From date">
+  <span style="color:var(--muted)">→</span>
+  <input type="date" id="f-to" onchange="applyFilters()" title="To date">
+  <div class="filter-sep"></div>
+  <button class="btn btn-sm btn-ghost" onclick="clearFilters()">Clear</button>
+</div>
+
+<!-- LAYOUT -->
+<div class="layout">
+
+  <!-- TABLE -->
+  <div class="table-pane" id="table-pane">
+    <div class="empty" id="empty-state">
+      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+      </svg>
+      <h2>No queue loaded</h2>
+      <p>Load your upload_queue.csv from Google Drive,<br>or add your first photo to get started.</p>
+      <button class="btn btn-primary" onclick="loadCSV()">Load CSV from Google Drive</button>
+    </div>
+    <table id="main-table" style="display:none">
+      <thead>
+        <tr>
+          <th onclick="sortBy('upload_id')">ID <span class="sort-arrow">↕</span></th>
+          <th onclick="sortBy('scheduled_date')">Date <span class="sort-arrow">↕</span></th>
+          <th onclick="sortBy('title')">Title <span class="sort-arrow">↕</span></th>
+          <th>Platforms</th>
+          <th onclick="sortBy('status')">Status <span class="sort-arrow">↕</span></th>
+          <th>NSFW</th>
+          <th>Sta.sh NSFW</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- DETAIL PANE -->
+  <div class="detail-pane" id="dp">
+    <div class="dp-header">
+      <h3 id="dp-title">Details</h3>
+      <button class="icon-btn" onclick="closeDetail()" title="Close">×</button>
+    </div>
+    <div class="dp-scroll">
+
+      <!-- Preview -->
+      <div class="dp-section">
+        <div class="dp-section-title">Photo Preview</div>
+        <div class="preview-area" id="preview-area" onclick="previewClick()">
+          <div class="preview-placeholder" id="preview-ph">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <small>Click to try loading preview</small>
+          </div>
+          <img id="preview-img" style="display:none" alt="">
+        </div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap" id="preview-links"></div>
+      </div>
+
+      <!-- Metadata -->
+      <div class="dp-section">
+        <div class="dp-section-title">Metadata</div>
+        <div class="dp-field"><div class="dp-label">Title</div><div class="dp-value" id="dp-ftitle">—</div></div>
+        <div class="dp-field"><div class="dp-label">Caption</div><div class="dp-value pre" id="dp-fcaption">—</div></div>
+        <div class="dp-field"><div class="dp-label">Keywords</div><div class="dp-value" id="dp-fkeywords">—</div></div>
+      </div>
+
+      <!-- Sta.sh -->
+      <div class="dp-section">
+        <div class="dp-section-title">Sta.sh Files</div>
+        <div class="dp-field">
+          <div class="dp-label">NSFW Version</div>
+          <div class="dp-value mono" id="dp-fnsfw">—</div>
+        </div>
+        <div class="dp-field">
+          <div class="dp-label">SAFE Version</div>
+          <div class="dp-value mono" id="dp-fsafe">—</div>
+        </div>
+        <div class="dp-field" id="dp-deviationwrap" style="display:none">
+          <div class="dp-label">DeviantArt URL</div>
+          <div class="dp-value"><a class="dp-link" id="dp-deviation" href="#" target="_blank">View on DA ↗</a></div>
+        </div>
+        <div class="dp-field" id="dp-500pxwrap" style="display:none">
+          <div class="dp-label">500px URL</div>
+          <div class="dp-value"><a class="dp-link" id="dp-500px" href="#" target="_blank">View on 500px ↗</a></div>
+        </div>
+        <div class="dp-field" id="dp-35pwrap" style="display:none">
+          <div class="dp-label">35photo URL</div>
+          <div class="dp-value"><a class="dp-link" id="dp-35p" href="#" target="_blank">View on 35photo ↗</a></div>
+        </div>
+        <div class="dp-field" id="dp-fbwrap" style="display:none">
+          <div class="dp-label">Facebook Post URL</div>
+          <div class="dp-value"><a class="dp-link" id="dp-fb" href="#" target="_blank">View on Facebook ↗</a></div>
+        </div>
+      </div>
+
+      <!-- Upload Info -->
+      <div class="dp-section">
+        <div class="dp-section-title">Upload Info</div>
+        <div class="dp-field"><div class="dp-label">Scheduled</div><div class="dp-value" id="dp-fsched">—</div></div>
+        <div class="dp-field"><div class="dp-label">Platforms</div><div class="dp-value" id="dp-fplat">—</div></div>
+        <div class="dp-field"><div class="dp-label">DA Mature Content</div><div class="dp-value" id="dp-fnsfw-flag">—</div></div>
+        <div class="dp-field" id="dp-tswrap" style="display:none">
+          <div class="dp-label">Uploaded At</div><div class="dp-value" id="dp-fts">—</div>
+        </div>
+      </div>
+
+      <!-- Notes / Errors -->
+      <div class="dp-section">
+        <div class="dp-section-title">Notes</div>
+        <div class="dp-value pre" id="dp-fnotes" style="color:var(--muted);font-size:12px">—</div>
+      </div>
+      <div class="dp-section" id="dp-errsec" style="display:none">
+        <div class="dp-section-title" style="color:var(--error)">Error Log</div>
+        <div class="dp-value pre" id="dp-ferror" style="color:var(--error);font-size:11.5px">—</div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="dp-actions">
+      <div class="dp-section-title" style="margin-bottom:10px">Quick Actions</div>
+      <div class="dp-row">
+        <button class="btn btn-sm btn-success" onclick="setStatus('Approved')" style="flex:1">✓ Approve</button>
+        <button class="btn btn-sm" onclick="setStatus('Skipped')" style="flex:1">⊘ Skip</button>
+        <button class="btn btn-sm btn-ghost" onclick="setStatus('Pending')" style="flex:1">↺ Reset</button>
+      </div>
+      <div class="dp-row">
+        <button class="btn btn-sm btn-primary" onclick="openEditModal()" style="flex:1">✎ Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteSel()" style="flex:1">✕ Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="modal-title">Add Photo</h2>
+      <button class="icon-btn" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+
+        <div class="form-section">Schedule</div>
+        <div class="fg">
+          <label>Scheduled Date</label>
+          <input type="date" id="m-date">
+        </div>
+        <div class="fg">
+          <label>Scheduled Time</label>
+          <input type="time" id="m-time" value="10:00">
+        </div>
+
+        <div class="form-section">Sta.sh Files</div>
+        <div class="fg form-full">
+          <label>Sta.sh URL — NSFW Version</label>
+          <input type="url" id="m-nsfw" placeholder="https://sta.sh/0xxxxxxxxxx">
+          <div class="stash-hint">The full Sta.sh URL for the NSFW / full-res version</div>
+        </div>
+        <div class="fg form-full">
+          <label>Sta.sh URL — SAFE Version <span style="font-weight:400;opacity:.6">(optional — for Facebook etc.)</span></label>
+          <input type="url" id="m-safe" placeholder="https://sta.sh/0xxxxxxxxxx">
+        </div>
+
+        <div class="form-section">Metadata</div>
+        <div class="form-full">
+          <div class="auto-row">
+            <div class="fg"><label>Title</label><input type="text" id="m-title" placeholder="AUTO"></div>
+            <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap" onclick="setAuto('m-title')">Set AUTO</button>
+          </div>
+        </div>
+        <div class="form-full">
+          <div class="auto-row">
+            <div class="fg"><label>Caption</label><textarea id="m-caption" rows="3" placeholder="AUTO"></textarea></div>
+            <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap" onclick="setAuto('m-caption')">Set AUTO</button>
+          </div>
+        </div>
+        <div class="form-full">
+          <div class="auto-row">
+            <div class="fg"><label>Keywords <span style="font-weight:400;opacity:.6">(comma-separated)</span></label><input type="text" id="m-keywords" placeholder="AUTO"></div>
+            <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap" onclick="setAuto('m-keywords')">Set AUTO</button>
+          </div>
+        </div>
+
+        <div class="form-section">Platform Settings</div>
+        <div class="fg form-full">
+          <label>Target Platforms</label>
+          <div class="platform-checks">
+            <label><input type="checkbox" id="p-da"> DeviantArt</label>
+            <label><input type="checkbox" id="p-500"> 500px</label>
+            <label><input type="checkbox" id="p-fb"> Facebook</label>
+            <label><input type="checkbox" id="p-35"> 35photo</label>
+          </div>
+        </div>
+        <div class="fg">
+          <label>DeviantArt Mature Content</label>
+          <div class="chk-row"><input type="checkbox" id="m-nsfw-flag"><span>Mark as Mature / NSFW on DA</span></div>
+        </div>
+        <div class="fg">
+          <label>Status</label>
+          <select id="m-status">
+            <option>Pending</option><option>Approved</option><option>Skipped</option>
+          </select>
+        </div>
+
+        <div class="form-section">Per-Platform Metadata</div>
+        <div class="fg">
+          <label>500px Category</label>
+          <select id="m-cat-500px">
+            <option value="">— select —</option>
+            <option>Abstract</option><option>Animals</option><option>Architecture</option>
+            <option>City &amp; Street</option><option>Fashion</option><option>Film</option>
+            <option>Fine Art</option><option>Landscape</option><option>Macro</option>
+            <option>Nature</option><option>Nude</option><option>People</option>
+            <option>Portrait</option><option>Sport</option><option>Still Life</option>
+            <option>Transportation</option><option>Travel</option><option>Underwater</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>35photo Category</label>
+          <select id="m-cat-35p">
+            <option value="">— select —</option>
+            <option>Portrait</option><option>Nude</option><option>Fashion</option>
+            <option>Fine Art</option><option>Street</option><option>Landscape</option>
+            <option>Architecture</option><option>Nature</option><option>Still Life</option>
+            <option>Black &amp; White</option><option>Film</option><option>Abstract</option>
+          </select>
+        </div>
+        <div class="fg form-full">
+          <label>Facebook Caption <span style="font-weight:400;opacity:.6">(optional — omit social links; uses main caption if blank)</span></label>
+          <textarea id="m-caption-fb" rows="2" placeholder="Leave blank to use main caption (auto-strips social links)"></textarea>
+        </div>
+
+        <div class="form-section">Notes</div>
+        <div class="fg form-full">
+          <label>Notes / Overrides</label>
+          <textarea id="m-notes" rows="2" placeholder="e.g. Skip FB — too edgy"></textarea>
+        </div>
+
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEntry()">Save Entry</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────────
+let rows = [], filtered = [], selId = null, editId = null, fileHandle = null;
+let sortField = 'scheduled_date', sortDir = 1;
+
+const COLS = ['upload_id','scheduled_date','scheduled_time',
+  'stash_url_nsfw','stash_url_safe','title','caption','keywords',
+  'da_nsfw_flag','category_500px','category_35p','caption_fb',
+  'platforms','status','upload_timestamp',
+  'da_deviation_url','url_500px','url_35p','url_fb',
+  'notes','error_log'];
+
+// ── CSV ────────────────────────────────────────────────────────────────────────
+function parseCSV(txt) {
+  const lines = txt.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  if (!lines.length) return [];
+  const hdr = parseLine(lines[0]);
+  return lines.slice(1).filter(l => l.trim()).map(l => {
+    const vals = parseLine(l), obj = {};
+    hdr.forEach((h,i) => obj[h] = vals[i] || '');
+    return obj;
+  });
+}
+function parseLine(line) {
+  const res = []; let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+    else if (c === ',' && !inQ) { res.push(cur); cur = ''; }
+    else cur += c;
+  }
+  return res.concat([cur]);
+}
+function esc(v) {
+  const s = String(v||'');
+  return (s.includes(',') || s.includes('"') || s.includes('\n'))
+    ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function toCSV(data) {
+  return [COLS.map(esc).join(','),
+    ...data.map(r => COLS.map(c => esc(r[c]||'')).join(','))
+  ].join('\r\n');
+}
+
+// ── FILE IO ────────────────────────────────────────────────────────────────────
+async function loadCSV() {
+  try {
+    if ('showOpenFilePicker' in window) {
+      const [fh] = await showOpenFilePicker({ types: [{ description:'CSV', accept:{'text/csv':['.csv']} }] });
+      fileHandle = fh;
+      const file = await fh.getFile();
+      rows = parseCSV(await file.text());
+      document.getElementById('file-label').textContent = '📄 ' + fh.name;
+    } else {
+      const inp = Object.assign(document.createElement('input'), { type:'file', accept:'.csv' });
+      inp.onchange = async e => {
+        const f = e.target.files[0]; if (!f) return;
+        rows = parseCSV(await f.text());
+        document.getElementById('file-label').textContent = '📄 ' + f.name;
+        refresh();
+      };
+      inp.click(); return;
+    }
+    document.getElementById('btn-save').disabled = false;
+    toast(`Loaded ${rows.length} entries`, 'success');
+    refresh();
+  } catch(e) { if (e.name !== 'AbortError') toast('Load error: ' + e.message, 'error'); }
+}
+async function saveCSV() {
+  const csv = toCSV(rows);
+  try {
+    if (fileHandle) {
+      const w = await fileHandle.createWritable();
+      await w.write(csv); await w.close();
+      toast('Saved ✓', 'success');
+    } else {
+      const url = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+      Object.assign(document.createElement('a'), { href:url, download:'upload_queue.csv' }).click();
+      URL.revokeObjectURL(url);
+      toast('Downloaded CSV', 'info');
+    }
+  } catch(e) { toast('Save error: ' + e.message, 'error'); }
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────────────────
+function refresh() { applyFilters(); updateStats(); }
+
+function applyFilters() {
+  const s = document.getElementById('f-search').value.toLowerCase();
+  const st = document.getElementById('f-status').value;
+  const pl = document.getElementById('f-platform').value;
+  const fr = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  filtered = rows.filter(r => {
+    if (s && ![r.title,r.caption,r.upload_id,r.notes,r.stash_url_nsfw].join(' ').toLowerCase().includes(s)) return false;
+    if (st && r.status !== st) return false;
+    if (pl && !r.platforms.includes(pl)) return false;
+    if (fr && r.scheduled_date < fr) return false;
+    if (to && r.scheduled_date > to) return false;
+    return true;
+  });
+  filtered.sort((a,b) => {
+    const [av,bv] = [a[sortField]||'', b[sortField]||''];
+    return av < bv ? -sortDir : av > bv ? sortDir : 0;
+  });
+  renderTable();
+}
+
+function sortBy(f) { sortDir = sortField === f ? -sortDir : 1; sortField = f; applyFilters(); }
+
+function renderTable() {
+  const empty = document.getElementById('empty-state');
+  const tbl = document.getElementById('main-table');
+  const tbody = document.getElementById('tbody');
+  if (rows.length === 0) { empty.style.display='flex'; tbl.style.display='none'; return; }
+  empty.style.display = 'none'; tbl.style.display = 'table';
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">No entries match your filters.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(r => {
+    const short = r.stash_url_nsfw ? r.stash_url_nsfw.split('/').pop() : '—';
+    return `<tr class="${r.upload_id===selId?'selected':''}" onclick="selectRow('${h(r.upload_id)}')">
+      <td style="color:var(--muted);font-size:11px">${h(r.upload_id)}</td>
+      <td>${h(r.scheduled_date)} <span style="color:var(--muted);font-size:11px">${h(r.scheduled_time)}</span></td>
+      <td><span class="truncate" style="max-width:170px;display:block">${r.title==='AUTO'?'<span class="badge b-auto">AUTO</span>':h(r.title)||'<span style="color:var(--muted)">—</span>'}</span></td>
+      <td>${plats(r.platforms)}</td>
+      <td>${statusBadge(r.status)}</td>
+      <td style="text-align:center">${r.da_nsfw_flag==='TRUE'?'<span style="color:var(--warning)">●</span>':'<span style="color:var(--border)">○</span>'}</td>
+      <td><a href="${h(r.stash_url_nsfw)}" target="_blank" onclick="event.stopPropagation()" style="color:var(--teal);font-size:11px;font-family:monospace" title="${h(r.stash_url_nsfw)}">${h(short)}</a></td>
+      <td><div style="display:flex;gap:4px">
+        <button class="btn btn-sm" onclick="event.stopPropagation();openEditById('${h(r.upload_id)}')">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteById('${h(r.upload_id)}')">✕</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function statusBadge(s) {
+  const m = {Pending:'b-pending',Approved:'b-approved',Uploaded:'b-uploaded',Failed:'b-failed',Skipped:'b-skipped',Partial:'b-partial'};
+  return `<span class="badge ${m[s]||'b-pending'}">${h(s||'Pending')}</span>`;
+}
+function plats(p) {
+  if (!p) return '—';
+  return p.split(',').map(x => {
+    x = x.trim();
+    const c = {DA:'pb-da','500PX':'pb-500px',FB:'pb-fb','35P':'pb-35p'}[x]||'';
+    return `<span class="pb ${c}">${h(x)}</span>`;
+  }).join('');
+}
+function updateStats() {
+  const c = {total:rows.length,Pending:0,Approved:0,Uploaded:0,Failed:0,Skipped:0};
+  rows.forEach(r => { if(c[r.status]!==undefined) c[r.status]++; });
+  ['total','pending','approved','uploaded','failed','skipped'].forEach((k,i) => {
+    const key = i===0?'total':['','Pending','Approved','Uploaded','Failed','Skipped'][i];
+    document.getElementById(`s-${k}`).textContent = c[key||k];
+  });
+}
+
+// ── DETAIL PANE ────────────────────────────────────────────────────────────────
+function selectRow(id) {
+  selId = id;
+  const r = rows.find(x => x.upload_id === id);
+  if (!r) return;
+  renderTable();
+  document.getElementById('dp-title').textContent = r.title && r.title !== 'AUTO' ? r.title : r.upload_id;
+  dpf('dp-ftitle', r.title === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.title), true);
+  dpf('dp-fcaption', r.caption === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.caption), true);
+  dpf('dp-fkeywords', r.keywords === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.keywords), true);
+  document.getElementById('dp-fnsfw').textContent = r.stash_url_nsfw || '—';
+  document.getElementById('dp-fsafe').textContent = r.stash_url_safe || '—';
+  document.getElementById('dp-fsched').textContent = (r.scheduled_date||'—') + ' at ' + (r.scheduled_time||'—');
+  document.getElementById('dp-fplat').innerHTML = plats(r.platforms);
+  document.getElementById('dp-fnsfw-flag').textContent = r.da_nsfw_flag === 'TRUE' ? '✓ Mature Content' : '✗ Standard';
+  document.getElementById('dp-fnotes').textContent = r.notes || '—';
+
+  const tsw = document.getElementById('dp-tswrap');
+  tsw.style.display = r.upload_timestamp ? '' : 'none';
+  if (r.upload_timestamp) document.getElementById('dp-fts').textContent = r.upload_timestamp;
+
+  const daw = document.getElementById('dp-deviationwrap');
+  daw.style.display = r.da_deviation_url ? '' : 'none';
+  if (r.da_deviation_url) { const el = document.getElementById('dp-deviation'); el.href = r.da_deviation_url; }
+
+  const u500 = document.getElementById('dp-500pxwrap');
+  u500.style.display = r.url_500px ? '' : 'none';
+  if (r.url_500px) { document.getElementById('dp-500px').href = r.url_500px; }
+
+  const u35 = document.getElementById('dp-35pwrap');
+  u35.style.display = r.url_35p ? '' : 'none';
+  if (r.url_35p) { document.getElementById('dp-35p').href = r.url_35p; }
+
+  const ufb = document.getElementById('dp-fbwrap');
+  ufb.style.display = r.url_fb ? '' : 'none';
+  if (r.url_fb) { document.getElementById('dp-fb').href = r.url_fb; }
+
+  const errs = document.getElementById('dp-errsec');
+  errs.style.display = r.error_log ? '' : 'none';
+  document.getElementById('dp-ferror').textContent = r.error_log || '';
+
+  // Preview links
+  const plinks = document.getElementById('preview-links');
+  plinks.innerHTML = '';
+  if (r.stash_url_nsfw) plinks.innerHTML += `<a href="${h(r.stash_url_nsfw)}" target="_blank" class="btn btn-sm">View NSFW on Sta.sh ↗</a>`;
+  if (r.stash_url_safe) plinks.innerHTML += `<a href="${h(r.stash_url_safe)}" target="_blank" class="btn btn-sm">View SAFE on Sta.sh ↗</a>`;
+
+  // Reset preview state
+  resetPreview();
+  // Try auto-load oEmbed thumbnail
+  if (r.stash_url_nsfw) tryOembed(r.stash_url_nsfw);
+
+  document.getElementById('dp').classList.add('open');
+}
+
+function dpf(id, val, isHtml) {
+  const el = document.getElementById(id); if (!el) return;
+  if (isHtml) el.innerHTML = val || '—'; else el.textContent = val || '—';
+}
+function closeDetail() { selId = null; document.getElementById('dp').classList.remove('open'); renderTable(); }
+
+// ── PREVIEW ────────────────────────────────────────────────────────────────────
+function resetPreview() {
+  document.getElementById('preview-img').style.display = 'none';
+  document.getElementById('preview-ph').style.display = 'block';
+  document.getElementById('preview-ph').innerHTML = `
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    <small>Click to try loading preview</small>`;
+}
+
+function previewClick() {
+  const r = rows.find(x => x.upload_id === selId); if (!r || !r.stash_url_nsfw) return;
+  tryOembed(r.stash_url_nsfw, true);
+}
+
+async function tryOembed(stashUrl, userTriggered = false) {
+  if (!stashUrl) return;
+  const oEmbedUrl = `https://backend.deviantart.com/oembed?url=${encodeURIComponent(stashUrl)}&format=json`;
+  try {
+    const res = await fetch(oEmbedUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const thumb = data.thumbnail_url || data.url;
+    if (thumb) {
+      const img = document.getElementById('preview-img');
+      img.src = thumb;
+      img.onload = () => {
+        img.style.display = 'block';
+        document.getElementById('preview-ph').style.display = 'none';
+      };
+      img.onerror = () => {
+        if (userTriggered) toast('Could not load image. Open on Sta.sh instead.', 'info');
+      };
+    }
+  } catch(e) {
+    if (userTriggered) {
+      document.getElementById('preview-ph').innerHTML = `<small style="color:var(--muted)">Preview not available due to browser security.<br>Use the "View on Sta.sh" links below.</small>`;
+    }
+  }
+}
+
+// ── QUICK STATUS ───────────────────────────────────────────────────────────────
+function setStatus(s) {
+  if (!selId) return;
+  const r = rows.find(x => x.upload_id === selId); if (!r) return;
+  r.status = s;
+  if (s === 'Uploaded') r.upload_timestamp = new Date().toLocaleString();
+  selectRow(selId); refresh();
+  toast('Status → ' + s, 'info');
+}
+function deleteSel() { if (selId) deleteById(selId); }
+function deleteById(id) {
+  if (!confirm(`Delete ${id}?`)) return;
+  rows = rows.filter(r => r.upload_id !== id);
+  if (selId === id) closeDetail();
+  refresh(); toast('Deleted', 'info');
+}
+
+// ── MODAL ──────────────────────────────────────────────────────────────────────
+function genId() {
+  const yr = new Date().getFullYear();
+  const n = Math.max(0, ...rows.filter(r => r.upload_id.startsWith(`PH-${yr}`)).map(r => +r.upload_id.split('-').pop()||0));
+  return `PH-${yr}-${String(n+1).padStart(3,'0')}`;
+}
+function clearForm() {
+  ['m-date','m-time','m-nsfw','m-safe','m-title','m-caption','m-keywords',
+   'm-caption-fb','m-notes'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('m-time').value = '10:00';
+  document.getElementById('m-nsfw-flag').checked = false;
+  document.getElementById('m-status').value = 'Pending';
+  document.getElementById('m-cat-500px').value = '';
+  document.getElementById('m-cat-35p').value = '';
+  ['p-da','p-500','p-fb','p-35'].forEach(id => document.getElementById(id).checked = false);
+}
+function openAddModal() {
+  editId = null;
+  document.getElementById('modal-title').textContent = 'Add Photo';
+  clearForm();
+  document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('p-da').checked = true;
+  document.getElementById('overlay').classList.add('open');
+}
+function openEditModal() { if (selId) openEditById(selId); }
+function openEditById(id) {
+  const r = rows.find(x => x.upload_id === id); if (!r) return;
+  editId = id;
+  document.getElementById('modal-title').textContent = `Edit — ${id}`;
+  clearForm();
+  document.getElementById('m-date').value = r.scheduled_date || '';
+  document.getElementById('m-time').value = r.scheduled_time || '10:00';
+  document.getElementById('m-nsfw').value = r.stash_url_nsfw || '';
+  document.getElementById('m-safe').value = r.stash_url_safe || '';
+  document.getElementById('m-title').value = r.title || '';
+  document.getElementById('m-caption').value = r.caption || '';
+  document.getElementById('m-keywords').value = r.keywords || '';
+  document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
+  document.getElementById('m-cat-500px').value = r.category_500px || '';
+  document.getElementById('m-cat-35p').value = r.category_35p || '';
+  document.getElementById('m-caption-fb').value = r.caption_fb || '';
+  document.getElementById('m-status').value = r.status || 'Pending';
+  document.getElementById('m-notes').value = r.notes || '';
+  const pls = (r.platforms||'').split(',').map(x=>x.trim());
+  document.getElementById('p-da').checked = pls.includes('DA');
+  document.getElementById('p-500').checked = pls.includes('500PX');
+  document.getElementById('p-fb').checked = pls.includes('FB');
+  document.getElementById('p-35').checked = pls.includes('35P');
+  document.getElementById('overlay').classList.add('open');
+}
+function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
+function setAuto(id) { document.getElementById(id).value = 'AUTO'; }
+
+function saveEntry() {
+  const date = document.getElementById('m-date').value;
+  const nsfw = document.getElementById('m-nsfw').value.trim();
+  if (!date) { toast('Please set a scheduled date', 'error'); return; }
+  if (!nsfw) { toast('Please enter the Sta.sh NSFW URL', 'error'); return; }
+  const platforms = ['DA','500PX','FB','35P'].filter((p,i) => document.getElementById(['p-da','p-500','p-fb','p-35'][i]).checked).join(',');
+  if (!platforms) { toast('Select at least one platform', 'error'); return; }
+
+  const existing = editId ? rows.find(r => r.upload_id === editId) : null;
+  const entry = {
+    upload_id: editId || genId(),
+    scheduled_date: date,
+    scheduled_time: document.getElementById('m-time').value || '10:00',
+    stash_url_nsfw: nsfw,
+    stash_url_safe: document.getElementById('m-safe').value.trim(),
+    title: document.getElementById('m-title').value || 'AUTO',
+    caption: document.getElementById('m-caption').value || 'AUTO',
+    keywords: document.getElementById('m-keywords').value || 'AUTO',
+    da_nsfw_flag: document.getElementById('m-nsfw-flag').checked ? 'TRUE' : 'FALSE',
+    category_500px: document.getElementById('m-cat-500px').value,
+    category_35p: document.getElementById('m-cat-35p').value,
+    caption_fb: document.getElementById('m-caption-fb').value.trim(),
+    platforms,
+    status: document.getElementById('m-status').value || 'Pending',
+    upload_timestamp: existing?.upload_timestamp || '',
+    da_deviation_url: existing?.da_deviation_url || '',
+    url_500px: existing?.url_500px || '',
+    url_35p: existing?.url_35p || '',
+    url_fb: existing?.url_fb || '',
+    notes: document.getElementById('m-notes').value.trim(),
+    error_log: existing?.error_log || '',
+  };
+
+  if (editId) {
+    const idx = rows.findIndex(r => r.upload_id === editId);
+    if (idx >= 0) rows[idx] = entry;
+    toast('Updated ✓', 'success');
+  } else {
+    rows.push(entry);
+    toast(`Added ${entry.upload_id}`, 'success');
+  }
+
+  document.getElementById('btn-save').disabled = false;
+  closeModal(); refresh();
+  selectRow(entry.upload_id);
+}
+
+// ── UTILS ──────────────────────────────────────────────────────────────────────
+function h(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function clearFilters() {
+  ['f-search','f-from','f-to'].forEach(id => document.getElementById(id).value = '');
+  ['f-status','f-platform'].forEach(id => document.getElementById(id).value = '');
+  applyFilters();
+}
+function toast(msg, type='info') {
+  const c = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span style="font-size:15px">${{success:'✓',error:'✕',info:'ℹ'}[type]}</span><span>${h(msg)}</span>`;
+  c.appendChild(el);
+  setTimeout(() => { el.style.transition='opacity .3s'; el.style.opacity='0'; setTimeout(()=>el.remove(),350); }, 3500);
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('overlay').classList.contains('open')) closeModal();
+    else closeDetail();
+  }
+  if ((e.ctrlKey||e.metaKey) && e.key==='s') { e.preventDefault(); if (!document.getElementById('btn-save').disabled) saveCSV(); }
+});
+
+// INIT
+applyFilters(); updateStats();
+</script>
+</body>
+</html>

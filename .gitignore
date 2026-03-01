@@ -1,0 +1,12 @@
+# Real data files — keep these local, never commit
+upload_queue.csv
+config.json
+
+# Temporary local photo files used during upload
+temp/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
