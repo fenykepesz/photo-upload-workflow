@@ -10,3 +10,9 @@ temp/
 
 # Windows
 Thumbs.db
+
+# Playwright browser profile (contains login cookies)
+chrome-profile/
+
+# Error screenshots from upload.py
+error_*.png

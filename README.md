@@ -43,7 +43,7 @@ photo-queue/
 
 ### 2. config.json
 
-Edit `config.json` to set your username on each platform. Claude uses these to verify the correct account is logged in before publishing.
+Edit `config.json` to set your username on each platform and optionally your social media profile URLs. Claude uses the account names to verify logins and appends the social links to photo descriptions (except on Facebook).
 
 ```json
 {
@@ -52,11 +52,17 @@ Edit `config.json` to set your username on each platform. Claude uses these to v
     "500px": "YOUR_500PX_USERNAME",
     "35photo": "YOUR_35PHOTO_USERNAME",
     "facebook": "YOUR_FACEBOOK_NAME"
+  },
+  "social_links": {
+    "web": "erikrozman.com/",
+    "instagram": "www.instagram.com/rozmane/",
+    "500px": "500px.com/erikrozman",
+    "deviantart": "flyy1.deviantart.com/"
   }
 }
 ```
 
-Replace the placeholder values with your real usernames before using those platforms.
+Replace the placeholder values with your real usernames before using those platforms. Social links are optional — only non-empty entries are appended to descriptions.
 
 ### 3. Sta.sh
 
@@ -95,6 +101,9 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `url_fb` | Facebook post URL (filled automatically) | |
 | `notes` | Free-form notes for yourself | `Golden mount, Bangkok. XT-20` |
 | `error_log` | Any errors during upload (filled automatically) | |
+| `model_name` | Name of the model in the photo (optional) | `Elena` |
+| `da_gallery` | DA galleries to submit to (comma-separated, always includes Featured) | `Featured,Street` |
+| `da_groups` | DA groups and folders to submit to (`Group:Folder` format) | `Street-Shooters:Candid` |
 
 ### Status Values
 
@@ -117,6 +126,44 @@ Set `title`, `caption`, and/or `keywords` to exactly `AUTO` and Claude will anal
 - **Keywords** — 30–40 tags for DeviantArt (DA allows up to 60), drawn from eight categories: location, subject, technique, mood/aesthetic, composition, genre, discovery terms, and gear. Multi-word concepts are written without spaces (`longexposure`, `blackandwhite`) because DA splits on spaces and would otherwise break them into useless single words. For 500px and 35photo, a curated shortlist of 10–15 of the most relevant tags is used instead, as those platforms benefit from precision over volume.
 
 You can pre-fill any combination — for example, set a title manually and leave caption/keywords as `AUTO`.
+
+---
+
+## DeviantArt Customizations
+
+### Gallery Selection
+
+By default, photos are submitted to the `Featured` gallery on DeviantArt. To also place the photo in a specific personal gallery, set `da_gallery` to a comma-separated list:
+
+```
+Featured,Street
+```
+
+DeviantArt allows Featured plus one additional gallery per submission.
+
+### Group Submissions
+
+Claude can submit the deviation to DA groups during the submission form. Set `da_groups` to a comma-separated list of `Group:Folder` pairs:
+
+```
+Street-Shooters:Candid,Landscape-Lovers:Mountains
+```
+
+Group and folder selections are made in the Sta.sh submission form before clicking Submit. Some groups may queue submissions for moderator approval.
+
+### Model Respect Line
+
+If `model_name` is set (e.g. `Elena`), this line is appended to the description on all platforms:
+
+> Model: Elena. Please respect the model.
+
+### Social Links
+
+Social media profile links from `config.json` are appended to descriptions on DA, 500px, and 35photo (not Facebook). Configure them in `config.json` under `social_links`.
+
+### Free Download
+
+The "Allow free download of source file" slider in DeviantArt's Advanced settings is always switched off during submission.
 
 ---
 
@@ -147,8 +194,11 @@ Claude will confirm the scheduled date, then proceed.
 7. **Approval gate** — presents three options: Approve & Publish, Edit Metadata, or Skip Today. No uploads begin until you approve
 8. **Uploads in order**: 500px → 35photo → Facebook → DeviantArt (always last)
 9. **Verifies account on each platform** — compares logged-in username against `config.json`; stops if there's a mismatch
-10. **Updates the CSV** — fills in result URLs, timestamp, and final status
-11. **Shows a summary** — lists every platform result and the next upcoming entry
+10. **Selects DA galleries** — places the deviation in the galleries specified by `da_gallery`
+11. **Submits to DA groups** — submits the deviation to each group:folder pair in `da_groups`
+12. **Disables free download** — switches off "Allow free download of source file" in DA Advanced settings
+13. **Updates the CSV** — fills in result URLs, timestamp, and final status
+14. **Shows a summary** — lists every platform result and the next upcoming entry
 
 ---
 
@@ -179,6 +229,7 @@ Claude will confirm the scheduled date, then proceed.
 | **Approval gate** | Hard stop before any upload begins — nothing is submitted without your explicit go-ahead |
 | **Placeholder check** | Stops at startup if `config.json` still has `YOUR_` placeholder values for a platform that's in the queue |
 | **DA always last** | Enforced by the workflow order — Sta.sh is preserved until all other platforms are done |
+| **Free download disabled** | Automatically switches off "Allow free download of source file" on every DA submission |
 
 ---
 

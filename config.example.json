@@ -4,5 +4,11 @@
     "500px": "YOUR_500PX_USERNAME",
     "35photo": "YOUR_35PHOTO_USERNAME",
     "facebook": "YOUR_FACEBOOK_NAME"
+  },
+  "social_links": {
+    "web": "erikrozman.com/",
+    "instagram": "www.instagram.com/rozmane/",
+    "500px": "500px.com/erikrozman",
+    "deviantart": "flyy1.deviantart.com/"
   }
 }
