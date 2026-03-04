@@ -1,16 +1,16 @@
 # Daily Photo Upload Workflow
 
-Automated photo publishing to **DeviantArt** and **500px** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
+Automated photo publishing to **DeviantArt**, **500px**, and **35photo.pro** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
 
 ---
 
 ## How It Works
 
-`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. 500px is always uploaded first, DA last (since publishing to DA consumes the Sta.sh staging item).
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px first, then 35photo, then DA last (since publishing to DA consumes the Sta.sh staging item).
 
 ```
 Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
--> 500px upload -> DeviantArt publish (last) -> CSV updated with results
+-> 500px upload -> 35photo upload -> DeviantArt publish (last) -> CSV updated with results
 ```
 
 ---
@@ -71,7 +71,7 @@ Social links are appended to photo descriptions on DA and 500px. Only non-empty 
 python upload.py --login
 ```
 
-This opens a Chromium window with a persistent profile. Log into 500px first, then DeviantArt when prompted. Cookies are saved to `chrome-profile/` and reused on subsequent runs.
+This opens a Chromium window with a persistent profile. Log into 500px first, then 35photo.pro, then DeviantArt when prompted. Cookies are saved to `chrome-profile/` and reused on subsequent runs.
 
 ### 4. Sta.sh
 
@@ -97,13 +97,15 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `title` | Photo title | `The Delivery Man, Bangkok` |
 | `caption` | Description/caption | `A candid moment on the streets...` |
 | `keywords` | Comma-separated tags | `Bangkok,street,Fujifilm` |
-| `da_nsfw_flag` | Mark as Mature on DeviantArt | `TRUE` / `FALSE` |
+| `da_nsfw_flag` | Mark as Mature/NSFW (all platforms) | `TRUE` / `FALSE` |
 | `category_500px` | 500px category name | `Travel` |
-| `platforms` | Comma-separated target platforms | `DA` / `DA,500PX` |
+| `category_35p` | 35photo style/category | `City/Architecture` |
+| `platforms` | Comma-separated target platforms | `DA` / `DA,500PX,35P` |
 | `status` | Current state | `Approved` / `Uploaded` / `Partial` / `Failed` |
 | `upload_timestamp` | Filled automatically after upload | `2026-03-01 15:12:18` |
 | `da_deviation_url` | DA result URL (filled automatically) | |
 | `url_500px` | 500px result (filled automatically) | |
+| `url_35p` | 35photo result (filled automatically) | |
 | `notes` | Free-form notes | `Golden mount. XT-20` |
 | `error_log` | Errors during upload (filled automatically) | |
 | `model_name` | Model name (optional) | `Elena` |
@@ -181,8 +183,15 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 
 - Requires a **file upload** (not a URL) — the script downloads the original image from Sta.sh automatically, preserving EXIF data
 - Uses 500px's 3-step upload wizard: file upload, details, publish
-- Fills: title, description, category, keywords
+- Fills: title, description, category, keywords, NSFW flag
 - Downloaded images are stored temporarily in `temp/` and cleaned up after upload
+
+### 35photo.pro
+
+- Requires a **file upload** — reuses the same image downloaded from Sta.sh
+- Simple HTML form (not a wizard)
+- Fills: style (category), title, description, tags, adult content flag
+- Style categories: Female portrait, City/Architecture, Fine Nudes, Portrait
 
 ---
 
@@ -224,7 +233,7 @@ Social media links from `config.json` are appended to descriptions on DA and 500
 | **EXIF preservation** | Downloads original files from Sta.sh via the Download menu (not browser image save) |
 | **`--no-submit` mode** | Fills all forms without publishing — visual verification |
 | **`--dry-run` mode** | Shows what would happen without launching a browser |
-| **DA always last** | 500px runs first; Sta.sh is preserved until DA is done |
+| **DA always last** | 500px and 35photo run first; Sta.sh is preserved until DA is done |
 | **Error screenshots** | Saves `error_*.png` on failure for debugging |
 
 ---
