@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Playwright-based photo upload automation for DeviantArt and 500px.
+Playwright-based photo upload automation for DeviantArt, 500px, and 35photo.
 Reads upload_queue.csv, uploads to platforms listed in each row's 'platforms' field.
 
-Upload order: 500PX first, DA last (DA consumes the Sta.sh item on publish).
+Upload order: 500PX → 35P → DA (DA consumes the Sta.sh item on publish, so always last).
 
 Usage:
     python upload.py                          # all Approved rows with supported platforms
@@ -30,7 +30,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 
 COLS = [
@@ -53,7 +53,7 @@ SOCIAL_LINK_LABELS = {
 # ── CLI ───────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Upload approved photos to 500px and DeviantArt via Playwright"
+        description="Upload approved photos to 500px, 35photo, and DeviantArt via Playwright"
     )
     p.add_argument("--row", help="Upload only this upload_id (e.g. PH-2026-001)")
     p.add_argument("--dry-run", action="store_true", help="Preview without launching browser")
@@ -281,6 +281,11 @@ def print_dry_run(rows, config):
             already = row.get("url_500px", "").strip()
             if already:
                 print(f"  500px URL:   {already} (already uploaded — will skip)")
+        if "35P" in platforms:
+            print(f"  35photo cat: {row.get('category_35p', '(none)')}")
+            already = row.get("url_35p", "").strip()
+            if already:
+                print(f"  35photo URL: {already} (already uploaded — will skip)")
         if "DA" in platforms:
             already = row.get("da_deviation_url", "").strip()
             if already:
@@ -466,6 +471,159 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     page.wait_for_timeout(5000)
     print("  Upload complete")
     return {"success": True, "url_500px": "UPLOADED", "error": ""}
+
+
+# ── 35photo Upload ────────────────────────────────────────────
+def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
+    """
+    Automate 35photo.pro photo upload.
+    Returns {"success": bool, "url_35p": str, "error": str}
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_35p": "", "error": "No image file available"}
+
+    category = row.get("category_35p", "").strip()
+    title = row.get("title", "").strip()
+    nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
+
+    # ── Navigate to 35photo upload page ──────────────────────
+    print("  Opening 35photo upload page...")
+    try:
+        page.goto("https://35photo.pro", wait_until="networkidle", timeout=30000)
+    except PlaywrightTimeout:
+        page.goto("https://35photo.pro", wait_until="domcontentloaded", timeout=15000)
+
+    page.wait_for_timeout(2000)
+
+    if "login" in page.url.lower():
+        return {"success": False, "url_35p": "",
+                "error": "Not logged into 35photo — run: python upload.py --login"}
+
+    # Click the "Upload" button in top nav
+    try:
+        upload_link = page.locator('a:has-text("Upload")').first
+        upload_link.click(timeout=5000)
+    except Exception:
+        # Fallback: navigate directly
+        page.goto("https://35photo.pro/upload/", wait_until="networkidle", timeout=30000)
+
+    page.wait_for_timeout(3000)
+
+    # ── Upload file ──────────────────────────────────────────
+    print(f"  Uploading file...")
+    file_input = page.locator('input[type="file"]')
+    if file_input.count() > 0:
+        file_input.first.set_input_files(str(image_path))
+    else:
+        return {"success": False, "url_35p": "", "error": "No file input found on 35photo upload page"}
+
+    # Wait for upload to process and form to appear
+    print("  Waiting for upload to complete...")
+    page.wait_for_timeout(15000)
+
+    # Scroll down to make the metadata form visible
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(2000)
+
+    # ── Fill metadata fields ────────────────────────────────
+    print(f"  Setting metadata: style, title, description, tags...")
+
+    # Style (category) — standard HTML <select>, skip the time interval select
+    if category:
+        try:
+            style_select = page.locator('select.photoData, select:not(#allowTimeInteval)').first
+            style_select.scroll_into_view_if_needed()
+            style_select.select_option(label=category, timeout=5000)
+        except Exception as e:
+            print(f"    WARNING: Could not select style '{category}': {e}")
+
+    page.wait_for_timeout(300)
+
+    # Title — standard HTML input with class photoData
+    try:
+        title_input = page.locator('input.photoData[placeholder="Title"], input[placeholder="Title"]').first
+        title_input.scroll_into_view_if_needed()
+        title_input.fill(title, timeout=5000)
+    except Exception as e:
+        print(f"    WARNING: Could not fill title: {e}")
+
+    page.wait_for_timeout(300)
+
+    # Description — standard HTML textarea
+    try:
+        desc_input = page.locator('textarea.photoData[placeholder="Description"], textarea[placeholder="Description"]').first
+        desc_input.scroll_into_view_if_needed()
+        desc_input.fill(desc_full, timeout=5000)
+    except Exception as e:
+        print(f"    WARNING: Could not fill description: {e}")
+
+    page.wait_for_timeout(300)
+
+    # Tags — the real <input var-input="photo_keywords"> has display:none.
+    # 35photo wraps it with a custom chip UI: div.upload-tags-editor > input.upload-tags-input.
+    # Click the visible input directly, or fall back to clicking the editor container.
+    try:
+        tag_input = page.locator('input.upload-tags-input')
+        if tag_input.count() > 0:
+            tag_input.first.scroll_into_view_if_needed()
+            tag_input.first.click(timeout=5000)
+        else:
+            # Fallback: click the editor container to activate the input
+            editor = page.locator('.upload-tags-editor')
+            if editor.count() > 0:
+                editor.first.scroll_into_view_if_needed()
+                editor.first.click(timeout=5000)
+            else:
+                # Last resort: click parent of the hidden input
+                parent_loc = page.locator('input[var-input="photo_keywords"]').locator('..')
+                parent_loc.scroll_into_view_if_needed()
+                parent_loc.click(timeout=5000)
+        page.wait_for_timeout(500)
+        for tag in tags:
+            page.keyboard.type(tag, delay=50)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(300)
+    except Exception as e:
+        print(f"    WARNING: Could not fill tags: {e}")
+
+    # Background — try to select black (last swatch)
+    try:
+        bg_swatches = page.locator('[class*="background"] span, [class*="bg"] span, .color-swatch')
+        if bg_swatches.count() > 0:
+            bg_swatches.last.click(timeout=2000)
+    except Exception:
+        pass  # Not critical
+
+    # Adult content checkbox
+    if nsfw:
+        try:
+            adult_cb = page.locator('text="Adult content 18"').first
+            adult_cb.click(timeout=3000)
+        except Exception as e:
+            print(f"    WARNING: Could not check adult content: {e}")
+
+    page.wait_for_timeout(1000)
+
+    if no_submit:
+        print("  --no-submit: skipping publish")
+        return {"success": True, "url_35p": "NO_SUBMIT", "error": ""}
+
+    # ── Publish ──────────────────────────────────────────────
+    print("  Publishing...")
+    publish_clicked = False
+    for label in ("Publish", "Submit", "Save", "Upload photo", "Upload"):
+        btn = page.locator(f'button:has-text("{label}"), input[type="submit"][value="{label}"], a:has-text("{label}")')
+        if btn.count() > 0:
+            btn.first.click()
+            publish_clicked = True
+            break
+
+    if not publish_clicked:
+        return {"success": False, "url_35p": "", "error": "No Publish button found"}
+
+    page.wait_for_timeout(5000)
+    print("  Upload complete")
+    return {"success": True, "url_35p": "UPLOADED", "error": ""}
 
 
 # ── DA Upload ─────────────────────────────────────────────────
@@ -1031,11 +1189,15 @@ def main():
                 viewport={"width": 1280, "height": 900},
             )
             page = ctx.new_page()
-            page.goto("https://500px.com/login", wait_until="networkidle", timeout=60000)
+            page.goto("https://500px.com/login", wait_until="domcontentloaded", timeout=30000)
             print("Log into 500px in the browser window.")
+            print("Press ENTER when done (will open 35photo next)...")
+            input()
+            page.goto("https://35photo.pro/login/", wait_until="domcontentloaded", timeout=30000)
+            print("Log into 35photo in the browser window.")
             print("Press ENTER when done (will open DeviantArt next)...")
             input()
-            page.goto("https://www.deviantart.com/users/login", wait_until="networkidle", timeout=60000)
+            page.goto("https://www.deviantart.com/users/login", wait_until="domcontentloaded", timeout=30000)
             print("Log into DeviantArt in the browser window.")
             print("Press ENTER when done...")
             input()
@@ -1099,6 +1261,7 @@ def main():
                 errors = []
                 image_path = None
                 ok_500px = False
+                ok_35p = False
                 ok_da = False
 
                 # ── 500PX (must run before DA) ────────────────────
@@ -1146,6 +1309,52 @@ def main():
                         url_500px = result_500px.get("url_500px", "")
                         if url_500px and url_500px not in ("NO_SUBMIT", "UPLOADED"):
                             save_row_update(args.csv, row["upload_id"], {"url_500px": url_500px})
+
+                # ── 35photo (between 500px and DA) ────────────────
+                if "35P" in platforms:
+                    already = row.get("url_35p", "").strip()
+                    if already:
+                        print(f"\n  35photo: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── 35photo Upload ──")
+                        # Download image from Sta.sh if not already downloaded
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url_nsfw — cannot download image")
+
+                        tags_35p = tags[:TAG_LIMIT_500PX]
+                        try:
+                            result_35p = upload_to_35photo(
+                                page, row, desc_full, tags_35p, image_path, args.no_submit
+                            )
+                        except PlaywrightTimeout as e:
+                            result_35p = {"success": False, "url_35p": "", "error": f"Timeout: {e}"}
+                        except Exception as e:
+                            result_35p = {"success": False, "url_35p": "", "error": f"Unexpected: {e}"}
+
+                        if result_35p["success"]:
+                            ok_35p = True
+                            print(f"  35photo: SUCCESS — {result_35p.get('url_35p', '')}")
+                        else:
+                            err = result_35p.get("error", "unknown")
+                            print(f"  35photo: FAILED — {err}")
+                            errors.append(f"35photo: {err}")
+                            # Screenshot on failure
+                            ts = datetime.now().strftime("%H%M%S")
+                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_35p_{ts}.png"
+                            try:
+                                page.screenshot(path=str(shot_path))
+                                print(f"  Error screenshot: {shot_path}")
+                            except Exception:
+                                pass
+
+                        # Update CSV with 35photo result
+                        url_35p = result_35p.get("url_35p", "")
+                        if url_35p and url_35p not in ("NO_SUBMIT", "UPLOADED"):
+                            save_row_update(args.csv, row["upload_id"], {"url_35p": url_35p})
 
                 # ── DA (must run last — consumes Sta.sh) ──────────
                 if "DA" in platforms:
@@ -1201,6 +1410,8 @@ def main():
                     done_platforms = set()
                     if "500PX" in platforms and (ok_500px or fresh_row.get("url_500px", "").strip()):
                         done_platforms.add("500PX")
+                    if "35P" in platforms and (ok_35p or fresh_row.get("url_35p", "").strip()):
+                        done_platforms.add("35P")
                     if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
                         done_platforms.add("DA")
 
