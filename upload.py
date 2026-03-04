@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Playwright-based DeviantArt upload automation.
-Reads upload_queue.csv, fills the Sta.sh submission form, and publishes to DA.
+Playwright-based photo upload automation for DeviantArt and 500px.
+Reads upload_queue.csv, uploads to platforms listed in each row's 'platforms' field.
+
+Upload order: 500PX first, DA last (DA consumes the Sta.sh item on publish).
 
 Usage:
-    python upload.py                          # all Approved DA rows
+    python upload.py                          # all Approved rows with supported platforms
     python upload.py --row PH-2026-001        # specific row only
     python upload.py --dry-run                # preview what would happen
     python upload.py --no-submit              # fill form but don't submit
@@ -27,6 +29,9 @@ DEFAULT_CONFIG = SCRIPT_DIR / "config.json"
 BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
+TAG_LIMIT_500PX = 15
+SUPPORTED_PLATFORMS = {"DA", "500PX"}
+TEMP_DIR = SCRIPT_DIR / "temp"
 
 COLS = [
     "upload_id", "scheduled_date", "scheduled_time",
@@ -48,7 +53,7 @@ SOCIAL_LINK_LABELS = {
 # ── CLI ───────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Upload approved photos to DeviantArt via Playwright"
+        description="Upload approved photos to 500px and DeviantArt via Playwright"
     )
     p.add_argument("--row", help="Upload only this upload_id (e.g. PH-2026-001)")
     p.add_argument("--dry-run", action="store_true", help="Preview without launching browser")
@@ -98,6 +103,12 @@ def save_row_update(csv_path, upload_id, updates):
 
 
 # ── Row filtering ─────────────────────────────────────────────
+def get_row_platforms(row):
+    """Return set of supported platforms for this row."""
+    raw = [p.strip().upper() for p in row.get("platforms", "").split(",")]
+    return SUPPORTED_PLATFORMS & set(raw)
+
+
 def filter_rows(rows, target_id=None):
     targets = []
     for row in rows:
@@ -110,11 +121,11 @@ def filter_rows(rows, target_id=None):
             if row.get("status", "").strip() != "Approved":
                 continue
 
-        # Must have DA in platforms
-        platforms = [p.strip() for p in row.get("platforms", "").split(",")]
-        if "DA" not in platforms:
+        # Must have at least one supported platform
+        platforms = get_row_platforms(row)
+        if not platforms:
             if target_id:
-                print(f"WARNING: {row['upload_id']} does not have DA in platforms — skipping")
+                print(f"WARNING: {row['upload_id']} has no supported platforms — skipping")
             continue
 
         # Skip AUTO fields
@@ -175,28 +186,286 @@ def parse_groups(groups_str):
     return result
 
 
+# ── Image download from Sta.sh ────────────────────────────────
+def download_stash_image(page, stash_url, upload_id):
+    """Navigate to Sta.sh URL, click Download in '...' menu to get the original
+    file with EXIF intact.  Uses Playwright's native download handling.
+    Returns the local file Path, or None on failure."""
+    TEMP_DIR.mkdir(exist_ok=True)
+    dest = TEMP_DIR / f"{upload_id}.jpg"
+
+    print(f"  Downloading image from Sta.sh: {stash_url}")
+    try:
+        page.goto(stash_url, wait_until="networkidle", timeout=30000)
+    except PlaywrightTimeout:
+        page.goto(stash_url, wait_until="domcontentloaded", timeout=15000)
+
+    page.wait_for_timeout(2000)
+
+    # Click "..." menu → "Download" using Playwright's native download capture
+    try:
+        # Click the "..." button near "Edit or Submit" (position-based matching)
+        clicked = page.evaluate("""
+            (() => {
+                const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+                const editBtn = btns.find(b => b.textContent.trim() === 'Edit or Submit');
+                if (!editBtn) return 'edit_btn_not_found';
+                const editRect = editBtn.getBoundingClientRect();
+                let closest = null, closestDist = Infinity;
+                for (const btn of btns) {
+                    const text = btn.textContent.trim();
+                    if (text === 'Edit or Submit' || text === 'Sell Deviation' || text.length > 5) continue;
+                    const rect = btn.getBoundingClientRect();
+                    const dist = Math.abs(rect.top - editRect.top) + Math.abs(rect.right - editRect.right);
+                    if (dist < closestDist && rect.width > 0) {
+                        closestDist = dist;
+                        closest = btn;
+                    }
+                }
+                if (closest) { closest.click(); return 'ok'; }
+                return 'no_candidate_found';
+            })()
+        """)
+        if clicked != 'ok':
+            print(f"    WARNING: Could not find '...' button: {clicked}")
+            return None
+        page.wait_for_timeout(1500)
+
+        # Click "Download" in the menu
+        dl_el = page.locator('text="Download"').first
+        if dl_el.count() == 0:
+            print("    WARNING: 'Download' not found in menu")
+            page.keyboard.press("Escape")
+            return None
+
+        with page.expect_download(timeout=30000) as download_info:
+            dl_el.click()
+        download = download_info.value
+        download.save_as(str(dest))
+        print(f"    Downloaded: {dest.name} ({dest.stat().st_size / 1024:.0f} KB)")
+        return dest
+
+    except Exception as e:
+        print(f"    WARNING: Download failed: {e}")
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+
+    return None
+
+
 # ── Dry run ───────────────────────────────────────────────────
 def print_dry_run(rows, config):
     print("\nDRY RUN — no browser will be launched")
     print("=" * 60)
     for i, row in enumerate(rows):
+        platforms = get_row_platforms(row)
         desc = build_description(row, config)
         tags = prepare_tags(row.get("keywords", ""))
         groups = parse_groups(row.get("da_groups", ""))
         galleries = row.get("da_gallery", "Featured")
 
         print(f"\nRow {i + 1}: {row['upload_id']}")
+        print(f"  Platforms:   {', '.join(sorted(platforms))}")
         print(f"  Sta.sh:      {row.get('stash_url_nsfw', '(missing)')}")
         print(f"  Title:       {row.get('title', '(missing)')}")
         print(f"  Tags ({len(tags)}):   {', '.join(tags[:5])}{'...' if len(tags) > 5 else ''}")
         print(f"  NSFW:        {row.get('da_nsfw_flag', 'FALSE')}")
-        print(f"  Gallery:     {galleries}")
-        if groups:
-            print(f"  Groups:      {', '.join(f'{g['group']}:{g['folder']}' for g in groups)}")
+        if "DA" in platforms:
+            print(f"  Gallery:     {galleries}")
+            if groups:
+                print(f"  Groups:      {', '.join(f'{g['group']}:{g['folder']}' for g in groups)}")
+        if "500PX" in platforms:
+            print(f"  500px cat:   {row.get('category_500px', '(none)')}")
+            already = row.get("url_500px", "").strip()
+            if already:
+                print(f"  500px URL:   {already} (already uploaded — will skip)")
+        if "DA" in platforms:
+            already = row.get("da_deviation_url", "").strip()
+            if already:
+                print(f"  DA URL:      {already} (already uploaded — will skip)")
         print(f"  Description: {desc[:100]}{'...' if len(desc) > 100 else ''}")
 
     print("\n" + "=" * 60)
     print(f"Would upload {len(rows)} row(s). Run without --dry-run to proceed.")
+
+
+# ── 500px Upload ──────────────────────────────────────────────
+def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
+    """
+    Automate 500px photo upload.
+    Returns {"success": bool, "url_500px": str, "error": str}
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_500px": "", "error": "No image file available"}
+
+    category = row.get("category_500px", "").strip()
+
+    # ── Navigate to 500px and open upload modal ────────────────
+    print("  Opening 500px upload modal...")
+    try:
+        page.goto("https://500px.com", wait_until="networkidle", timeout=30000)
+    except PlaywrightTimeout:
+        page.goto("https://500px.com", wait_until="domcontentloaded", timeout=15000)
+
+    page.wait_for_timeout(3000)
+
+    if "login" in page.url.lower() or "sign" in page.url.lower():
+        return {"success": False, "url_500px": "",
+                "error": "Not logged into 500px — run: python upload.py --login"}
+
+    # Hover Upload button → click dropdown item → modal opens
+    upload_btn = page.locator("button:has-text('Upload'), a:has-text('Upload')").first
+    upload_btn.hover()
+    page.wait_for_timeout(1500)
+    try:
+        dropdown_item = page.locator('.ant-dropdown a, .ant-dropdown-menu-item').filter(has_text="Upload").first
+        dropdown_item.click(timeout=5000)
+    except Exception:
+        # Fallback: JS click on dropdown item
+        page.evaluate("""
+            (() => {
+                const items = document.querySelectorAll('.ant-dropdown a, .ant-dropdown-menu-item');
+                for (const item of items) {
+                    if (item.textContent.trim() === 'Upload') { item.click(); return; }
+                }
+            })()
+        """)
+
+    # Wait for the upload modal to appear
+    try:
+        page.locator('text=Drag files to upload').wait_for(state="visible", timeout=10000)
+    except PlaywrightTimeout:
+        print("    WARNING: Upload modal not detected — continuing anyway")
+
+    page.wait_for_timeout(1000)
+
+    # ── Upload file ──────────────────────────────────────────
+    print(f"  Uploading file...")
+    file_input = page.locator('input[type="file"]')
+    if file_input.count() > 0:
+        file_input.first.set_input_files(str(image_path))
+    else:
+        try:
+            page.locator('button:has-text("Add photos")').click(timeout=5000)
+            page.wait_for_timeout(1000)
+            file_input = page.locator('input[type="file"]')
+            if file_input.count() > 0:
+                file_input.first.set_input_files(str(image_path))
+            else:
+                return {"success": False, "url_500px": "", "error": "No file input found on 500px upload page"}
+        except Exception as e:
+            return {"success": False, "url_500px": "", "error": f"No file input: {e}"}
+
+    # Wait for upload to process (500px extracts EXIF server-side)
+    page.wait_for_timeout(10000)
+
+    # ── Fill metadata fields ────────────────────────────────
+    title = row.get("title", "").strip()
+    nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
+
+    def js_escape_500px(s):
+        return s.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("'", "\\'").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
+
+    # Title — React controlled input, use native setter + events
+    print(f"  Setting metadata: title, description, category, keywords...")
+    page.evaluate(f"""
+        (() => {{
+            const el = document.querySelector('#editpanel-title');
+            if (!el) return;
+            el.focus();
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(el, '{js_escape_500px(title)}');
+            el.dispatchEvent(new Event('input', {{bubbles: true}}));
+            el.dispatchEvent(new Event('change', {{bubbles: true}}));
+            el.dispatchEvent(new Event('blur', {{bubbles: true}}));
+        }})()
+    """)
+    page.wait_for_timeout(500)
+
+    # Description — React controlled textarea, use native setter + events
+    page.evaluate(f"""
+        (() => {{
+            const el = document.querySelector('#edit-panel-description');
+            if (!el) return;
+            el.focus();
+            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+            setter.call(el, `{js_escape_500px(desc_full)}`);
+            el.dispatchEvent(new Event('input', {{bubbles: true}}));
+            el.dispatchEvent(new Event('change', {{bubbles: true}}));
+            el.dispatchEvent(new Event('blur', {{bubbles: true}}));
+        }})()
+    """)
+    page.wait_for_timeout(500)
+
+    # Category
+    if category:
+        page.click('#category-input')
+        page.wait_for_timeout(500)
+        try:
+            cat_option = page.locator(f'text="{category}"').first
+            cat_option.scroll_into_view_if_needed()
+            cat_option.click(timeout=3000)
+        except Exception as e:
+            print(f"    WARNING: Could not select category '{category}': {e}")
+        page.wait_for_timeout(300)
+
+    # Keywords
+    keywords_input = page.locator('#editpanel-keywords')
+    keywords_input.scroll_into_view_if_needed()
+    keywords_input.click()
+    page.wait_for_timeout(300)
+    for tag in tags:
+        page.keyboard.type(tag, delay=50)
+        page.keyboard.press('Enter')
+        page.wait_for_timeout(300)
+
+    # NSFW
+    if nsfw:
+        try:
+            nsfw_toggle = page.locator('[class*="nsfw"], [class*="safe"], label:has-text("NSFW"), label:has-text("Not Safe")').first
+            nsfw_toggle.click(timeout=3000)
+        except Exception as e:
+            print(f"    WARNING: Could not find NSFW toggle: {e}")
+
+    page.wait_for_timeout(1000)
+
+    if no_submit:
+        print("  --no-submit: skipping publish")
+        return {"success": True, "url_500px": "NO_SUBMIT", "error": ""}
+
+    # Advance wizard: Details → Additional info → Upload
+    print("  Publishing...")
+    next_btn = page.locator('button:has-text("Next")').first
+    if next_btn.count() > 0:
+        next_btn.click()
+        page.wait_for_timeout(4000)
+
+    # Click final Upload button (.last to avoid nav bar match)
+    publish_clicked = False
+    for label in ("Publish", "Submit", "Save", "Post", "Done"):
+        btn = page.locator(f'button:has-text("{label}")').first
+        if btn.count() > 0:
+            btn.click()
+            publish_clicked = True
+            break
+
+    if not publish_clicked:
+        upload_btns = page.locator('button:has-text("Upload")')
+        if upload_btns.count() > 1:
+            upload_btns.last.click()
+            publish_clicked = True
+        elif upload_btns.count() == 1:
+            upload_btns.first.click()
+            publish_clicked = True
+
+    if not publish_clicked:
+        return {"success": False, "url_500px": "", "error": "No Publish button found"}
+
+    page.wait_for_timeout(5000)
+    print("  Upload complete")
+    return {"success": True, "url_500px": "UPLOADED", "error": ""}
 
 
 # ── DA Upload ─────────────────────────────────────────────────
@@ -751,7 +1020,7 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 def main():
     args = parse_args()
 
-    # Login mode: open browser for DA login, then exit
+    # Login mode: open browser for platform logins, then exit
     if args.login:
         print(f"Opening browser for login (profile: {args.profile})")
         with sync_playwright() as pw:
@@ -762,12 +1031,16 @@ def main():
                 viewport={"width": 1280, "height": 900},
             )
             page = ctx.new_page()
+            page.goto("https://500px.com/login", wait_until="networkidle", timeout=60000)
+            print("Log into 500px in the browser window.")
+            print("Press ENTER when done (will open DeviantArt next)...")
+            input()
             page.goto("https://www.deviantart.com/users/login", wait_until="networkidle", timeout=60000)
             print("Log into DeviantArt in the browser window.")
-            print("Press ENTER here when done...")
+            print("Press ENTER when done...")
             input()
             ctx.close()
-        print("Login saved. You can now run: python upload.py --no-submit")
+        print("Logins saved. You can now run: python upload.py --no-submit")
         sys.exit(0)
 
     # Load config
@@ -779,7 +1052,7 @@ def main():
 
     if not target_rows:
         print("No rows to upload.")
-        print("Check that: status=Approved, platforms contains DA, and no AUTO fields remain.")
+        print("Check that: status=Approved, platforms contains a supported platform, and no AUTO fields remain.")
         sys.exit(0)
 
     print(f"Found {len(target_rows)} row(s) to upload.")
@@ -818,56 +1091,159 @@ def main():
                 print(f"[{i + 1}/{len(target_rows)}] {row['upload_id']} — {row.get('title', '?')}")
                 print(f"{'=' * 60}")
 
+                platforms = get_row_platforms(row)
+                print(f"  Platforms: {', '.join(sorted(platforms))}")
+
                 desc_full = build_description(row, config)
                 tags = prepare_tags(row.get("keywords", ""))
-                groups = parse_groups(row.get("da_groups", ""))
+                errors = []
+                image_path = None
+                ok_500px = False
+                ok_da = False
 
-                try:
-                    result = upload_to_da(page, row, desc_full, tags, groups, args.no_submit)
-                except PlaywrightTimeout as e:
-                    result = {"success": False, "deviation_url": "", "error": f"Timeout: {e}"}
-                except Exception as e:
-                    result = {"success": False, "deviation_url": "", "error": f"Unexpected: {e}"}
+                # ── 500PX (must run before DA) ────────────────────
+                if "500PX" in platforms:
+                    already = row.get("url_500px", "").strip()
+                    if already:
+                        print(f"\n  500px: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── 500px Upload ──")
+                        # Download image from Sta.sh if not already downloaded
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url_nsfw — cannot download image")
 
-                # Screenshot on failure
-                if not result["success"] and result.get("error"):
-                    ts = datetime.now().strftime("%H%M%S")
-                    shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_{ts}.png"
+                        tags_500px = tags[:TAG_LIMIT_500PX]
+                        try:
+                            result_500px = upload_to_500px(
+                                page, row, desc_full, tags_500px, image_path, args.no_submit
+                            )
+                        except PlaywrightTimeout as e:
+                            result_500px = {"success": False, "url_500px": "", "error": f"Timeout: {e}"}
+                        except Exception as e:
+                            result_500px = {"success": False, "url_500px": "", "error": f"Unexpected: {e}"}
+
+                        if result_500px["success"]:
+                            ok_500px = True
+                            print(f"  500px: SUCCESS — {result_500px.get('url_500px', '')}")
+                        else:
+                            err = result_500px.get("error", "unknown")
+                            print(f"  500px: FAILED — {err}")
+                            errors.append(f"500px: {err}")
+                            # Screenshot on failure
+                            ts = datetime.now().strftime("%H%M%S")
+                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_500px_{ts}.png"
+                            try:
+                                page.screenshot(path=str(shot_path))
+                                print(f"  Error screenshot: {shot_path}")
+                            except Exception:
+                                pass
+
+                        # Update CSV with 500px result
+                        url_500px = result_500px.get("url_500px", "")
+                        if url_500px and url_500px not in ("NO_SUBMIT", "UPLOADED"):
+                            save_row_update(args.csv, row["upload_id"], {"url_500px": url_500px})
+
+                # ── DA (must run last — consumes Sta.sh) ──────────
+                if "DA" in platforms:
+                    already = row.get("da_deviation_url", "").strip()
+                    if already:
+                        print(f"\n  DA: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── DeviantArt Upload ──")
+                        groups = parse_groups(row.get("da_groups", ""))
+                        try:
+                            result_da = upload_to_da(page, row, desc_full, tags, groups, args.no_submit)
+                        except PlaywrightTimeout as e:
+                            result_da = {"success": False, "deviation_url": "", "error": f"Timeout: {e}"}
+                        except Exception as e:
+                            result_da = {"success": False, "deviation_url": "", "error": f"Unexpected: {e}"}
+
+                        if result_da["success"]:
+                            ok_da = True
+                            print(f"  DA: SUCCESS — {result_da.get('deviation_url', '')}")
+                        else:
+                            err = result_da.get("error", "unknown")
+                            print(f"  DA: FAILED — {err}")
+                            errors.append(f"DA: {err}")
+                            # Screenshot on failure
+                            ts = datetime.now().strftime("%H%M%S")
+                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_da_{ts}.png"
+                            try:
+                                page.screenshot(path=str(shot_path))
+                                print(f"  Error screenshot: {shot_path}")
+                            except Exception:
+                                pass
+
+                        # Update CSV with DA result
+                        da_url = result_da.get("deviation_url", "")
+                        if da_url and da_url not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"da_deviation_url": da_url})
+
+                # ── Clean up temp image ───────────────────────────
+                if image_path and Path(image_path).exists():
                     try:
-                        page.screenshot(path=str(shot_path))
-                        print(f"  Error screenshot: {shot_path}")
-                    except Exception:
-                        pass
+                        Path(image_path).unlink()
+                        print(f"  Cleaned up temp file: {image_path}")
+                    except Exception as e:
+                        print(f"  WARNING: Could not delete temp file: {e}")
 
-                # Update CSV
-                updates = {
-                    "status": "Uploaded" if result["success"] else "Failed",
-                    "upload_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-                if result.get("deviation_url") and result["deviation_url"] not in ("NO_SUBMIT", "DRY_RUN"):
-                    updates["da_deviation_url"] = result["deviation_url"]
-                if result.get("error"):
-                    # Sanitize: keep first line only to prevent CSV corruption
-                    err_msg = result["error"].split("\n")[0][:200]
-                    updates["error_log"] = err_msg
-
+                # ── Update row status ─────────────────────────────
+                # Check which platforms are now done (either this run or previously)
+                # Re-read row to get latest URLs
                 if not args.no_submit:
+                    fresh_rows = load_queue(args.csv)
+                    fresh_row = next((r for r in fresh_rows if r["upload_id"] == row["upload_id"]), row)
+
+                    done_platforms = set()
+                    if "500PX" in platforms and (ok_500px or fresh_row.get("url_500px", "").strip()):
+                        done_platforms.add("500PX")
+                    if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
+                        done_platforms.add("DA")
+
+                    if done_platforms == platforms:
+                        status = "Uploaded"
+                    elif done_platforms:
+                        status = "Partial"
+                    else:
+                        status = "Failed"
+
+                    updates = {
+                        "status": status,
+                        "upload_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    if errors:
+                        updates["error_log"] = "; ".join(errors)[:200]
                     save_row_update(args.csv, row["upload_id"], updates)
 
-                status = "SUCCESS" if result["success"] else "FAILED"
-                detail = result.get("deviation_url", "") or result.get("error", "")
-                print(f"\n  {status}: {detail}")
-                results_summary.append((row["upload_id"], status, detail))
+                # Summary line
+                summary_detail = []
+                if "500PX" in platforms:
+                    s = "done" if ok_500px or row.get("url_500px", "").strip() else "failed"
+                    summary_detail.append(f"500px:{s}")
+                if "DA" in platforms:
+                    s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
+                    summary_detail.append(f"DA:{s}")
+                results_summary.append((row["upload_id"], ", ".join(summary_detail)))
 
         finally:
+            # Clean up temp directory if empty
+            if TEMP_DIR.exists():
+                try:
+                    TEMP_DIR.rmdir()  # only removes if empty
+                except OSError:
+                    pass
             context.close()
 
     # Summary
     print(f"\n{'=' * 60}")
     print("SUMMARY")
     print(f"{'=' * 60}")
-    for uid, status, detail in results_summary:
-        print(f"  {status}: {uid} — {detail}")
+    for uid, detail in results_summary:
+        print(f"  {uid} — {detail}")
     print(f"\n{len(results_summary)} row(s) processed.")
 
 
