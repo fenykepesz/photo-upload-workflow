@@ -1,17 +1,16 @@
-# 📸 Daily Photo Upload Workflow
+# Daily Photo Upload Workflow
 
-Automated daily photo publishing to DeviantArt (and optionally 500px, 35photo, and Facebook) using [Claude Cowork](https://claude.ai) as the orchestration engine. Photos are staged on Sta.sh, scheduled via a Google Drive-synced queue, and published through browser automation.
+Automated photo publishing to **DeviantArt** and **500px** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
 
 ---
 
 ## How It Works
 
-Each day, Claude reads the upload queue, finds that day's scheduled photo, views it on Sta.sh, generates metadata (or uses what you've pre-filled), waits for your approval, then publishes to each platform in sequence — always ending with DeviantArt, since publishing to DA consumes the Sta.sh staging item.
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. 500px is always uploaded first, DA last (since publishing to DA consumes the Sta.sh staging item).
 
 ```
-Sta.sh (staging) → Claude views photo → Generates metadata
-→ You approve → 500px → 35photo → Facebook → DeviantArt (last)
-→ Queue CSV updated with result URLs
+Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
+-> 500px upload -> DeviantArt publish (last) -> CSV updated with results
 ```
 
 ---
@@ -19,15 +18,16 @@ Sta.sh (staging) → Claude views photo → Generates metadata
 ## Folder Structure
 
 ```
-photo-queue/
-├── upload_queue.csv        # The upload schedule (synced via Google Drive)
-├── config.json             # Platform account names for login verification
-├── queue_manager.html      # Visual queue manager (open in browser)
-├── temp/                   # Temporary local files for non-DA platforms
-└── .claude/
-    └── skills/
-        └── da-upload/
-            └── SKILL.md    # Workflow skill definition (read by Claude)
+photo-upload-workflow/
+├── upload.py                  # Main upload automation script
+├── upload_queue.csv           # The upload schedule
+├── config.json                # Platform accounts and social links
+├── requirements.txt           # Python dependencies (playwright)
+├── queue_manager.html         # Visual queue manager (open in browser)
+├── upload_queue.example.csv   # Example CSV for reference
+├── config.example.json        # Example config for reference
+├── temp/                      # Temporary downloaded images (auto-cleaned)
+└── chrome-profile/            # Playwright browser profile (login cookies)
 ```
 
 ---
@@ -36,96 +36,153 @@ photo-queue/
 
 ### 1. Prerequisites
 
-- [Claude desktop app](https://claude.ai/download) with **Cowork mode** enabled
-- **Claude in Chrome** extension installed in your browser
-- **Google Drive** synced locally (on Mac or Windows)
-- Cowork pointed at the `photo-queue` folder in Google Drive
+- Python 3.8+
+- [Playwright](https://playwright.dev/python/) (`pip install playwright && playwright install chromium`)
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
 
 ### 2. config.json
 
-Edit `config.json` to set your username on each platform and optionally your social media profile URLs. Claude uses the account names to verify logins and appends the social links to photo descriptions (except on Facebook).
+Copy `config.example.json` to `config.json` and fill in your usernames:
 
 ```json
 {
   "accounts": {
-    "deviantart": "flyy1",
-    "500px": "YOUR_500PX_USERNAME",
-    "35photo": "YOUR_35PHOTO_USERNAME",
-    "facebook": "YOUR_FACEBOOK_NAME"
+    "deviantart": "YOUR_DEVIANTART_USERNAME",
+    "500px": "YOUR_500PX_USERNAME"
   },
   "social_links": {
-    "web": "erikrozman.com/",
-    "instagram": "www.instagram.com/rozmane/",
-    "500px": "500px.com/erikrozman",
-    "deviantart": "flyy1.deviantart.com/"
+    "web": "yoursite.com/",
+    "instagram": "www.instagram.com/you/",
+    "500px": "500px.com/you",
+    "deviantart": "you.deviantart.com/"
   }
 }
 ```
 
-Replace the placeholder values with your real usernames before using those platforms. Social links are optional — only non-empty entries are appended to descriptions.
+Social links are appended to photo descriptions on DA and 500px. Only non-empty entries are included.
 
-### 3. Sta.sh
+### 3. Browser Login (first time)
 
-Upload each photo to [Sta.sh](https://sta.sh) (DeviantArt's staging area) before its scheduled date. Copy the resulting `https://sta.sh/xxxxxxxxx` URL into the queue CSV.
+```bash
+python upload.py --login
+```
 
-> **Important:** Do not publish a Sta.sh item manually before running the workflow — publishing removes the item and breaks the automation.
+This opens a Chromium window with a persistent profile. Log into 500px first, then DeviantArt when prompted. Cookies are saved to `chrome-profile/` and reused on subsequent runs.
+
+### 4. Sta.sh
+
+Upload each photo to [Sta.sh](https://sta.sh) (DeviantArt's staging area) before its scheduled date. Copy the Sta.sh URL into the queue CSV.
+
+> **Important:** Do not publish a Sta.sh item manually before running the script — publishing removes the item and breaks the automation.
 
 ---
 
 ## The Upload Queue (`upload_queue.csv`)
 
-Each row represents one scheduled upload. Open `queue_manager.html` in your browser for a visual view, or edit the CSV directly.
+Each row represents one scheduled upload. Open `queue_manager.html` in your browser for a visual editor, or edit the CSV directly.
 
 ### Column Reference
 
 | Column | Description | Example |
 |---|---|---|
-| `upload_id` | Unique ID for this entry | `PH-2026-001` |
+| `upload_id` | Unique ID | `PH-2026-001` |
 | `scheduled_date` | Date to publish (`YYYY-MM-DD`) | `2026-03-01` |
 | `scheduled_time` | Time of day (informational) | `10:00` |
-| `stash_url_nsfw` | Sta.sh URL for the full/NSFW version | `https://sta.sh/0abc123` |
-| `stash_url_safe` | Sta.sh URL for the safe-for-work crop (optional) | `https://sta.sh/0xyz789` |
-| `title` | Photo title, or `AUTO` to generate from image | `The Delivery Man, Bangkok` |
-| `caption` | Description/caption, or `AUTO` | `A candid moment on the streets of Bangkok...` |
-| `keywords` | Comma-separated tags, or `AUTO` | `Bangkok, street photography, Fujifilm` |
+| `stash_url_nsfw` | Sta.sh URL for the photo | `https://sta.sh/0abc123` |
+| `stash_url_safe` | Sta.sh URL for safe crop (optional, future use) | |
+| `title` | Photo title | `The Delivery Man, Bangkok` |
+| `caption` | Description/caption | `A candid moment on the streets...` |
+| `keywords` | Comma-separated tags | `Bangkok,street,Fujifilm` |
 | `da_nsfw_flag` | Mark as Mature on DeviantArt | `TRUE` / `FALSE` |
-| `category_500px` | 500px category name | `Street` |
-| `category_35p` | 35photo genre | `Urban` |
-| `caption_fb` | Facebook-specific caption (optional, strips external links) | *(leave blank to use main caption)* |
-| `platforms` | Comma-separated platforms to publish to | `DA` / `DA,500PX,35P,FB` |
-| `status` | Current state of this entry | `Pending` / `Uploaded` / `Skipped` / `Partial` / `Failed` |
-| `upload_timestamp` | Filled in automatically after upload | `2026-03-01 15:12:18` |
-| `da_deviation_url` | DeviantArt result URL (filled automatically) | `https://www.deviantart.com/flyy1/art/...` |
-| `url_500px` | 500px result URL (filled automatically) | |
-| `url_35p` | 35photo result URL (filled automatically) | |
-| `url_fb` | Facebook post URL (filled automatically) | |
-| `notes` | Free-form notes for yourself | `Golden mount, Bangkok. XT-20` |
-| `error_log` | Any errors during upload (filled automatically) | |
-| `model_name` | Name of the model in the photo (optional) | `Elena` |
-| `da_gallery` | DA galleries to submit to (comma-separated, always includes Featured) | `Featured,Street` |
-| `da_groups` | DA groups and folders to submit to (`Group:Folder` format) | `Street-Shooters:Candid` |
+| `category_500px` | 500px category name | `Travel` |
+| `platforms` | Comma-separated target platforms | `DA` / `DA,500PX` |
+| `status` | Current state | `Approved` / `Uploaded` / `Partial` / `Failed` |
+| `upload_timestamp` | Filled automatically after upload | `2026-03-01 15:12:18` |
+| `da_deviation_url` | DA result URL (filled automatically) | |
+| `url_500px` | 500px result (filled automatically) | |
+| `notes` | Free-form notes | `Golden mount. XT-20` |
+| `error_log` | Errors during upload (filled automatically) | |
+| `model_name` | Model name (optional) | `Elena` |
+| `da_gallery` | DA galleries (comma-separated) | `Featured,Travel` |
+| `da_groups` | DA groups (`Group:Folder` format) | `TheSpiritofArt:Featured` |
 
 ### Status Values
 
 | Status | Meaning |
 |---|---|
-| `Pending` | Scheduled, not yet uploaded |
+| `Pending` | Scheduled, metadata not yet finalized |
+| `Approved` | Ready for upload (script picks up these rows) |
 | `Uploaded` | Successfully published to all target platforms |
-| `Partial` | Published to some platforms; check `error_log` |
+| `Partial` | Some platforms succeeded; check `error_log` |
 | `Failed` | All platforms failed; check `error_log` |
-| `Skipped` | You chose to skip at the approval gate |
 
 ---
 
-## AUTO Metadata
+## Usage
 
-Set `title`, `caption`, and/or `keywords` to exactly `AUTO` and Claude will analyze the photo using its vision capabilities and generate:
+### Upload all approved rows
 
-- **Title** — 3–8 words, evocative, classical art style
-- **Caption** — 2–3 sentences, 150–250 characters, fine art voice; mentions the camera when identifiable
-- **Keywords** — 30–40 tags for DeviantArt (DA allows up to 60), drawn from eight categories: location, subject, technique, mood/aesthetic, composition, genre, discovery terms, and gear. Multi-word concepts are written without spaces (`longexposure`, `blackandwhite`) because DA splits on spaces and would otherwise break them into useless single words. For 500px and 35photo, a curated shortlist of 10–15 of the most relevant tags is used instead, as those platforms benefit from precision over volume.
+```bash
+python upload.py
+```
 
-You can pre-fill any combination — for example, set a title manually and leave caption/keywords as `AUTO`.
+### Upload a specific row (any status)
+
+```bash
+python upload.py --row PH-2026-001
+```
+
+### Preview what would happen
+
+```bash
+python upload.py --dry-run
+```
+
+### Fill forms without submitting
+
+```bash
+python upload.py --no-submit
+```
+
+### Custom CSV or config path
+
+```bash
+python upload.py --csv path/to/queue.csv --config path/to/config.json
+```
+
+### All flags
+
+| Flag | Description |
+|---|---|
+| `--row ID` | Upload only this row (bypasses status filter) |
+| `--dry-run` | Preview without launching browser |
+| `--no-submit` | Fill forms but don't click Submit/Publish |
+| `--csv PATH` | Custom CSV path (default: `upload_queue.csv`) |
+| `--config PATH` | Custom config path (default: `config.json`) |
+| `--profile PATH` | Custom browser profile directory |
+| `--login` | Open browser for first-time platform logins |
+
+---
+
+## Platform Details
+
+### DeviantArt
+
+- Published via the **Sta.sh web submission form** (not the API)
+- Publishing **consumes the Sta.sh item** — always runs last
+- Fills: title, description, tags, galleries, groups, mature flag, NoAI flag
+- Disables "Allow free download of source file" automatically
+
+### 500px
+
+- Requires a **file upload** (not a URL) — the script downloads the original image from Sta.sh automatically, preserving EXIF data
+- Uses 500px's 3-step upload wizard: file upload, details, publish
+- Fills: title, description, category, keywords
+- Downloaded images are stored temporarily in `temp/` and cleaned up after upload
 
 ---
 
@@ -133,90 +190,29 @@ You can pre-fill any combination — for example, set a title manually and leave
 
 ### Gallery Selection
 
-By default, photos are submitted to the `Featured` gallery on DeviantArt. To also place the photo in a specific personal gallery, set `da_gallery` to a comma-separated list:
+Set `da_gallery` to a comma-separated list of galleries:
 
 ```
-Featured,Street
+Featured,Travel
 ```
-
-DeviantArt allows Featured plus one additional gallery per submission.
 
 ### Group Submissions
 
-Claude can submit the deviation to DA groups during the submission form. Set `da_groups` to a comma-separated list of `Group:Folder` pairs:
+Set `da_groups` to comma-separated `Group:Folder` pairs:
 
 ```
-Street-Shooters:Candid,Landscape-Lovers:Mountains
+TheSpiritofArt:Featured,Street-Shooters:Candid
 ```
 
-Group and folder selections are made in the Sta.sh submission form before clicking Submit. Some groups may queue submissions for moderator approval.
+### Model Credit
 
-### Model Respect Line
-
-If `model_name` is set (e.g. `Elena`), this line is appended to the description on all platforms:
+If `model_name` is set (e.g. `Elena`), this line is appended to descriptions:
 
 > Model: Elena. Please respect the model.
 
 ### Social Links
 
-Social media profile links from `config.json` are appended to descriptions on DA, 500px, and 35photo (not Facebook). Configure them in `config.json` under `social_links`.
-
-### Free Download
-
-The "Allow free download of source file" slider in DeviantArt's Advanced settings is always switched off during submission.
-
----
-
-## Running the Workflow
-
-### Daily (manual trigger)
-
-Open Cowork and say:
-
-> **run da-upload**
-
-Claude will find today's scheduled entry and walk through the full workflow.
-
-### On-demand (specific entry)
-
-> **publish PH-2026-007 now**
-
-Claude will confirm the scheduled date, then proceed.
-
-### What Claude does step by step
-
-1. **Loads `config.json`** — checks for placeholder values, warns if any remain
-2. **Detects the browser machine** — reads the browser's User-Agent via JavaScript and reports whether Chrome is running on Windows or macOS; no guessing or screenshot needed
-3. **Reads the queue** — finds today's `Pending` entry; shows upcoming entries if nothing is scheduled today
-4. **Re-upload guard** — stops if the entry is already marked `Uploaded` to prevent duplicates
-5. **Views the photo in Chrome** — navigates to the Sta.sh URL; confirms it loads
-6. **Generates AUTO metadata** — analyses the image; shows proposed title/caption/keywords
-7. **Approval gate** — presents three options: Approve & Publish, Edit Metadata, or Skip Today. No uploads begin until you approve
-8. **Uploads in order**: 500px → 35photo → Facebook → DeviantArt (always last)
-9. **Verifies account on each platform** — compares logged-in username against `config.json`; stops if there's a mismatch
-10. **Selects DA galleries** — places the deviation in the galleries specified by `da_gallery`
-11. **Submits to DA groups** — submits the deviation to each group:folder pair in `da_groups`
-12. **Disables free download** — switches off "Allow free download of source file" in DA Advanced settings
-13. **Updates the CSV** — fills in result URLs, timestamp, and final status
-14. **Shows a summary** — lists every platform result and the next upcoming entry
-
----
-
-## Platform Notes
-
-### DeviantArt
-
-- Published via the **Sta.sh web interface** (Edit or Submit button), not the API
-- The Cowork VM cannot reach the DeviantArt API due to proxy sandboxing — browser automation is the only viable path
-- Publishing **consumes the Sta.sh item** — it will no longer be accessible at the original URL after this step
-- This is why DA is always published **last**
-
-### 500px / 35photo / Facebook
-
-- These platforms require a **local file** on your computer (not a Sta.sh URL)
-- Save the photo to `photo-queue/temp/{upload_id}_NSFW.jpg` (and `_SAFE.jpg` for Facebook) before running the workflow
-- Claude will prompt you if the file is missing
-- Facebook uses the `stash_url_safe` version to avoid mature content flags; if `caption_fb` is blank, the main caption is used with external social links stripped
+Social media links from `config.json` are appended to descriptions on DA and 500px.
 
 ---
 
@@ -224,12 +220,12 @@ Claude will confirm the scheduled date, then proceed.
 
 | Feature | What it does |
 |---|---|
-| **Re-upload guard** | Warns before publishing an entry already marked `Uploaded` |
-| **Account verification** | Checks the logged-in username on each platform against `config.json` before touching any form |
-| **Approval gate** | Hard stop before any upload begins — nothing is submitted without your explicit go-ahead |
-| **Placeholder check** | Stops at startup if `config.json` still has `YOUR_` placeholder values for a platform that's in the queue |
-| **DA always last** | Enforced by the workflow order — Sta.sh is preserved until all other platforms are done |
-| **Free download disabled** | Automatically switches off "Allow free download of source file" on every DA submission |
+| **Skip already-uploaded** | Skips a platform if its result URL column is already filled |
+| **EXIF preservation** | Downloads original files from Sta.sh via the Download menu (not browser image save) |
+| **`--no-submit` mode** | Fills all forms without publishing — visual verification |
+| **`--dry-run` mode** | Shows what would happen without launching a browser |
+| **DA always last** | 500px runs first; Sta.sh is preserved until DA is done |
+| **Error screenshots** | Saves `error_*.png` on failure for debugging |
 
 ---
 
@@ -237,30 +233,18 @@ Claude will confirm the scheduled date, then proceed.
 
 | Problem | Fix |
 |---|---|
-| "Config not found" | Ensure `config.json` exists in the queue folder and Cowork has the folder selected |
-| "Queue not found" | Confirm Google Drive is synced and Cowork is pointing at the right folder |
-| Sta.sh shows "Page not found" | The URL may be wrong, or the item was already published to DA manually |
-| Wrong account on platform | Log into the correct account in Chrome, then tell Claude to continue |
-| Facebook CAPTCHA | Solve it manually in the browser, then tell Claude to continue |
-| Platform upload failed | Status will be `Partial`; check `error_log` in the CSV; reset the row to `Pending` to retry |
-| Entry already `Uploaded` | Claude will warn you — confirm explicitly if you really want to re-publish |
+| "No browser profile found" | Run `python upload.py --login` first |
+| "No rows to upload" | Check that rows have `status=Approved` and a supported platform |
+| Sta.sh "Page not found" | URL may be wrong, or the item was already published to DA |
+| EXIF missing on 500px | Ensure the Sta.sh download works (check for "..." menu on the Sta.sh page) |
+| Wrong account on platform | Run `--login` again to log into the correct account |
+| Platform upload failed | Status will be `Partial`; check `error_log`; fix and re-run |
 
 ---
 
 ## Adding New Entries
 
 1. Open `queue_manager.html` in your browser, or edit `upload_queue.csv` directly
-2. Add a new row with a unique `upload_id` (e.g. `PH-2026-003`), a `scheduled_date`, the Sta.sh URL, and any pre-known metadata
-3. Set `status` to `Pending`
-4. Upload your photo to Sta.sh and paste the URL into `stash_url_nsfw`
-5. On the scheduled date, run `da-upload` in Cowork
-
----
-
-## Known Limitations
-
-- The Cowork VM has no outbound internet access to DeviantArt's API — all DA interaction is through the Chrome browser
-- Local temp files for 500px/35photo/Facebook must be placed manually; the VM cannot download from Sta.sh directly
-- Facebook post URLs are not always immediately available after posting
-- The workflow runs on whichever machine has the Claude in Chrome extension active. Claude detects this automatically at startup using the browser's User-Agent string (no guessing needed)
-- If you need to run the workflow and your primary machine is off, install the extension on a second machine — Claude will detect it and adapt
+2. Add a row with a unique `upload_id`, `scheduled_date`, Sta.sh URL, and metadata
+3. Set `status` to `Approved` when ready
+4. Run `python upload.py`
