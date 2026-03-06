@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Playwright-based photo upload automation for DeviantArt, 500px, 35photo, and VK.
+Playwright-based photo upload automation for DeviantArt, 500px, 35photo, VK, and X.
 Reads upload_queue.csv, uploads to platforms listed in each row's 'platforms' field.
 
-Upload order: 500PX → 35P → VK → DA (DA consumes the Sta.sh item on publish, so always last).
+Upload order: 500PX → 35P → VK → X → DA (DA consumes the Sta.sh item on publish, so always last).
 
 Usage:
     python upload.py                          # all Approved rows with supported platforms
@@ -30,7 +30,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 
 COLS = [
@@ -38,7 +38,7 @@ COLS = [
     "stash_url_nsfw", "stash_url_safe", "title", "caption", "keywords",
     "da_nsfw_flag", "category_500px", "category_35p", "caption_fb",
     "platforms", "status", "upload_timestamp",
-    "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_fb",
+    "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups",
 ]
 
@@ -295,6 +295,10 @@ def print_dry_run(rows, config):
             already = row.get("url_vk", "").strip()
             if already:
                 print(f"  VK URL:      {already} (already uploaded — will skip)")
+        if "X" in platforms:
+            already = row.get("url_x", "").strip()
+            if already:
+                print(f"  X URL:       {already} (already uploaded — will skip)")
         if "DA" in platforms:
             already = row.get("da_deviation_url", "").strip()
             if already:
@@ -775,6 +779,148 @@ def upload_to_vk(page, desc_full, image_path, no_submit=False):
     page.wait_for_timeout(5000)
     print("  Wall post created")
     return {"success": True, "url_vk": "UPLOADED", "error": ""}
+
+
+# ── X.com Upload (Playwright) ─────────────────────────────────
+X_CHAR_LIMIT = 280
+
+
+def build_x_post_text(title, keywords_str):
+    """Build a tweet from title + hashtags, fitting within 280 characters."""
+    text = title.strip()
+    if not keywords_str:
+        return text[:X_CHAR_LIMIT]
+    tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    for tag in tags:
+        hashtag = "#" + tag.replace(" ", "")
+        candidate = text + " " + hashtag
+        if len(candidate) <= X_CHAR_LIMIT:
+            text = candidate
+        else:
+            break
+    return text
+
+
+def upload_to_x(page, post_text, image_path, no_submit=False):
+    """
+    Post a photo with text to X.com via browser automation.
+    Flow: home → compose → write text → attach photo → Post.
+    Returns {"success": bool, "url_x": str, "error": str}
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_x": "", "error": "No image file available"}
+
+    # Navigate to X compose page
+    print("  Opening X.com compose...")
+    try:
+        page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=30000)
+    except PlaywrightTimeout:
+        return {"success": False, "url_x": "", "error": "Timeout loading X.com"}
+    page.wait_for_timeout(3000)
+
+    # Check if logged in
+    if "/login" in page.url or "/i/flow/login" in page.url:
+        return {"success": False, "url_x": "", "error": "Not logged into X — run --login first"}
+
+    # Write post text — find the tweet composer contenteditable
+    print("  Writing post text...")
+    try:
+        caption_ok = page.evaluate("""(text) => {
+            const vh = window.innerHeight;
+            const candidates = document.querySelectorAll(
+                '[contenteditable="true"], [role="textbox"]'
+            );
+            let best = null;
+            let bestArea = 0;
+            for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 100 && r.height > 15 && r.top > 50 && r.top < vh) {
+                    const area = r.width * r.height;
+                    if (area > bestArea) {
+                        best = el;
+                        bestArea = area;
+                    }
+                }
+            }
+            if (best) {
+                best.focus();
+                best.click();
+                document.execCommand('insertText', false, text);
+                return {found: true, tag: best.tagName, class: best.className?.substring(0, 80),
+                        rect: {top: best.getBoundingClientRect().top,
+                               width: best.getBoundingClientRect().width}};
+            }
+            return {found: false};
+        }""", post_text)
+        print(f"    Compose area: {caption_ok}")
+        if not caption_ok.get("found"):
+            # Fallback: click placeholder text
+            placeholder = page.locator('text="What\'s happening?"').first
+            placeholder.click(timeout=3000)
+            page.wait_for_timeout(300)
+            page.keyboard.type(post_text, delay=10)
+    except Exception as e:
+        print(f"    WARNING: Could not write text: {e}")
+
+    page.wait_for_timeout(1000)
+
+    # Upload photo — click the media button to trigger file picker
+    print("  Uploading photo...")
+    try:
+        with page.expect_file_chooser(timeout=5000) as fc_info:
+            # The media button is an input[type=file] or a button with media icon
+            media_input = page.locator('input[type="file"][accept*="image"]')
+            if media_input.count() > 0:
+                media_input.first.set_input_files(image_path)
+                # Cancel the expect_file_chooser since we used set_input_files
+                raise Exception("used set_input_files directly")
+            else:
+                # Click the media/photo button (camera/image icon)
+                media_btn = page.locator('[aria-label="Add photos or video"], [data-testid="fileInput"]').first
+                media_btn.click(timeout=3000)
+        file_chooser = fc_info.value
+        file_chooser.set_files(image_path)
+        print(f"    Photo attached via file chooser")
+    except Exception as e:
+        if "used set_input_files" in str(e):
+            print(f"    Photo attached via input element")
+        else:
+            # Last fallback: try any file input
+            file_input = page.locator('input[type="file"]')
+            if file_input.count() > 0:
+                file_input.first.set_input_files(image_path)
+                print(f"    Fallback: photo set on input directly")
+            else:
+                return {"success": False, "url_x": "", "error": f"Could not attach photo: {e}"}
+
+    # Wait for photo to process
+    print("  Waiting for photo to process...")
+    page.wait_for_timeout(5000)
+
+    if no_submit:
+        print("  --no-submit: skipping post")
+        return {"success": True, "url_x": "NO_SUBMIT", "error": ""}
+
+    # Dismiss any hashtag autocomplete dropdown before clicking Post
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(500)
+
+    # Click "Post" button
+    print("  Posting...")
+    try:
+        post_btn = page.locator('[data-testid="tweetButton"]')
+        if post_btn.count() > 0:
+            post_btn.first.click(timeout=5000)
+        else:
+            # Fallback: find button with "Post" text
+            post_btn = page.locator('button:has-text("Post")').last
+            post_btn.click(timeout=5000)
+    except Exception:
+        return {"success": False, "url_x": "", "error": "Could not find Post button"}
+
+    page.wait_for_timeout(5000)
+    print("  Tweet posted")
+    return {"success": True, "url_x": "UPLOADED", "error": ""}
 
 
 # ── DA Upload ─────────────────────────────────────────────────
@@ -1336,10 +1482,16 @@ def main():
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(args.profile),
                 headless=False,
-                args=["--no-first-run", "--no-default-browser-check"],
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ],
                 viewport={"width": 1280, "height": 900},
             )
             page = ctx.new_page()
+            # Hide automation flags so sites like X.com don't block login
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page.goto("https://500px.com/login", wait_until="domcontentloaded", timeout=30000)
             print("Log into 500px in the browser window.")
             print("Press ENTER when done (will open 35photo next)...")
@@ -1350,6 +1502,10 @@ def main():
             input()
             page.goto("https://vk.com/login", wait_until="domcontentloaded", timeout=30000)
             print("Log into VK in the browser window.")
+            print("Press ENTER when done (will open X next)...")
+            input()
+            page.goto("https://x.com/login", wait_until="domcontentloaded", timeout=30000)
+            print("Log into X.com in the browser window.")
             print("Press ENTER when done (will open DeviantArt next)...")
             input()
             page.goto("https://www.deviantart.com/users/login", wait_until="domcontentloaded", timeout=30000)
@@ -1399,6 +1555,7 @@ def main():
             slow_mo=100,
         )
         page = context.new_page()
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         results_summary = []
 
@@ -1418,6 +1575,7 @@ def main():
                 ok_500px = False
                 ok_35p = False
                 ok_vk = False
+                ok_x = False
                 ok_da = False
 
                 # ── 500PX (must run before DA) ────────────────────
@@ -1545,6 +1703,42 @@ def main():
                         if url_vk and url_vk not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_vk": url_vk})
 
+                # ── X (between VK and DA) ────────────────────────
+                if "X" in platforms:
+                    already = row.get("url_x", "").strip()
+                    if already:
+                        print(f"\n  X: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── X.com Upload ──")
+                        # Download image from Sta.sh if not already downloaded
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url_nsfw — cannot download image")
+
+                        post_text = build_x_post_text(row.get("title", ""), row.get("keywords", ""))
+                        print(f"    Post text ({len(post_text)} chars): {post_text}")
+
+                        try:
+                            result_x = upload_to_x(page, post_text, image_path, args.no_submit)
+                        except Exception as e:
+                            result_x = {"success": False, "url_x": "", "error": f"Unexpected: {e}"}
+
+                        if result_x["success"]:
+                            ok_x = True
+                            print(f"  X: SUCCESS — {result_x.get('url_x', '')}")
+                        else:
+                            err = result_x.get("error", "unknown")
+                            print(f"  X: FAILED — {err}")
+                            errors.append(f"X: {err}")
+
+                        # Update CSV with X result
+                        url_x = result_x.get("url_x", "")
+                        if url_x and url_x not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"url_x": url_x})
+
                 # ── DA (must run last — consumes Sta.sh) ──────────
                 if "DA" in platforms:
                     already = row.get("da_deviation_url", "").strip()
@@ -1603,6 +1797,8 @@ def main():
                         done_platforms.add("35P")
                     if "VK" in platforms and (ok_vk or fresh_row.get("url_vk", "").strip()):
                         done_platforms.add("VK")
+                    if "X" in platforms and (ok_x or fresh_row.get("url_x", "").strip()):
+                        done_platforms.add("X")
                     if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
                         done_platforms.add("DA")
 
@@ -1632,6 +1828,9 @@ def main():
                 if "VK" in platforms:
                     s = "done" if ok_vk or row.get("url_vk", "").strip() else "failed"
                     summary_detail.append(f"VK:{s}")
+                if "X" in platforms:
+                    s = "done" if ok_x or row.get("url_x", "").strip() else "failed"
+                    summary_detail.append(f"X:{s}")
                 if "DA" in platforms:
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")

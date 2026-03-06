@@ -1,16 +1,16 @@
 # Daily Photo Upload Workflow
 
-Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, and **VK** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
+Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, **VK**, and **X.com** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
 
 ---
 
 ## How It Works
 
-`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px first, then 35photo, then VK, then DA last (since publishing to DA consumes the Sta.sh staging item).
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px first, then 35photo, then VK, then X, then DA last (since publishing to DA consumes the Sta.sh staging item).
 
 ```
 Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
--> 500px upload -> 35photo upload -> VK wall post -> DeviantArt publish (last)
+-> 500px upload -> 35photo upload -> VK wall post -> X.com post -> DeviantArt publish (last)
 -> CSV updated with results
 ```
 
@@ -72,7 +72,7 @@ Social links are appended to photo descriptions on DA and 500px. Only non-empty 
 python upload.py --login
 ```
 
-This opens a Chromium window with a persistent profile. Log into 500px, then 35photo.pro, then VK, then DeviantArt when prompted. Cookies are saved to `chrome-profile/` and reused on subsequent runs.
+This opens a Chromium window with a persistent profile. Log into 500px, then 35photo.pro, then VK, then X.com, then DeviantArt when prompted. Cookies are saved to `chrome-profile/` and reused on subsequent runs.
 
 ### 4. Sta.sh
 
@@ -101,13 +101,14 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `da_nsfw_flag` | Mark as Mature/NSFW (all platforms) | `TRUE` / `FALSE` |
 | `category_500px` | 500px category name | `Travel` |
 | `category_35p` | 35photo style/category | `City/Architecture` |
-| `platforms` | Comma-separated target platforms | `DA,500PX,35P,VK` |
+| `platforms` | Comma-separated target platforms | `DA,500PX,35P,VK,X` |
 | `status` | Current state | `Approved` / `Uploaded` / `Partial` / `Failed` |
 | `upload_timestamp` | Filled automatically after upload | `2026-03-01 15:12:18` |
 | `da_deviation_url` | DA result URL (filled automatically) | |
 | `url_500px` | 500px result (filled automatically) | |
 | `url_35p` | 35photo result (filled automatically) | |
 | `url_vk` | VK wall post URL (filled automatically) | |
+| `url_x` | X.com post URL (filled automatically) | |
 | `notes` | Free-form notes | `Golden mount. XT-20` |
 | `error_log` | Errors during upload (filled automatically) | |
 | `model_name` | Model name (optional) | `Elena` |
@@ -201,6 +202,13 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 - Uses the browser "Create post" flow: upload photo, write caption, publish
 - No API app registration needed — uses existing browser session cookies
 
+### X.com (Twitter)
+
+- Posts a photo with a short text to the user's **X.com timeline**
+- Text is composed from the photo **title + hashtags** from keywords, respecting the **280-character limit**
+- Hashtags are added one by one until the limit is reached
+- Uses the browser compose flow: no API keys or developer account needed
+
 ---
 
 ## DeviantArt Customizations
@@ -241,7 +249,7 @@ Social media links from `config.json` are appended to descriptions on DA and 500
 | **EXIF preservation** | Downloads original files from Sta.sh via the Download menu (not browser image save) |
 | **`--no-submit` mode** | Fills all forms without publishing — visual verification |
 | **`--dry-run` mode** | Shows what would happen without launching a browser |
-| **DA always last** | 500px, 35photo, and VK run first; Sta.sh is preserved until DA is done |
+| **DA always last** | 500px, 35photo, VK, and X run first; Sta.sh is preserved until DA is done |
 | **Error screenshots** | Saves `error_*.png` on failure for debugging |
 
 ---
@@ -257,6 +265,7 @@ Social media links from `config.json` are appended to descriptions on DA and 500
 | Wrong account on platform | Run `--login` again to log into the correct account |
 | Platform upload failed | Status will be `Partial`; check `error_log`; fix and re-run |
 | VK "Not logged into VK" | Run `--login` and log into VK when prompted |
+| X "Not logged into X" | Run `--login` and log into X.com when prompted |
 
 ---
 
