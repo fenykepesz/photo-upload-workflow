@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Playwright-based photo upload automation for DeviantArt, 500px, and 35photo.
+Playwright-based photo upload automation for DeviantArt, 500px, 35photo, and VK.
 Reads upload_queue.csv, uploads to platforms listed in each row's 'platforms' field.
 
-Upload order: 500PX → 35P → DA (DA consumes the Sta.sh item on publish, so always last).
+Upload order: 500PX → 35P → VK → DA (DA consumes the Sta.sh item on publish, so always last).
 
 Usage:
     python upload.py                          # all Approved rows with supported platforms
@@ -30,7 +30,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX", "35P"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 
 COLS = [
@@ -38,7 +38,7 @@ COLS = [
     "stash_url_nsfw", "stash_url_safe", "title", "caption", "keywords",
     "da_nsfw_flag", "category_500px", "category_35p", "caption_fb",
     "platforms", "status", "upload_timestamp",
-    "da_deviation_url", "url_500px", "url_35p", "url_fb",
+    "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups",
 ]
 
@@ -95,6 +95,11 @@ def save_row_update(csv_path, upload_id, updates):
         if row["upload_id"] == upload_id:
             row.update(updates)
             break
+
+    # Add any new columns from updates that aren't in the CSV yet
+    for key in updates:
+        if key not in fieldnames:
+            fieldnames.append(key)
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -286,6 +291,10 @@ def print_dry_run(rows, config):
             already = row.get("url_35p", "").strip()
             if already:
                 print(f"  35photo URL: {already} (already uploaded — will skip)")
+        if "VK" in platforms:
+            already = row.get("url_vk", "").strip()
+            if already:
+                print(f"  VK URL:      {already} (already uploaded — will skip)")
         if "DA" in platforms:
             already = row.get("da_deviation_url", "").strip()
             if already:
@@ -624,6 +633,148 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
     page.wait_for_timeout(5000)
     print("  Upload complete")
     return {"success": True, "url_35p": "UPLOADED", "error": ""}
+
+
+# ── VK Upload (Playwright) ────────────────────────────────────
+def upload_to_vk(page, desc_full, image_path, no_submit=False):
+    """
+    Post a photo to the VK wall via browser automation.
+    Flow: feed → Create post → write caption → upload photo → Next → Publish.
+    Returns {"success": bool, "url_vk": str, "error": str}
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_vk": "", "error": "No image file available"}
+
+    # Navigate to VK feed
+    print("  Opening VK feed...")
+    try:
+        page.goto("https://vk.com/feed", wait_until="domcontentloaded", timeout=30000)
+    except PlaywrightTimeout:
+        return {"success": False, "url_vk": "", "error": "Timeout loading VK feed"}
+    page.wait_for_timeout(3000)
+
+    # Check if logged in (VK redirects to login page if not)
+    if "/login" in page.url or "/authorize" in page.url:
+        return {"success": False, "url_vk": "", "error": "Not logged into VK — run --login first"}
+
+    # Click "Create post" button
+    print("  Creating new post...")
+    try:
+        create_btn = page.locator('text="Create post"').first
+        create_btn.click(timeout=5000)
+    except Exception:
+        try:
+            create_btn = page.locator('[class*="create"], [class*="new_post"], [data-testid*="post"]').first
+            create_btn.click(timeout=5000)
+        except Exception:
+            return {"success": False, "url_vk": "", "error": "Could not find 'Create post' button"}
+    page.wait_for_timeout(2000)
+
+    # Handle "saved draft" dialog — click "Start over" if it appears
+    try:
+        start_over = page.locator('text="Start over"')
+        if start_over.count() > 0 and start_over.first.is_visible():
+            print("    Draft dialog found — clicking 'Start over'")
+            start_over.first.click()
+            page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
+    # Fill caption FIRST (before photo upload — the caption area is simpler before photo is attached)
+    print("  Writing caption...")
+    try:
+        caption_ok = page.evaluate("""(text) => {
+            const vh = window.innerHeight;
+            // Find contenteditable elements within the visible viewport
+            const candidates = document.querySelectorAll(
+                '[contenteditable="true"], [role="textbox"]'
+            );
+            let best = null;
+            let bestArea = 0;
+            for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                // Must be visible, reasonably sized, and within the viewport
+                if (r.width > 100 && r.height > 15 && r.top > 50 && r.top < vh) {
+                    const area = r.width * r.height;
+                    if (area > bestArea) {
+                        best = el;
+                        bestArea = area;
+                    }
+                }
+            }
+            if (best) {
+                best.focus();
+                best.click();
+                // Use execCommand to insert text (works with contenteditable)
+                document.execCommand('insertText', false, text);
+                return {found: true, tag: best.tagName, class: best.className?.substring(0, 80),
+                        rect: {top: best.getBoundingClientRect().top,
+                               width: best.getBoundingClientRect().width}};
+            }
+            return {found: false};
+        }""", desc_full)
+        print(f"    Caption area: {caption_ok}")
+        if not caption_ok.get("found"):
+            # Fallback: click placeholder text directly, then type
+            placeholder = page.locator('text="Write something here..."').first
+            placeholder.click(timeout=3000)
+            page.wait_for_timeout(300)
+            page.keyboard.type(desc_full, delay=10)
+    except Exception as e:
+        print(f"    WARNING: Could not fill caption: {e}")
+
+    page.wait_for_timeout(1000)
+
+    # Upload file — use expect_file_chooser to intercept native file picker
+    print("  Uploading photo...")
+    try:
+        with page.expect_file_chooser(timeout=5000) as fc_info:
+            # Click "Upload from device" to trigger the native file picker
+            upload_btn = page.locator('text="Upload from device"').first
+            upload_btn.click(timeout=3000)
+        file_chooser = fc_info.value
+        file_chooser.set_files(image_path)
+        print(f"    Photo file set via file chooser")
+    except Exception as e:
+        print(f"    File chooser approach failed: {e}")
+        # Fallback: try setting file input directly
+        file_input = page.locator('input[type="file"]')
+        if file_input.count() > 0:
+            file_input.last.set_input_files(image_path)
+            print(f"    Fallback: file set on input directly")
+        else:
+            return {"success": False, "url_vk": "", "error": "Could not upload file"}
+
+    # Wait for photo to process
+    print("  Waiting for photo to process...")
+    page.wait_for_timeout(8000)
+
+    page.wait_for_timeout(1000)
+
+    # Click "Next" button
+    print("  Clicking Next...")
+    try:
+        next_btn = page.locator('button:has-text("Next"), [class*="next"]').first
+        next_btn.click(timeout=5000)
+    except Exception:
+        return {"success": False, "url_vk": "", "error": "Could not find Next button"}
+    page.wait_for_timeout(2000)
+
+    if no_submit:
+        print("  --no-submit: skipping publish")
+        return {"success": True, "url_vk": "NO_SUBMIT", "error": ""}
+
+    # Click "Publish" button
+    print("  Publishing...")
+    try:
+        pub_btn = page.locator('button:has-text("Publish"), [class*="publish"]').first
+        pub_btn.click(timeout=5000)
+    except Exception:
+        return {"success": False, "url_vk": "", "error": "Could not find Publish button"}
+
+    page.wait_for_timeout(5000)
+    print("  Wall post created")
+    return {"success": True, "url_vk": "UPLOADED", "error": ""}
 
 
 # ── DA Upload ─────────────────────────────────────────────────
@@ -1195,6 +1346,10 @@ def main():
             input()
             page.goto("https://35photo.pro/login/", wait_until="domcontentloaded", timeout=30000)
             print("Log into 35photo in the browser window.")
+            print("Press ENTER when done (will open VK next)...")
+            input()
+            page.goto("https://vk.com/login", wait_until="domcontentloaded", timeout=30000)
+            print("Log into VK in the browser window.")
             print("Press ENTER when done (will open DeviantArt next)...")
             input()
             page.goto("https://www.deviantart.com/users/login", wait_until="domcontentloaded", timeout=30000)
@@ -1262,6 +1417,7 @@ def main():
                 image_path = None
                 ok_500px = False
                 ok_35p = False
+                ok_vk = False
                 ok_da = False
 
                 # ── 500PX (must run before DA) ────────────────────
@@ -1356,6 +1512,39 @@ def main():
                         if url_35p and url_35p not in ("NO_SUBMIT", "UPLOADED"):
                             save_row_update(args.csv, row["upload_id"], {"url_35p": url_35p})
 
+                # ── VK (API-based, between 35P and DA) ───────────
+                if "VK" in platforms:
+                    already = row.get("url_vk", "").strip()
+                    if already:
+                        print(f"\n  VK: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── VK Upload ──")
+                        # Download image from Sta.sh if not already downloaded
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url_nsfw — cannot download image")
+
+                        try:
+                            result_vk = upload_to_vk(page, desc_full, image_path, args.no_submit)
+                        except Exception as e:
+                            result_vk = {"success": False, "url_vk": "", "error": f"Unexpected: {e}"}
+
+                        if result_vk["success"]:
+                            ok_vk = True
+                            print(f"  VK: SUCCESS — {result_vk.get('url_vk', '')}")
+                        else:
+                            err = result_vk.get("error", "unknown")
+                            print(f"  VK: FAILED — {err}")
+                            errors.append(f"VK: {err}")
+
+                        # Update CSV with VK result
+                        url_vk = result_vk.get("url_vk", "")
+                        if url_vk and url_vk not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"url_vk": url_vk})
+
                 # ── DA (must run last — consumes Sta.sh) ──────────
                 if "DA" in platforms:
                     already = row.get("da_deviation_url", "").strip()
@@ -1412,6 +1601,8 @@ def main():
                         done_platforms.add("500PX")
                     if "35P" in platforms and (ok_35p or fresh_row.get("url_35p", "").strip()):
                         done_platforms.add("35P")
+                    if "VK" in platforms and (ok_vk or fresh_row.get("url_vk", "").strip()):
+                        done_platforms.add("VK")
                     if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
                         done_platforms.add("DA")
 
@@ -1435,6 +1626,12 @@ def main():
                 if "500PX" in platforms:
                     s = "done" if ok_500px or row.get("url_500px", "").strip() else "failed"
                     summary_detail.append(f"500px:{s}")
+                if "35P" in platforms:
+                    s = "done" if ok_35p or row.get("url_35p", "").strip() else "failed"
+                    summary_detail.append(f"35photo:{s}")
+                if "VK" in platforms:
+                    s = "done" if ok_vk or row.get("url_vk", "").strip() else "failed"
+                    summary_detail.append(f"VK:{s}")
                 if "DA" in platforms:
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")

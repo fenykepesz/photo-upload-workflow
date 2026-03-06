@@ -449,6 +449,11 @@
       color: #ff5050;
     }
 
+    .pb-vk {
+      background: rgba(0, 119, 255, .12);
+      color: #0077ff;
+    }
+
     /* ── DETAIL PANE ── */
     .dp-header {
       padding: 14px 16px;
@@ -902,6 +907,7 @@
       <option value="500PX">500px</option>
       <option value="FB">Facebook</option>
       <option value="35P">35photo</option>
+      <option value="VK">VK</option>
     </select>
     <input type="date" id="f-from" onchange="applyFilters()" title="From date">
     <span style="color:var(--muted)">→</span>
@@ -1012,6 +1018,10 @@
           <div class="dp-field" id="dp-35pwrap" style="display:none">
             <div class="dp-label">35photo URL</div>
             <div class="dp-value"><a class="dp-link" id="dp-35p" href="#" target="_blank">View on 35photo ↗</a></div>
+          </div>
+          <div class="dp-field" id="dp-vkwrap" style="display:none">
+            <div class="dp-label">VK URL</div>
+            <div class="dp-value"><a class="dp-link" id="dp-vk" href="#" target="_blank">View on VK ↗</a></div>
           </div>
           <div class="dp-field" id="dp-fbwrap" style="display:none">
             <div class="dp-label">Facebook Post URL</div>
@@ -1146,6 +1156,7 @@
               <label><input type="checkbox" id="p-500"> 500px</label>
               <label><input type="checkbox" id="p-fb"> Facebook</label>
               <label><input type="checkbox" id="p-35"> 35photo</label>
+              <label><input type="checkbox" id="p-vk"> VK</label>
             </div>
           </div>
           <div class="fg">
@@ -1395,7 +1406,7 @@
       if (!p) return '—';
       return p.split(',').map(x => {
         x = x.trim();
-        const c = { DA: 'pb-da', '500PX': 'pb-500px', FB: 'pb-fb', '35P': 'pb-35p' }[x] || '';
+        const c = { DA: 'pb-da', '500PX': 'pb-500px', FB: 'pb-fb', '35P': 'pb-35p', VK: 'pb-vk' }[x] || '';
         return `<span class="pb ${c}">${h(x)}</span>`;
       }).join('');
     }
@@ -1440,6 +1451,10 @@
       const u35 = document.getElementById('dp-35pwrap');
       u35.style.display = r.url_35p ? '' : 'none';
       if (r.url_35p) { document.getElementById('dp-35p').href = r.url_35p; }
+
+      const uvk = document.getElementById('dp-vkwrap');
+      uvk.style.display = r.url_vk ? '' : 'none';
+      if (r.url_vk) { document.getElementById('dp-vk').href = r.url_vk; }
 
       const ufb = document.getElementById('dp-fbwrap');
       ufb.style.display = r.url_fb ? '' : 'none';
@@ -1608,6 +1623,7 @@
       document.getElementById('p-500').checked = pls.includes('500PX');
       document.getElementById('p-fb').checked = pls.includes('FB');
       document.getElementById('p-35').checked = pls.includes('35P');
+      document.getElementById('p-vk').checked = pls.includes('VK');
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
@@ -1618,7 +1634,7 @@
       const nsfw = document.getElementById('m-nsfw').value.trim();
       if (!date) { toast('Please set a scheduled date', 'error'); return; }
       if (!nsfw) { toast('Please enter the Sta.sh NSFW URL', 'error'); return; }
-      const platforms = ['DA', '500PX', 'FB', '35P'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35'][i]).checked).join(',');
+      const platforms = ['DA', '500PX', 'FB', '35P', 'VK'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
 
       const existing = editId ? rows.find(r => r.upload_id === editId) : null;
