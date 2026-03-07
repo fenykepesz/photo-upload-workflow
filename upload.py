@@ -997,19 +997,47 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
 
     # Write caption AFTER photo — Facebook resets text when a photo is attached
     print("  Writing caption...")
+
+    # Diagnose: how many contenteditable/textbox elements exist after photo?
+    diag = page.evaluate("""() => {
+        const all = document.querySelectorAll('[contenteditable="true"]');
+        const results = [];
+        for (const el of all) {
+            const r = el.getBoundingClientRect();
+            results.push({
+                tag: el.tagName,
+                role: el.getAttribute('role'),
+                ariaLabel: el.getAttribute('aria-label'),
+                class: el.className?.substring(0, 60),
+                text: el.textContent?.substring(0, 40),
+                rect: {top: Math.round(r.top), left: Math.round(r.left),
+                       width: Math.round(r.width), height: Math.round(r.height)},
+                visible: r.width > 0 && r.height > 0
+            });
+        }
+        return results;
+    }""")
+    print(f"    Contenteditable elements found: {len(diag)}")
+    for i, d in enumerate(diag):
+        print(f"      [{i}] {d['tag']} role={d.get('role')} visible={d['visible']} "
+              f"rect={d['rect']} text='{d.get('text','')[:30]}' aria={d.get('ariaLabel')}")
+
     try:
         textbox = page.locator('[contenteditable="true"][role="textbox"]').first
-        # Playwright's fill() natively supports contenteditable — handles focus and input events
+        # Playwright's fill() natively supports contenteditable
         textbox.fill(caption, timeout=5000)
-        print(f"    Caption filled: {caption[:60]}{'...' if len(caption) > 60 else ''}")
+        # Verify the text was actually inserted
+        actual = textbox.inner_text(timeout=2000)
+        print(f"    fill() done. Textbox now contains: '{actual[:60]}'")
     except Exception as e1:
-        print(f"    fill() failed ({e1}), trying click + press_sequentially...")
+        print(f"    fill() failed: {e1}")
         try:
             textbox = page.locator('[contenteditable="true"][role="textbox"]').first
             textbox.click(timeout=3000)
             page.wait_for_timeout(500)
             textbox.press_sequentially(caption, delay=10)
-            print(f"    Caption typed: {caption[:60]}{'...' if len(caption) > 60 else ''}")
+            actual = textbox.inner_text(timeout=2000)
+            print(f"    press_sequentially() done. Textbox now contains: '{actual[:60]}'")
         except Exception as e2:
             print(f"    WARNING: Could not write caption: {e2}")
 
