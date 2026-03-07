@@ -1036,7 +1036,7 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
 
     # Submit — Facebook uses div[role="button"] with overlays that intercept clicks
-    # Use JS click to bypass overlay interception
+    # Use dispatch_event to bypass overlay interception
     print("  Posting...")
     try:
         # Check for "Next" button first (multi-step flow)
@@ -1046,13 +1046,35 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
             print("    Clicked Next")
             page.wait_for_timeout(3000)
 
-        # Click the "Post" button
-        post_btn = page.locator('[aria-label="Post"]')
-        if post_btn.count() > 0 and post_btn.first.is_visible():
-            post_btn.first.dispatch_event("click")
-            print("    Clicked Post")
+        # Discover what buttons are available after Next
+        buttons = page.evaluate("""() => {
+            const btns = document.querySelectorAll('[role="button"]');
+            const results = [];
+            for (const b of btns) {
+                const r = b.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    const label = b.getAttribute('aria-label') || b.textContent?.trim().substring(0, 40);
+                    if (label) results.push({label, top: Math.round(r.top), left: Math.round(r.left)});
+                }
+            }
+            return results;
+        }""")
+        print(f"    Available buttons: {buttons}")
+
+        # Try multiple possible labels for the submit button
+        post_btn = None
+        for label in ["Post", "Share", "Share now", "Publish"]:
+            candidate = page.locator(f'[aria-label="{label}"]')
+            if candidate.count() > 0 and candidate.first.is_visible():
+                post_btn = candidate.first
+                print(f"    Found submit button: '{label}'")
+                break
+
+        if post_btn:
+            post_btn.dispatch_event("click")
+            print("    Clicked submit")
         else:
-            return {"success": False, "url_fb": "", "error": "Could not find Post button"}
+            return {"success": False, "url_fb": "", "error": f"Could not find Post/Share button. Available: {[b['label'] for b in buttons[:10]]}"}
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not submit post: {e}"}
 
