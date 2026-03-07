@@ -996,50 +996,38 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
     page.wait_for_timeout(5000)
 
     # Write caption AFTER photo — Facebook resets text when a photo is attached
+    # Facebook has multiple textboxes; the caption is the topmost one (smallest top value)
     print("  Writing caption...")
-
-    # Diagnose: how many contenteditable/textbox elements exist after photo?
-    diag = page.evaluate("""() => {
-        const all = document.querySelectorAll('[contenteditable="true"]');
-        const results = [];
-        for (const el of all) {
-            const r = el.getBoundingClientRect();
-            results.push({
-                tag: el.tagName,
-                role: el.getAttribute('role'),
-                ariaLabel: el.getAttribute('aria-label'),
-                class: el.className?.substring(0, 60),
-                text: el.textContent?.substring(0, 40),
-                rect: {top: Math.round(r.top), left: Math.round(r.left),
-                       width: Math.round(r.width), height: Math.round(r.height)},
-                visible: r.width > 0 && r.height > 0
-            });
-        }
-        return results;
-    }""")
-    print(f"    Contenteditable elements found: {len(diag)}")
-    for i, d in enumerate(diag):
-        print(f"      [{i}] {d['tag']} role={d.get('role')} visible={d['visible']} "
-              f"rect={d['rect']} text='{d.get('text','')[:30]}' aria={d.get('ariaLabel')}")
-
     try:
-        textbox = page.locator('[contenteditable="true"][role="textbox"]').first
-        # Playwright's fill() natively supports contenteditable
-        textbox.fill(caption, timeout=5000)
-        # Verify the text was actually inserted
-        actual = textbox.inner_text(timeout=2000)
-        print(f"    fill() done. Textbox now contains: '{actual[:60]}'")
-    except Exception as e1:
-        print(f"    fill() failed: {e1}")
-        try:
-            textbox = page.locator('[contenteditable="true"][role="textbox"]').first
-            textbox.click(timeout=3000)
-            page.wait_for_timeout(500)
-            textbox.press_sequentially(caption, delay=10)
+        # Mark the topmost visible textbox with a data attribute so we can target it
+        marked = page.evaluate("""() => {
+            const boxes = document.querySelectorAll('[contenteditable="true"][role="textbox"]');
+            let topmost = null;
+            let minTop = Infinity;
+            for (const el of boxes) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 && r.top < minTop) {
+                    minTop = r.top;
+                    topmost = el;
+                }
+            }
+            if (topmost) {
+                topmost.setAttribute('data-fb-caption', 'true');
+                return {found: true, top: minTop};
+            }
+            return {found: false};
+        }""")
+        print(f"    Topmost textbox: {marked}")
+
+        if marked.get("found"):
+            textbox = page.locator('[data-fb-caption="true"]')
+            textbox.fill(caption, timeout=5000)
             actual = textbox.inner_text(timeout=2000)
-            print(f"    press_sequentially() done. Textbox now contains: '{actual[:60]}'")
-        except Exception as e2:
-            print(f"    WARNING: Could not write caption: {e2}")
+            print(f"    Caption filled: '{actual[:60]}'")
+        else:
+            print(f"    WARNING: No visible textbox found")
+    except Exception as e:
+        print(f"    WARNING: Could not write caption: {e}")
 
     page.wait_for_timeout(1000)
 
