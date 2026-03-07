@@ -213,7 +213,8 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 ### Facebook
 
 - Posts a photo with the **title as caption** to the user's **personal timeline**
-- Uses the safe image (`stash_url_safe`) when available, falls back to `stash_url_nsfw`
+- **NSFW safety:** If `da_nsfw_flag` is `TRUE`, only the safe image (`stash_url_safe`) is used — if missing, the upload **fails** (NSFW photos are never uploaded to Facebook)
+- For non-NSFW photos, uses the standard `stash_url_nsfw` image
 - Uses the browser "Create post" flow: open composer, write caption, attach photo, post
 - No API app registration needed — uses existing browser session cookies
 

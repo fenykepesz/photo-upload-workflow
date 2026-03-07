@@ -1895,22 +1895,48 @@ def main():
                         print(f"\n  FB: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── Facebook Upload ──")
-                        # Download image from Sta.sh if not already downloaded
-                        # Prefer stash_url_safe for Facebook, fall back to stash_url_nsfw
-                        if not image_path:
-                            stash_url = row.get("stash_url_safe", "").strip() or row.get("stash_url_nsfw", "").strip()
-                            if stash_url:
-                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                        is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+
+                        # NSFW safety: never upload NSFW image to Facebook
+                        # If NSFW, require stash_url_safe; if missing, fail hard
+                        if is_nsfw:
+                            safe_url = row.get("stash_url_safe", "").strip()
+                            if not safe_url:
+                                result_fb = {"success": False, "url_fb": "",
+                                             "error": "NSFW photo has no stash_url_safe — refusing to upload to Facebook"}
                             else:
-                                print("  WARNING: No Sta.sh URL — cannot download image")
+                                # Download the safe version specifically for FB
+                                fb_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
+                                fb_caption = row.get("title", "")
+                                print(f"    Caption: {fb_caption}")
+                                print(f"    Using safe image (NSFW flag set)")
+                                try:
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, args.no_submit)
+                                except Exception as e:
+                                    result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
+                                finally:
+                                    # Clean up the separate safe image
+                                    if fb_image_path and Path(fb_image_path).exists():
+                                        try:
+                                            Path(fb_image_path).unlink()
+                                        except Exception:
+                                            pass
+                        else:
+                            # Non-NSFW: use the regular image (already downloaded or download now)
+                            if not image_path:
+                                stash_url = row.get("stash_url_nsfw", "").strip()
+                                if stash_url:
+                                    image_path = download_stash_image(page, stash_url, row["upload_id"])
+                                else:
+                                    print("  WARNING: No Sta.sh URL — cannot download image")
 
-                        fb_caption = row.get("title", "")
-                        print(f"    Caption: {fb_caption}")
+                            fb_caption = row.get("title", "")
+                            print(f"    Caption: {fb_caption}")
 
-                        try:
-                            result_fb = upload_to_fb(page, fb_caption, image_path, args.no_submit)
-                        except Exception as e:
-                            result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
+                            try:
+                                result_fb = upload_to_fb(page, fb_caption, image_path, args.no_submit)
+                            except Exception as e:
+                                result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
 
                         if result_fb["success"]:
                             ok_fb = True
