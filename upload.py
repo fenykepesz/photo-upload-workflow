@@ -931,7 +931,7 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
 def upload_to_fb(page, caption, image_path, no_submit=False):
     """
     Post a photo with caption to Facebook personal timeline via browser automation.
-    Flow: home → open composer → write caption → attach photo → Next → Post.
+    Flow: home → open composer → attach photo → write caption → Next → Post.
     Returns {"success": bool, "url_fb": str, "error": str}
     """
     if not image_path or not Path(image_path).exists():
@@ -963,26 +963,7 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not open composer: {e}"}
 
-    # Write caption — click the textbox and type via keyboard
-    # Facebook's custom editor ignores execCommand('insertText'), so we use keyboard input
-    print("  Writing caption...")
-    try:
-        # Find and click the contenteditable textbox in the modal
-        textbox = page.locator('[contenteditable="true"][role="textbox"]')
-        if textbox.count() > 0:
-            textbox.first.click(timeout=3000)
-        else:
-            # Fallback: click the placeholder text
-            page.locator('text="What\'s on your mind"').first.click(timeout=3000)
-        page.wait_for_timeout(500)
-        page.keyboard.type(caption, delay=10)
-        print(f"    Caption typed: {caption[:60]}{'...' if len(caption) > 60 else ''}")
-    except Exception as e:
-        print(f"    WARNING: Could not write caption: {e}")
-
-    page.wait_for_timeout(1000)
-
-    # Attach photo — click the photo/video icon in "Add to your post" toolbar
+    # Attach photo FIRST — Facebook resets the text area when a photo is added
     print("  Uploading photo...")
     try:
         # Try direct file input first (Facebook often has hidden file inputs)
@@ -1013,6 +994,22 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
     # Wait for photo to upload/process
     print("  Waiting for photo to process...")
     page.wait_for_timeout(5000)
+
+    # Write caption AFTER photo — Facebook resets text when a photo is attached
+    print("  Writing caption...")
+    try:
+        textbox = page.locator('[contenteditable="true"][role="textbox"]')
+        if textbox.count() > 0:
+            textbox.first.click(timeout=3000)
+        else:
+            page.locator('text="What\'s on your mind"').first.click(timeout=3000)
+        page.wait_for_timeout(500)
+        page.keyboard.type(caption, delay=10)
+        print(f"    Caption typed: {caption[:60]}{'...' if len(caption) > 60 else ''}")
+    except Exception as e:
+        print(f"    WARNING: Could not write caption: {e}")
+
+    page.wait_for_timeout(1000)
 
     if no_submit:
         print("  --no-submit: skipping post")
