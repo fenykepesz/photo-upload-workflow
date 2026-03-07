@@ -1035,61 +1035,68 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         print("  --no-submit: skipping post")
         return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
 
-    # Submit — Facebook's overlay blocks Playwright clicks and dispatch_event
-    # doesn't trigger React handlers. Use JS element.click() + keyboard Enter as fallback.
+    # Submit — Facebook has an overlay that intercepts all pointer events.
+    # Disable pointer-events on overlay elements, then click normally.
     print("  Posting...")
-    try:
-        # Click "Next" via JS .click() — this triggers the full event chain that React picks up
-        clicked = page.evaluate("""() => {
-            const btns = document.querySelectorAll('[aria-label="Next"]');
-            for (const btn of btns) {
-                const r = btn.getBoundingClientRect();
-                if (r.width > 0 && r.height > 0) {
-                    btn.click();
-                    return {clicked: true, top: Math.round(r.top)};
+
+    def fb_click_button(label):
+        """Click a Facebook button by aria-label, disabling overlays first."""
+        # Disable pointer-events on overlay elements that block clicks
+        page.evaluate("""() => {
+            // Target the known overlay classes and any fixed/absolute overlays
+            const all = document.querySelectorAll('div');
+            for (const el of all) {
+                const style = window.getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                // Large overlay divs that cover the modal
+                if (r.width > 400 && r.height > 400 &&
+                    !el.querySelector('[aria-label]') &&
+                    el.childElementCount === 0) {
+                    el.style.pointerEvents = 'none';
                 }
             }
-            return {clicked: false};
         }""")
-        print(f"    Next JS click: {clicked}")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(300)
+        btn = page.locator(f'[aria-label="{label}"]')
+        if btn.count() > 0 and btn.first.is_visible():
+            btn.first.click(timeout=5000)
+            return True
+        return False
 
-        # Check if modal is still open — if Next didn't work, try focus+Enter
-        still_has_next = page.locator('[aria-label="Next"]')
-        if still_has_next.count() > 0 and still_has_next.first.is_visible():
-            print("    Next still visible — trying focus + Enter...")
-            still_has_next.first.focus()
-            page.wait_for_timeout(300)
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(3000)
+    try:
+        # Click "Next" button
+        next_btn = page.locator('[aria-label="Next"]')
+        if next_btn.count() > 0 and next_btn.first.is_visible():
+            if fb_click_button("Next"):
+                print("    Clicked Next")
+            else:
+                print("    WARNING: Could not click Next")
+            page.wait_for_timeout(5000)
 
-        # Check again if modal closed
-        still_has_next2 = page.locator('[aria-label="Next"]')
-        if still_has_next2.count() > 0 and still_has_next2.first.is_visible():
-            print("    Next STILL visible — trying Tab to focus + Enter...")
-            # Tab through until Next is focused, then press Enter
-            for _ in range(10):
-                page.keyboard.press("Tab")
-                page.wait_for_timeout(100)
-                focused_label = page.evaluate("() => document.activeElement?.getAttribute('aria-label')")
-                if focused_label == "Next":
-                    page.keyboard.press("Enter")
-                    print("    Pressed Enter on focused Next button")
-                    page.wait_for_timeout(3000)
+        # Check if modal is gone (Next was the final submit)
+        next_still = page.locator('[aria-label="Next"]')
+        modal_gone = next_still.count() == 0 or not next_still.first.is_visible()
+
+        if modal_gone:
+            print("    Modal closed — post submitted via Next")
+        else:
+            # Try Post/Share button (if there's a second step)
+            submitted = False
+            for label in ["Post", "Share", "Share now", "Publish"]:
+                if fb_click_button(label):
+                    print(f"    Clicked '{label}'")
+                    submitted = True
                     break
 
-        # After Next, look for Post/Share button (if there's a second step)
-        post_btn = None
-        for label in ["Post", "Share", "Share now", "Publish"]:
-            candidate = page.locator(f'[aria-label="{label}"]')
-            if candidate.count() > 0 and candidate.first.is_visible():
-                post_btn = candidate.first
-                print(f"    Found submit button: '{label}'")
-                break
-
-        if post_btn:
-            post_btn.click(force=True, timeout=5000)
-            print("    Clicked submit")
+            if not submitted:
+                buttons = page.evaluate("""() => {
+                    const btns = document.querySelectorAll('[role="button"]');
+                    return Array.from(btns)
+                        .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+                        .map(b => b.getAttribute('aria-label') || b.textContent?.trim().substring(0, 30))
+                        .filter(Boolean).slice(0, 15);
+                }""")
+                return {"success": False, "url_fb": "", "error": f"Could not submit. Buttons: {buttons}"}
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not submit post: {e}"}
 
