@@ -1035,9 +1035,7 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         print("  --no-submit: skipping post")
         return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
 
-    # Submit — Facebook uses React event delegation, so dispatch_event doesn't work.
-    # Use Playwright's .click(force=True) to bypass overlay interception while still
-    # generating real pointer events that React can detect.
+    # Submit — Facebook uses React; need .click(force=True) to bypass overlay
     print("  Posting...")
     try:
         # Click "Next" button (force=True bypasses overlay interception)
@@ -1045,11 +1043,16 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         if next_btn.count() > 0 and next_btn.first.is_visible():
             next_btn.first.click(force=True, timeout=5000)
             print("    Clicked Next")
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
 
-        # Try multiple possible labels for the submit button
+            # Screenshot after Next for debugging
+            shot = SCRIPT_DIR / "debug_fb_after_next.png"
+            page.screenshot(path=str(shot))
+            print(f"    Screenshot saved: {shot}")
+
+        # Try multiple possible labels for the submit button (NOT "Next")
         post_btn = None
-        for label in ["Post", "Share", "Share now", "Publish", "Next"]:
+        for label in ["Post", "Share", "Share now", "Publish"]:
             candidate = page.locator(f'[aria-label="{label}"]')
             if candidate.count() > 0 and candidate.first.is_visible():
                 post_btn = candidate.first
