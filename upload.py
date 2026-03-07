@@ -30,7 +30,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 
 COLS = [
@@ -299,6 +299,10 @@ def print_dry_run(rows, config):
             already = row.get("url_x", "").strip()
             if already:
                 print(f"  X URL:       {already} (already uploaded — will skip)")
+        if "FB" in platforms:
+            already = row.get("url_fb", "").strip()
+            if already:
+                print(f"  FB URL:      {already} (already uploaded — will skip)")
         if "DA" in platforms:
             already = row.get("da_deviation_url", "").strip()
             if already:
@@ -923,6 +927,200 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
     return {"success": True, "url_x": "UPLOADED", "error": ""}
 
 
+# ── Facebook Upload ──────────────────────────────────────────────
+def upload_to_fb(page, caption, image_path, no_submit=False):
+    """
+    Post a photo with caption to Facebook personal timeline via browser automation.
+    Flow: home → open composer → attach photo → write caption → Next → Post.
+    Returns {"success": bool, "url_fb": str, "error": str}
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_fb": "", "error": "No image file available"}
+
+    # Navigate to Facebook
+    print("  Opening Facebook...")
+    try:
+        page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=30000)
+    except PlaywrightTimeout:
+        return {"success": False, "url_fb": "", "error": "Timeout loading Facebook"}
+    page.wait_for_timeout(3000)
+
+    # Check if logged in
+    if "/login" in page.url:
+        return {"success": False, "url_fb": "", "error": "Not logged into Facebook — run --login first"}
+
+    # Open the Create Post composer
+    print("  Opening composer...")
+    try:
+        # Click the "What's on your mind" trigger bar
+        composer_trigger = page.locator(
+            '[role="button"]:has-text("What\'s on your mind"), '
+            '[aria-label*="Create a post"], '
+            '[aria-label*="What\'s on your mind"]'
+        ).first
+        composer_trigger.click(timeout=5000)
+        page.wait_for_timeout(2000)
+    except Exception as e:
+        return {"success": False, "url_fb": "", "error": f"Could not open composer: {e}"}
+
+    # Attach photo FIRST — Facebook resets the text area when a photo is added
+    print("  Uploading photo...")
+    try:
+        # Try direct file input first (Facebook often has hidden file inputs)
+        file_input = page.locator('input[type="file"][accept*="image"]')
+        if file_input.count() > 0:
+            file_input.first.set_input_files(image_path)
+            print(f"    Photo attached via file input")
+        else:
+            # Click the photo/video button to trigger file chooser
+            with page.expect_file_chooser(timeout=5000) as fc_info:
+                photo_btn = page.locator(
+                    '[aria-label="Photo/video"], [aria-label="Photo/Video"], '
+                    '[aria-label*="photo"], [aria-label*="Photo"]'
+                ).first
+                photo_btn.click(timeout=3000)
+            file_chooser = fc_info.value
+            file_chooser.set_files(image_path)
+            print(f"    Photo attached via file chooser")
+    except Exception as e:
+        # Last fallback: try any file input that appeared
+        file_input = page.locator('input[type="file"]')
+        if file_input.count() > 0:
+            file_input.first.set_input_files(image_path)
+            print(f"    Fallback: photo set on input directly")
+        else:
+            return {"success": False, "url_fb": "", "error": f"Could not attach photo: {e}"}
+
+    # Wait for photo to upload/process
+    print("  Waiting for photo to process...")
+    page.wait_for_timeout(5000)
+
+    # Write caption AFTER photo — Facebook resets text when a photo is attached
+    # Facebook has multiple textboxes; the caption is the topmost one (smallest top value)
+    print("  Writing caption...")
+    try:
+        # Mark the topmost visible textbox with a data attribute so we can target it
+        marked = page.evaluate("""() => {
+            const boxes = document.querySelectorAll('[contenteditable="true"][role="textbox"]');
+            let topmost = null;
+            let minTop = Infinity;
+            for (const el of boxes) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 && r.top < minTop) {
+                    minTop = r.top;
+                    topmost = el;
+                }
+            }
+            if (topmost) {
+                topmost.setAttribute('data-fb-caption', 'true');
+                return {found: true, top: minTop};
+            }
+            return {found: false};
+        }""")
+        if marked.get("found"):
+            textbox = page.locator('[data-fb-caption="true"]')
+            textbox.fill(caption, timeout=5000)
+            print(f"    Caption: '{caption[:60]}'")
+        else:
+            print(f"    WARNING: No visible textbox found")
+    except Exception as e:
+        print(f"    WARNING: Could not write caption: {e}")
+
+    page.wait_for_timeout(1000)
+
+    if no_submit:
+        print("  --no-submit: skipping post")
+        return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
+
+    # Submit — Facebook has overlay divs that intercept pointer events.
+    # Use elementsFromPoint() to find and disable ALL overlays above the button.
+    print("  Posting...")
+
+    def fb_clear_and_click(aria_label):
+        """Find an enabled button by aria-label, disable overlays above it, then click."""
+        info = page.evaluate("""(label) => {
+            const btns = document.querySelectorAll('[aria-label="' + label + '"]');
+            if (btns.length === 0) return {found: false, reason: 'no elements'};
+            // Find the first visible AND enabled button
+            let target = null;
+            for (const btn of btns) {
+                const r = btn.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 &&
+                    btn.getAttribute('aria-disabled') !== 'true') {
+                    target = btn;
+                    break;
+                }
+            }
+            if (!target) return {found: false, reason: 'none enabled'};
+            const rect = target.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            // Get the full element stack at the click point (top to bottom)
+            const stack = document.elementsFromPoint(cx, cy);
+            let cleared = 0;
+            for (const el of stack) {
+                if (el === target || target.contains(el) || el.contains(target)) break;
+                el.style.pointerEvents = 'none';
+                cleared++;
+            }
+            return {found: true, top: rect.top, cleared: cleared};
+        }""", aria_label)
+        if not info.get("found"):
+            return False
+        page.wait_for_timeout(300)
+        # Click the enabled button (skip disabled ones)
+        btns = page.locator(f'[aria-label="{aria_label}"]')
+        for i in range(btns.count()):
+            btn = btns.nth(i)
+            if btn.is_visible() and btn.get_attribute("aria-disabled") != "true":
+                btn.click(timeout=5000)
+                return True
+        return False
+
+    try:
+        # Try Post/Share first (standard post flow), then Next (multi-step flow)
+        submitted = False
+        for label in ["Post", "Share", "Share now", "Publish", "Next"]:
+            try:
+                if fb_clear_and_click(label):
+                    print(f"    Clicked '{label}'")
+                    submitted = True
+                    page.wait_for_timeout(3000)
+                    break
+            except Exception:
+                continue
+
+        if submitted:
+            # If we clicked Next, check if there's a second step
+            # (look for Post/Share button after Next)
+            for label in ["Post", "Share", "Share now", "Publish"]:
+                try:
+                    if fb_clear_and_click(label):
+                        print(f"    Clicked '{label}'")
+                        break
+                except Exception:
+                    continue
+        else:
+            # Dump available buttons for debugging
+            buttons = page.evaluate("""() => {
+                return Array.from(document.querySelectorAll('[role="button"]'))
+                    .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+                    .map(b => {
+                        const label = b.getAttribute('aria-label') || b.textContent?.trim().substring(0, 30);
+                        const disabled = b.getAttribute('aria-disabled') === 'true' ? ' (disabled)' : '';
+                        return label ? label + disabled : null;
+                    })
+                    .filter(Boolean).slice(0, 20);
+            }""")
+            return {"success": False, "url_fb": "", "error": f"Could not submit. Buttons: {buttons}"}
+    except Exception as e:
+        return {"success": False, "url_fb": "", "error": f"Could not submit post: {e}"}
+
+    page.wait_for_timeout(5000)
+    print("  Facebook post published")
+    return {"success": True, "url_fb": "UPLOADED", "error": ""}
+
+
 # ── DA Upload ─────────────────────────────────────────────────
 def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     """
@@ -1506,6 +1704,10 @@ def main():
             input()
             page.goto("https://x.com/login", wait_until="domcontentloaded", timeout=30000)
             print("Log into X.com in the browser window.")
+            print("Press ENTER when done (will open Facebook next)...")
+            input()
+            page.goto("https://www.facebook.com/login", wait_until="domcontentloaded", timeout=30000)
+            print("Log into Facebook in the browser window.")
             print("Press ENTER when done (will open DeviantArt next)...")
             input()
             page.goto("https://www.deviantart.com/users/login", wait_until="domcontentloaded", timeout=30000)
@@ -1576,6 +1778,7 @@ def main():
                 ok_35p = False
                 ok_vk = False
                 ok_x = False
+                ok_fb = False
                 ok_da = False
 
                 # ── 500PX (must run before DA) ────────────────────
@@ -1739,6 +1942,69 @@ def main():
                         if url_x and url_x not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_x": url_x})
 
+                # ── FB (between X and DA) ───────────────────────
+                if "FB" in platforms:
+                    already = row.get("url_fb", "").strip()
+                    if already:
+                        print(f"\n  FB: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── Facebook Upload ──")
+                        is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+
+                        # NSFW safety: never upload NSFW image to Facebook
+                        # If NSFW, require stash_url_safe; if missing, fail hard
+                        if is_nsfw:
+                            safe_url = row.get("stash_url_safe", "").strip()
+                            if not safe_url:
+                                result_fb = {"success": False, "url_fb": "",
+                                             "error": "NSFW photo has no stash_url_safe — refusing to upload to Facebook"}
+                            else:
+                                # Download the safe version specifically for FB
+                                fb_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
+                                fb_caption = row.get("title", "")
+                                print(f"    Caption: {fb_caption}")
+                                print(f"    Using safe image (NSFW flag set)")
+                                try:
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, args.no_submit)
+                                except Exception as e:
+                                    result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
+                                finally:
+                                    # Clean up the separate safe image
+                                    if fb_image_path and Path(fb_image_path).exists():
+                                        try:
+                                            Path(fb_image_path).unlink()
+                                        except Exception:
+                                            pass
+                        else:
+                            # Non-NSFW: use the regular image (already downloaded or download now)
+                            if not image_path:
+                                stash_url = row.get("stash_url_nsfw", "").strip()
+                                if stash_url:
+                                    image_path = download_stash_image(page, stash_url, row["upload_id"])
+                                else:
+                                    print("  WARNING: No Sta.sh URL — cannot download image")
+
+                            fb_caption = row.get("title", "")
+                            print(f"    Caption: {fb_caption}")
+
+                            try:
+                                result_fb = upload_to_fb(page, fb_caption, image_path, args.no_submit)
+                            except Exception as e:
+                                result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
+
+                        if result_fb["success"]:
+                            ok_fb = True
+                            print(f"  FB: SUCCESS — {result_fb.get('url_fb', '')}")
+                        else:
+                            err = result_fb.get("error", "unknown")
+                            print(f"  FB: FAILED — {err}")
+                            errors.append(f"FB: {err}")
+
+                        # Update CSV with FB result
+                        url_fb = result_fb.get("url_fb", "")
+                        if url_fb and url_fb not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"url_fb": url_fb})
+
                 # ── DA (must run last — consumes Sta.sh) ──────────
                 if "DA" in platforms:
                     already = row.get("da_deviation_url", "").strip()
@@ -1799,6 +2065,8 @@ def main():
                         done_platforms.add("VK")
                     if "X" in platforms and (ok_x or fresh_row.get("url_x", "").strip()):
                         done_platforms.add("X")
+                    if "FB" in platforms and (ok_fb or fresh_row.get("url_fb", "").strip()):
+                        done_platforms.add("FB")
                     if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
                         done_platforms.add("DA")
 
@@ -1831,6 +2099,9 @@ def main():
                 if "X" in platforms:
                     s = "done" if ok_x or row.get("url_x", "").strip() else "failed"
                     summary_detail.append(f"X:{s}")
+                if "FB" in platforms:
+                    s = "done" if ok_fb or row.get("url_fb", "").strip() else "failed"
+                    summary_detail.append(f"FB:{s}")
                 if "DA" in platforms:
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")
