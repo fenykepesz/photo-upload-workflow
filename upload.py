@@ -998,16 +998,20 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
     # Write caption AFTER photo — Facebook resets text when a photo is attached
     print("  Writing caption...")
     try:
-        textbox = page.locator('[contenteditable="true"][role="textbox"]')
-        if textbox.count() > 0:
-            textbox.first.click(timeout=3000)
-        else:
-            page.locator('text="What\'s on your mind"').first.click(timeout=3000)
-        page.wait_for_timeout(500)
-        page.keyboard.type(caption, delay=10)
-        print(f"    Caption typed: {caption[:60]}{'...' if len(caption) > 60 else ''}")
-    except Exception as e:
-        print(f"    WARNING: Could not write caption: {e}")
+        textbox = page.locator('[contenteditable="true"][role="textbox"]').first
+        # Playwright's fill() natively supports contenteditable — handles focus and input events
+        textbox.fill(caption, timeout=5000)
+        print(f"    Caption filled: {caption[:60]}{'...' if len(caption) > 60 else ''}")
+    except Exception as e1:
+        print(f"    fill() failed ({e1}), trying click + press_sequentially...")
+        try:
+            textbox = page.locator('[contenteditable="true"][role="textbox"]').first
+            textbox.click(timeout=3000)
+            page.wait_for_timeout(500)
+            textbox.press_sequentially(caption, delay=10)
+            print(f"    Caption typed: {caption[:60]}{'...' if len(caption) > 60 else ''}")
+        except Exception as e2:
+            print(f"    WARNING: Could not write caption: {e2}")
 
     page.wait_for_timeout(1000)
 
