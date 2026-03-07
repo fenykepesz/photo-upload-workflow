@@ -1019,21 +1019,22 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         print("  --no-submit: skipping post")
         return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
 
-    # Submit — Facebook may have a "Next" step then "Post", or direct "Post"
+    # Submit — Facebook uses div[role="button"] with overlays that intercept clicks
+    # Use JS click to bypass overlay interception
     print("  Posting...")
     try:
-        # Check for "Next" button first (multi-step flow from screenshots)
-        next_btn = page.locator('button:has-text("Next"), [aria-label="Next"]')
+        # Check for "Next" button first (multi-step flow)
+        next_btn = page.locator('[aria-label="Next"]')
         if next_btn.count() > 0 and next_btn.first.is_visible():
-            next_btn.first.click(timeout=5000)
-            page.wait_for_timeout(2000)
+            next_btn.first.dispatch_event("click")
+            print("    Clicked Next")
+            page.wait_for_timeout(3000)
 
         # Click the "Post" button
-        post_btn = page.locator(
-            '[aria-label="Post"], button:has-text("Post")'
-        )
-        if post_btn.count() > 0:
-            post_btn.first.click(timeout=5000)
+        post_btn = page.locator('[aria-label="Post"]')
+        if post_btn.count() > 0 and post_btn.first.is_visible():
+            post_btn.first.dispatch_event("click")
+            print("    Clicked Post")
         else:
             return {"success": False, "url_fb": "", "error": "Could not find Post button"}
     except Exception as e:
