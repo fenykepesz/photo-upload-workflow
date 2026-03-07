@@ -963,44 +963,20 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not open composer: {e}"}
 
-    # Write caption — find the contenteditable text area in the modal
+    # Write caption — click the textbox and type via keyboard
+    # Facebook's custom editor ignores execCommand('insertText'), so we use keyboard input
     print("  Writing caption...")
     try:
-        caption_ok = page.evaluate("""(text) => {
-            const vh = window.innerHeight;
-            // Look for contenteditable inside the Create Post modal/dialog
-            const candidates = document.querySelectorAll(
-                '[contenteditable="true"][role="textbox"], [contenteditable="true"]'
-            );
-            let best = null;
-            let bestArea = 0;
-            for (const el of candidates) {
-                const r = el.getBoundingClientRect();
-                if (r.width > 100 && r.height > 15 && r.top > 50 && r.top < vh) {
-                    const area = r.width * r.height;
-                    if (area > bestArea) {
-                        best = el;
-                        bestArea = area;
-                    }
-                }
-            }
-            if (best) {
-                best.focus();
-                best.click();
-                document.execCommand('insertText', false, text);
-                return {found: true, tag: best.tagName, class: best.className?.substring(0, 80),
-                        rect: {top: best.getBoundingClientRect().top,
-                               width: best.getBoundingClientRect().width}};
-            }
-            return {found: false};
-        }""", caption)
-        print(f"    Compose area: {caption_ok}")
-        if not caption_ok.get("found"):
-            # Fallback: click placeholder text and type
-            placeholder = page.locator('text="What\'s on your mind"').first
-            placeholder.click(timeout=3000)
-            page.wait_for_timeout(300)
-            page.keyboard.type(caption, delay=10)
+        # Find and click the contenteditable textbox in the modal
+        textbox = page.locator('[contenteditable="true"][role="textbox"]')
+        if textbox.count() > 0:
+            textbox.first.click(timeout=3000)
+        else:
+            # Fallback: click the placeholder text
+            page.locator('text="What\'s on your mind"').first.click(timeout=3000)
+        page.wait_for_timeout(500)
+        page.keyboard.type(caption, delay=10)
+        print(f"    Caption typed: {caption[:60]}{'...' if len(caption) > 60 else ''}")
     except Exception as e:
         print(f"    WARNING: Could not write caption: {e}")
 
