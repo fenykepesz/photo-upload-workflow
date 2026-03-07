@@ -1136,6 +1136,10 @@
                 etc.)</span></label>
             <input type="url" id="m-safe" placeholder="https://sta.sh/0xxxxxxxxxx">
           </div>
+          <div class="fg">
+            <label>Mature Content</label>
+            <div class="chk-row"><input type="checkbox" id="m-nsfw-flag"><span>Mark as Mature / NSFW</span></div>
+          </div>
 
           <div class="form-section">Metadata</div>
           <div class="form-full">
@@ -1182,14 +1186,10 @@
             </div>
           </div>
           <div class="fg">
-            <label>DeviantArt Mature Content</label>
-            <div class="chk-row"><input type="checkbox" id="m-nsfw-flag"><span>Mark as Mature / NSFW on DA</span></div>
-          </div>
-          <div class="fg">
             <label>Status</label>
             <select id="m-status">
               <option>Pending</option>
-              <option>Approved</option>
+              <option selected>Approved</option>
               <option>Skipped</option>
             </select>
           </div>
@@ -1594,7 +1594,7 @@
 
       document.getElementById('m-time').value = '10:00';
       document.getElementById('m-nsfw-flag').checked = false;
-      document.getElementById('m-status').value = 'Pending';
+      document.getElementById('m-status').value = 'Approved';
       document.getElementById('m-cat-500px').value = '';
       document.getElementById('m-cat-35p').value = '';
       ['p-da', 'p-500', 'p-fb', 'p-35'].forEach(id => document.getElementById(id).checked = false);
@@ -1684,7 +1684,7 @@
         category_35p: document.getElementById('m-cat-35p').value,
         caption_fb: document.getElementById('m-caption-fb').value.trim(),
         platforms,
-        status: document.getElementById('m-status').value || 'Pending',
+        status: document.getElementById('m-status').value || 'Approved',
         model_name: document.getElementById('m-model-name').value.trim(),
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
@@ -1732,6 +1732,11 @@
       c.appendChild(el);
       setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 350); }, 3500);
     }
+    document.getElementById('m-safe').addEventListener('input', function() {
+      if (this.value.trim()) {
+        document.getElementById('m-nsfw-flag').checked = true;
+      }
+    });
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         if (document.getElementById('overlay').classList.contains('open')) closeModal();
