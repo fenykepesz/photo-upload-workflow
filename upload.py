@@ -1035,22 +1035,50 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         print("  --no-submit: skipping post")
         return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
 
-    # Submit — Facebook uses React; need .click(force=True) to bypass overlay
+    # Submit — Facebook's overlay blocks Playwright clicks and dispatch_event
+    # doesn't trigger React handlers. Use JS element.click() + keyboard Enter as fallback.
     print("  Posting...")
     try:
-        # Click "Next" button (force=True bypasses overlay interception)
-        next_btn = page.locator('[aria-label="Next"]')
-        if next_btn.count() > 0 and next_btn.first.is_visible():
-            next_btn.first.click(force=True, timeout=5000)
-            print("    Clicked Next")
-            page.wait_for_timeout(5000)
+        # Click "Next" via JS .click() — this triggers the full event chain that React picks up
+        clicked = page.evaluate("""() => {
+            const btns = document.querySelectorAll('[aria-label="Next"]');
+            for (const btn of btns) {
+                const r = btn.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    btn.click();
+                    return {clicked: true, top: Math.round(r.top)};
+                }
+            }
+            return {clicked: false};
+        }""")
+        print(f"    Next JS click: {clicked}")
+        page.wait_for_timeout(3000)
 
-            # Screenshot after Next for debugging
-            shot = SCRIPT_DIR / "debug_fb_after_next.png"
-            page.screenshot(path=str(shot))
-            print(f"    Screenshot saved: {shot}")
+        # Check if modal is still open — if Next didn't work, try focus+Enter
+        still_has_next = page.locator('[aria-label="Next"]')
+        if still_has_next.count() > 0 and still_has_next.first.is_visible():
+            print("    Next still visible — trying focus + Enter...")
+            still_has_next.first.focus()
+            page.wait_for_timeout(300)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(3000)
 
-        # Try multiple possible labels for the submit button (NOT "Next")
+        # Check again if modal closed
+        still_has_next2 = page.locator('[aria-label="Next"]')
+        if still_has_next2.count() > 0 and still_has_next2.first.is_visible():
+            print("    Next STILL visible — trying Tab to focus + Enter...")
+            # Tab through until Next is focused, then press Enter
+            for _ in range(10):
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(100)
+                focused_label = page.evaluate("() => document.activeElement?.getAttribute('aria-label')")
+                if focused_label == "Next":
+                    page.keyboard.press("Enter")
+                    print("    Pressed Enter on focused Next button")
+                    page.wait_for_timeout(3000)
+                    break
+
+        # After Next, look for Post/Share button (if there's a second step)
         post_btn = None
         for label in ["Post", "Share", "Share now", "Publish"]:
             candidate = page.locator(f'[aria-label="{label}"]')
@@ -1062,21 +1090,6 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
         if post_btn:
             post_btn.click(force=True, timeout=5000)
             print("    Clicked submit")
-        else:
-            # Log available buttons for debugging
-            buttons = page.evaluate("""() => {
-                const btns = document.querySelectorAll('[role="button"]');
-                const results = [];
-                for (const b of btns) {
-                    const r = b.getBoundingClientRect();
-                    if (r.width > 0 && r.height > 0) {
-                        const label = b.getAttribute('aria-label') || b.textContent?.trim().substring(0, 40);
-                        if (label) results.push(label);
-                    }
-                }
-                return results.slice(0, 15);
-            }""")
-            return {"success": False, "url_fb": "", "error": f"Could not find Post/Share button. Available: {buttons}"}
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not submit post: {e}"}
 
