@@ -459,6 +459,11 @@
       color: #000;
     }
 
+    .pb-bsky {
+      background: rgba(32, 139, 254, .12);
+      color: #208bfe;
+    }
+
     /* ── DETAIL PANE ── */
     .dp-header {
       padding: 14px 16px;
@@ -914,6 +919,7 @@
       <option value="35P">35photo</option>
       <option value="VK">VK</option>
       <option value="X">X (Twitter)</option>
+      <option value="BSKY">Bluesky</option>
     </select>
     <input type="date" id="f-from" onchange="applyFilters()" title="From date">
     <span style="color:var(--muted)">→</span>
@@ -1032,6 +1038,10 @@
           <div class="dp-field" id="dp-xwrap" style="display:none">
             <div class="dp-label">X URL</div>
             <div class="dp-value"><a class="dp-link" id="dp-x" href="#" target="_blank">View on X ↗</a></div>
+          </div>
+          <div class="dp-field" id="dp-bskywrap" style="display:none">
+            <div class="dp-label">Bluesky URL</div>
+            <div class="dp-value"><a class="dp-link" id="dp-bsky" href="#" target="_blank">View on Bluesky ↗</a></div>
           </div>
           <div class="dp-field" id="dp-fbwrap" style="display:none">
             <div class="dp-label">Facebook Post URL</div>
@@ -1168,6 +1178,7 @@
               <label><input type="checkbox" id="p-35"> 35photo</label>
               <label><input type="checkbox" id="p-vk"> VK</label>
               <label><input type="checkbox" id="p-x"> X</label>
+              <label><input type="checkbox" id="p-bsky"> Bluesky</label>
             </div>
           </div>
           <div class="fg">
@@ -1278,7 +1289,7 @@
       'stash_url_nsfw', 'stash_url_safe', 'title', 'caption', 'keywords',
       'da_nsfw_flag', 'category_500px', 'category_35p', 'caption_fb',
       'platforms', 'status', 'upload_timestamp',
-      'da_deviation_url', 'url_500px', 'url_35p', 'url_fb',
+      'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
@@ -1417,7 +1428,7 @@
       if (!p) return '—';
       return p.split(',').map(x => {
         x = x.trim();
-        const c = { DA: 'pb-da', '500PX': 'pb-500px', FB: 'pb-fb', '35P': 'pb-35p', VK: 'pb-vk', X: 'pb-x' }[x] || '';
+        const c = { DA: 'pb-da', '500PX': 'pb-500px', FB: 'pb-fb', '35P': 'pb-35p', VK: 'pb-vk', X: 'pb-x', BSKY: 'pb-bsky' }[x] || '';
         return `<span class="pb ${c}">${h(x)}</span>`;
       }).join('');
     }
@@ -1470,6 +1481,10 @@
       const ux = document.getElementById('dp-xwrap');
       ux.style.display = r.url_x ? '' : 'none';
       if (r.url_x) { document.getElementById('dp-x').href = r.url_x; }
+
+      const ubsky = document.getElementById('dp-bskywrap');
+      ubsky.style.display = r.url_bsky ? '' : 'none';
+      if (r.url_bsky) { document.getElementById('dp-bsky').href = r.url_bsky; }
 
       const ufb = document.getElementById('dp-fbwrap');
       ufb.style.display = r.url_fb ? '' : 'none';
@@ -1640,6 +1655,7 @@
       document.getElementById('p-35').checked = pls.includes('35P');
       document.getElementById('p-vk').checked = pls.includes('VK');
       document.getElementById('p-x').checked = pls.includes('X');
+      document.getElementById('p-bsky').checked = pls.includes('BSKY');
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
@@ -1650,7 +1666,7 @@
       const nsfw = document.getElementById('m-nsfw').value.trim();
       if (!date) { toast('Please set a scheduled date', 'error'); return; }
       if (!nsfw) { toast('Please enter the Sta.sh NSFW URL', 'error'); return; }
-      const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x'][i]).checked).join(',');
+      const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
 
       const existing = editId ? rows.find(r => r.upload_id === editId) : null;
@@ -1679,6 +1695,9 @@
         da_deviation_url: existing?.da_deviation_url || '',
         url_500px: existing?.url_500px || '',
         url_35p: existing?.url_35p || '',
+        url_vk: existing?.url_vk || '',
+        url_x: existing?.url_x || '',
+        url_bsky: existing?.url_bsky || '',
         url_fb: existing?.url_fb || '',
         notes: document.getElementById('m-notes').value.trim(),
         error_log: existing?.error_log || '',

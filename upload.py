@@ -30,7 +30,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 
 COLS = [
@@ -38,7 +38,7 @@ COLS = [
     "stash_url_nsfw", "stash_url_safe", "title", "caption", "keywords",
     "da_nsfw_flag", "category_500px", "category_35p", "caption_fb",
     "platforms", "status", "upload_timestamp",
-    "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_fb",
+    "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups",
 ]
 
@@ -299,6 +299,10 @@ def print_dry_run(rows, config):
             already = row.get("url_x", "").strip()
             if already:
                 print(f"  X URL:       {already} (already uploaded — will skip)")
+        if "BSKY" in platforms:
+            already = row.get("url_bsky", "").strip()
+            if already:
+                print(f"  BSKY URL:    {already} (already uploaded — will skip)")
         if "FB" in platforms:
             already = row.get("url_fb", "").strip()
             if already:
@@ -787,6 +791,7 @@ def upload_to_vk(page, desc_full, image_path, no_submit=False):
 
 # ── X.com Upload (Playwright) ─────────────────────────────────
 X_CHAR_LIMIT = 280
+BSKY_CHAR_LIMIT = 300
 
 
 def build_x_post_text(title, keywords_str):
@@ -799,6 +804,22 @@ def build_x_post_text(title, keywords_str):
         hashtag = "#" + tag.replace(" ", "")
         candidate = text + " " + hashtag
         if len(candidate) <= X_CHAR_LIMIT:
+            text = candidate
+        else:
+            break
+    return text
+
+
+def build_bsky_post_text(title, keywords_str):
+    """Build a Bluesky post from title + hashtags, fitting within 300 characters."""
+    text = title.strip()
+    if not keywords_str:
+        return text[:BSKY_CHAR_LIMIT]
+    tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    for tag in tags:
+        hashtag = "#" + tag.replace(" ", "")
+        candidate = text + " " + hashtag
+        if len(candidate) <= BSKY_CHAR_LIMIT:
             text = candidate
         else:
             break
@@ -925,6 +946,169 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
     page.wait_for_timeout(5000)
     print("  Tweet posted")
     return {"success": True, "url_x": "UPLOADED", "error": ""}
+
+
+# ── Bluesky Upload ──────────────────────────────────────────────
+def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
+    """
+    Post a photo with text to Bluesky via browser automation.
+    Flow: home → New Post → write text → attach photo → (NSFW label) → Post.
+    Returns {"success": bool, "url_bsky": str, "error": str}
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_bsky": "", "error": "No image file available"}
+
+    # Navigate to Bluesky
+    print("  Opening Bluesky...")
+    try:
+        page.goto("https://bsky.app/", wait_until="domcontentloaded", timeout=30000)
+    except PlaywrightTimeout:
+        return {"success": False, "url_bsky": "", "error": "Timeout loading Bluesky"}
+    page.wait_for_timeout(3000)
+
+    # Check if logged in — Bluesky redirects to login or shows sign-in buttons
+    if "/login" in page.url or page.locator('button:has-text("Sign in")').count() > 0:
+        return {"success": False, "url_bsky": "", "error": "Not logged into Bluesky — run --login first"}
+
+    # Open composer — click "New Post" button
+    print("  Opening composer...")
+    try:
+        new_post_btn = page.locator(
+            '[aria-label="New Post"], '
+            '[aria-label="New post"], '
+            '[aria-label="Compose post"], '
+            '[data-testid="composePostButton"], '
+            'button:has-text("New Post"), '
+            'a:has-text("New Post")'
+        ).first
+        new_post_btn.click(timeout=5000)
+        page.wait_for_timeout(2000)
+    except Exception as e:
+        # Diagnostic: list all buttons/links with text or aria-labels
+        btns = page.evaluate("""() => {
+            const els = document.querySelectorAll('button, a, [role="button"], [role="link"]');
+            return Array.from(els)
+                .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+                .map(el => ({
+                    tag: el.tagName,
+                    label: el.getAttribute('aria-label') || '',
+                    text: el.textContent?.trim().substring(0, 40) || '',
+                    testid: el.getAttribute('data-testid') || '',
+                }))
+                .filter(el => el.label || el.text || el.testid)
+                .slice(0, 25);
+        }""")
+        print(f"    Available elements: {btns}")
+        return {"success": False, "url_bsky": "", "error": f"Could not open composer: {e}"}
+
+    # Write post text
+    print("  Writing post text...")
+    try:
+        # Bluesky's compose area — try contenteditable with placeholder
+        caption_ok = page.evaluate("""(text) => {
+            const vh = window.innerHeight;
+            const candidates = document.querySelectorAll(
+                '[contenteditable="true"], [role="textbox"]'
+            );
+            let best = null;
+            let bestArea = 0;
+            for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 100 && r.height > 15 && r.top > 30 && r.top < vh) {
+                    const area = r.width * r.height;
+                    if (area > bestArea) {
+                        best = el;
+                        bestArea = area;
+                    }
+                }
+            }
+            if (best) {
+                best.focus();
+                best.click();
+                document.execCommand('insertText', false, text);
+                return {found: true};
+            }
+            return {found: false};
+        }""", post_text)
+        if not caption_ok.get("found"):
+            # Fallback: click placeholder and type
+            placeholder = page.locator('text="What\'s up?"').first
+            placeholder.click(timeout=3000)
+            page.wait_for_timeout(300)
+            page.keyboard.type(post_text, delay=10)
+    except Exception as e:
+        print(f"    WARNING: Could not write text: {e}")
+
+    page.wait_for_timeout(1000)
+
+    # Upload photo — the correct compose toolbar button is "Add media to post",
+    # NOT "Add image" (which is a sidebar button). No input[type="file"] exists
+    # until the button is clicked, so we use expect_file_chooser.
+    print("  Uploading photo...")
+    try:
+        media_btn = page.locator('[aria-label="Add media to post"]').first
+        with page.expect_file_chooser(timeout=5000) as fc_info:
+            media_btn.click(timeout=3000)
+        file_chooser = fc_info.value
+        file_chooser.set_files(image_path)
+        print(f"    Photo attached via file chooser")
+    except Exception as e:
+        # Fallback: check if a file input appeared in the DOM
+        file_input = page.locator('input[type="file"]')
+        if file_input.count() > 0:
+            file_input.first.set_input_files(image_path)
+            print(f"    Fallback: photo set on input directly")
+        else:
+            return {"success": False, "url_bsky": "", "error": f"Could not attach photo: {e}"}
+
+    # Wait for image upload to finish — Bluesky shows "Uploading images..." in the
+    # compose header while processing.  Wait for that text to disappear before posting.
+    print("  Waiting for photo to upload...")
+    try:
+        uploading = page.locator('text="Uploading images..."')
+        uploading.wait_for(state="hidden", timeout=30000)
+        print("    Photo upload complete")
+    except Exception:
+        print("    Upload indicator not found or timed out, waiting extra...")
+        page.wait_for_timeout(10000)
+
+    # NSFW: apply content label if needed
+    if is_nsfw:
+        print("  Applying NSFW label...")
+        try:
+            labels_btn = page.locator('button:has-text("Labels")').first
+            labels_btn.click(timeout=3000)
+            page.wait_for_timeout(1000)
+            # Select adult content option
+            adult_opt = page.locator(
+                'text="Adult Content", text="Porn", text="Sexual", text="Nudity"'
+            ).first
+            adult_opt.click(timeout=3000)
+            page.wait_for_timeout(500)
+            # Confirm/done if there's a confirm button
+            done_btn = page.locator('button:has-text("Done"), button:has-text("Save"), button:has-text("Confirm")')
+            if done_btn.count() > 0:
+                done_btn.first.click(timeout=3000)
+            page.wait_for_timeout(500)
+            print("    NSFW label applied")
+        except Exception as e:
+            print(f"    WARNING: Could not apply NSFW label: {e}")
+
+    if no_submit:
+        print("  --no-submit: skipping post")
+        return {"success": True, "url_bsky": "NO_SUBMIT", "error": ""}
+
+    # Click "Post" button — aria-label is "Publish post" (not "Post")
+    print("  Posting...")
+    try:
+        post_btn = page.locator('[aria-label="Publish post"]').first
+        post_btn.click(timeout=5000)
+    except Exception as e:
+        return {"success": False, "url_bsky": "", "error": f"Could not find Post button: {e}"}
+
+    page.wait_for_timeout(5000)
+    print("  Bluesky post published")
+    return {"success": True, "url_bsky": "UPLOADED", "error": ""}
 
 
 # ── Facebook Upload ──────────────────────────────────────────────
@@ -1704,6 +1888,10 @@ def main():
             input()
             page.goto("https://x.com/login", wait_until="domcontentloaded", timeout=30000)
             print("Log into X.com in the browser window.")
+            print("Press ENTER when done (will open Bluesky next)...")
+            input()
+            page.goto("https://bsky.app/", wait_until="domcontentloaded", timeout=30000)
+            print("Log into Bluesky in the browser window.")
             print("Press ENTER when done (will open Facebook next)...")
             input()
             page.goto("https://www.facebook.com/login", wait_until="domcontentloaded", timeout=30000)
@@ -1778,6 +1966,7 @@ def main():
                 ok_35p = False
                 ok_vk = False
                 ok_x = False
+                ok_bsky = False
                 ok_fb = False
                 ok_da = False
 
@@ -1942,7 +2131,44 @@ def main():
                         if url_x and url_x not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_x": url_x})
 
-                # ── FB (between X and DA) ───────────────────────
+                # ── BSKY (between X and FB) ─────────────────────
+                if "BSKY" in platforms:
+                    already = row.get("url_bsky", "").strip()
+                    if already:
+                        print(f"\n  BSKY: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── Bluesky Upload ──")
+                        # Download image from Sta.sh if not already downloaded
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url_nsfw — cannot download image")
+
+                        is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+                        post_text = build_bsky_post_text(row.get("title", ""), row.get("keywords", ""))
+                        print(f"    Post text ({len(post_text)} chars): {post_text}")
+
+                        try:
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit)
+                        except Exception as e:
+                            result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
+
+                        if result_bsky["success"]:
+                            ok_bsky = True
+                            print(f"  BSKY: SUCCESS — {result_bsky.get('url_bsky', '')}")
+                        else:
+                            err = result_bsky.get("error", "unknown")
+                            print(f"  BSKY: FAILED — {err}")
+                            errors.append(f"BSKY: {err}")
+
+                        # Update CSV with BSKY result
+                        url_bsky = result_bsky.get("url_bsky", "")
+                        if url_bsky and url_bsky not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"url_bsky": url_bsky})
+
+                # ── FB (between BSKY and DA) ───────────────────────
                 if "FB" in platforms:
                     already = row.get("url_fb", "").strip()
                     if already:
@@ -2065,6 +2291,8 @@ def main():
                         done_platforms.add("VK")
                     if "X" in platforms and (ok_x or fresh_row.get("url_x", "").strip()):
                         done_platforms.add("X")
+                    if "BSKY" in platforms and (ok_bsky or fresh_row.get("url_bsky", "").strip()):
+                        done_platforms.add("BSKY")
                     if "FB" in platforms and (ok_fb or fresh_row.get("url_fb", "").strip()):
                         done_platforms.add("FB")
                     if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
@@ -2099,6 +2327,9 @@ def main():
                 if "X" in platforms:
                     s = "done" if ok_x or row.get("url_x", "").strip() else "failed"
                     summary_detail.append(f"X:{s}")
+                if "BSKY" in platforms:
+                    s = "done" if ok_bsky or row.get("url_bsky", "").strip() else "failed"
+                    summary_detail.append(f"BSKY:{s}")
                 if "FB" in platforms:
                     s = "done" if ok_fb or row.get("url_fb", "").strip() else "failed"
                     summary_detail.append(f"FB:{s}")
