@@ -1617,6 +1617,7 @@
       rows = rows.filter(r => r.upload_id !== id);
       if (selId === id) closeDetail();
       refresh(); toast('Deleted', 'info');
+      saveCSV();
     }
 
     // ── MODAL ──────────────────────────────────────────────────────────────────────
@@ -1764,6 +1765,7 @@
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
+      saveCSV();
     }
 
     // ── UTILS ──────────────────────────────────────────────────────────────────────
