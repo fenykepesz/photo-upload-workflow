@@ -147,13 +147,15 @@ def filter_rows(rows, target_id=None):
 
 # ── Description & Tags ────────────────────────────────────────
 def build_description(row, config):
-    """Assemble desc_full: caption + model respect + social links."""
-    parts = [row.get("caption", "").strip()]
+    """Assemble desc_full: model credit + caption + social links."""
+    parts = []
 
-    # Model respect
+    # Model credit (before caption, on its own line)
     model = row.get("model_name", "").strip()
     if model:
-        parts.append(f"\n\nModel: {model}. Please respect the model.")
+        parts.append(f"Model: {model}\nPlease respect the model.\n\n")
+
+    parts.append(row.get("caption", "").strip())
 
     # Social links (DA, 500px, 35photo — not Facebook)
     social = config.get("social_links", {})
@@ -165,6 +167,19 @@ def build_description(row, config):
                 links.append(f"{label}: {url}")
         if links:
             parts.append("\n\n---\n" + "\n".join(links))
+
+    return "".join(parts)
+
+
+def build_description_fb(row):
+    """Assemble FB caption: model credit + caption (no social links)."""
+    parts = []
+
+    model = row.get("model_name", "").strip()
+    if model:
+        parts.append(f"Model: {model}\nPlease respect the model.\n\n")
+
+    parts.append(row.get("caption", "").strip())
 
     return "".join(parts)
 
@@ -425,14 +440,31 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     """)
     page.wait_for_timeout(500)
 
-    # Category
+    # Category — use JS click to bypass overlay (image preview intercepts pointer events)
     if category:
         page.click('#category-input')
         page.wait_for_timeout(500)
         try:
-            cat_option = page.locator(f'text="{category}"').first
-            cat_option.scroll_into_view_if_needed()
-            cat_option.click(timeout=3000)
+            selected = page.evaluate("""(cat) => {
+                // Try Ant Design option items first
+                const selectors = ['[class*="StyledName"]', '.ant-select-item', '[class*="Option"]'];
+                for (const sel of selectors) {
+                    const items = document.querySelectorAll(sel);
+                    for (const item of items) {
+                        if (item.textContent.trim() === cat) { item.click(); return true; }
+                    }
+                }
+                // Broadest fallback: any element with exact text match in dropdown area
+                const all = document.querySelectorAll('[class*="dropdown"] *, [class*="select"] *, [role="listbox"] *');
+                for (const item of all) {
+                    if (item.textContent.trim() === cat && item.children.length === 0) {
+                        item.click(); return true;
+                    }
+                }
+                return false;
+            }""", category)
+            if not selected:
+                print(f"    WARNING: Could not select category '{category}' via JS")
         except Exception as e:
             print(f"    WARNING: Could not select category '{category}': {e}")
         page.wait_for_timeout(300)
@@ -615,13 +647,30 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
     except Exception:
         pass  # Not critical
 
-    # Adult content checkbox
+    # Adult content checkbox — may be inside a popup triggered by the label area
     if nsfw:
+        print("  Setting adult content flag...")
         try:
-            adult_cb = page.locator('text="Adult content 18"').first
-            adult_cb.click(timeout=3000)
-        except Exception as e:
-            print(f"    WARNING: Could not check adult content: {e}")
+            # Scroll to and click the "Adult content" label area to reveal the checkbox popup
+            ac_label = page.locator('text="Adult cont"').first
+            ac_label.scroll_into_view_if_needed()
+            ac_label.click(timeout=2000)
+            page.wait_for_timeout(500)
+            # Try clicking the checkbox input directly
+            cb = page.locator('input[type="checkbox"]').last
+            if cb.is_visible(timeout=2000) and not cb.is_checked():
+                cb.click(timeout=3000)
+                print("    Adult content checked")
+            else:
+                print("    Adult content already checked or not found via input")
+        except Exception:
+            try:
+                # Fallback: broader text match for "Adult content 18"
+                page.locator('text=/Adult content 18/').first.scroll_into_view_if_needed()
+                page.locator('text=/Adult content 18/').first.click(timeout=3000)
+                print("    Adult content checked (fallback)")
+            except Exception as e:
+                print(f"    WARNING: Could not check adult content: {e}")
 
     page.wait_for_timeout(1000)
 
@@ -1072,35 +1121,32 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
         print("    Upload indicator not found or timed out, waiting extra...")
         page.wait_for_timeout(10000)
 
-    # NSFW: apply content label if needed
+    # NSFW: only handle content warning dialog if it appears automatically.
+    # Do NOT proactively open the Labels dialog — just post directly.
     if is_nsfw:
-        print("  Applying NSFW label...")
         try:
-            labels_btn = page.locator('button:has-text("Labels")').first
-            labels_btn.click(timeout=3000)
-            page.wait_for_timeout(1000)
-            # Select adult content option
-            adult_opt = page.locator(
-                'text="Adult Content", text="Porn", text="Sexual", text="Nudity"'
-            ).first
-            adult_opt.click(timeout=3000)
-            page.wait_for_timeout(500)
-            # Confirm/done if there's a confirm button
-            done_btn = page.locator('button:has-text("Done"), button:has-text("Save"), button:has-text("Confirm")')
-            if done_btn.count() > 0:
-                done_btn.first.click(timeout=3000)
-            page.wait_for_timeout(500)
-            print("    NSFW label applied")
-        except Exception as e:
-            print(f"    WARNING: Could not apply NSFW label: {e}")
+            warning_dialog = page.locator('text="Add a content warning"')
+            if warning_dialog.is_visible(timeout=2000):
+                print("  Content warning dialog detected, selecting Nudity...")
+                page.locator('text="Nudity"').click(timeout=3000)
+                page.locator('button:has-text("Done")').click(timeout=3000)
+                page.wait_for_timeout(500)
+                print("    Nudity label applied")
+        except Exception:
+            print("    Content warning dialog not found, posting without label")
 
     if no_submit:
         print("  --no-submit: skipping post")
         return {"success": True, "url_bsky": "NO_SUBMIT", "error": ""}
 
-    # Click "Post" button — aria-label is "Publish post" (not "Post")
+    # Click "Post" button — dismiss any blocking overlay first
     print("  Posting...")
     try:
+        # If "Close active dialog" overlay exists, dismiss it
+        overlay = page.locator('[aria-label="Close active dialog"]')
+        if overlay.count() > 0 and overlay.first.is_visible():
+            overlay.first.click(timeout=2000)
+            page.wait_for_timeout(500)
         post_btn = page.locator('[aria-label="Publish post"]').first
         post_btn.click(timeout=5000)
     except Exception as e:
@@ -1443,7 +1489,27 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     # 3. TAGS — the unnamed text input (name="", placeholder="")
     #    This input has zero dimensions until focused, so we use JS to
     #    find/scroll/focus it (bypasses visibility), then Playwright keyboard.
-    print(f"  Adding {len(tags)} tags...")
+    #    DA may auto-suggest/pre-populate tags — count existing before adding.
+    existing_tag_count = page.evaluate("""
+        (() => {
+            let count = document.querySelectorAll('[class*="tag-item"], [class*="tagItem"], [data-tag]').length;
+            if (count === 0) {
+                const allBtns = document.querySelectorAll('button');
+                const tagBtns = Array.from(allBtns).filter(b => {
+                    const rect = b.getBoundingClientRect();
+                    return rect.width > 20 && rect.width < 200 && rect.height > 15 && rect.height < 40
+                        && b.textContent.trim().length > 0 && b.textContent.trim().length < 30;
+                });
+                count = Math.max(0, tagBtns.length - 10);
+            }
+            return count;
+        })()
+    """)
+    remaining_slots = max(0, TAG_LIMIT - existing_tag_count)
+    if existing_tag_count > 0:
+        print(f"  DA has {existing_tag_count} pre-existing tags, room for {remaining_slots} more")
+    tags_to_add = tags[:remaining_slots]
+    print(f"  Adding {len(tags_to_add)} of {len(tags)} tags...")
     tag_activated = page.evaluate("""
         (() => {
             const inputs = Array.from(document.querySelectorAll('input'));
@@ -1459,11 +1525,11 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     """)
     if tag_activated:
         page.wait_for_timeout(500)
-        for tag in tags:
+        for tag in tags_to_add:
             page.keyboard.type(tag, delay=50)
             page.keyboard.press("Enter")
             page.wait_for_timeout(300)
-        print(f"    Tags entered: {len(tags)}")
+        print(f"    Tags entered: {len(tags_to_add)}")
     else:
         print("    WARNING: Could not find tag input")
 
@@ -2187,8 +2253,8 @@ def main():
                             else:
                                 # Download the safe version specifically for FB
                                 fb_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
-                                fb_caption = row.get("title", "")
-                                print(f"    Caption: {fb_caption}")
+                                fb_caption = build_description_fb(row)
+                                print(f"    Caption: {fb_caption[:80]}...")
                                 print(f"    Using safe image (NSFW flag set)")
                                 try:
                                     result_fb = upload_to_fb(page, fb_caption, fb_image_path, args.no_submit)
@@ -2210,8 +2276,8 @@ def main():
                                 else:
                                     print("  WARNING: No Sta.sh URL — cannot download image")
 
-                            fb_caption = row.get("title", "")
-                            print(f"    Caption: {fb_caption}")
+                            fb_caption = build_description_fb(row)
+                            print(f"    Caption: {fb_caption[:80]}...")
 
                             try:
                                 result_fb = upload_to_fb(page, fb_caption, image_path, args.no_submit)
