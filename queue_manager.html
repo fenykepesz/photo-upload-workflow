@@ -1825,15 +1825,16 @@
         return;
       } catch (e) { /* fetch fails on file:// — try file handle or picker */ }
 
-      // 1.5 Try localStorage cache
-      const cachedDA = localStorage.getItem('da_data_cache');
-      if (cachedDA) {
-        try {
-          daData = JSON.parse(cachedDA);
-          populateDAChoices();
-          if (interactive) toast('Galleries & Groups loaded from cache', 'success');
-          return;
-        } catch (e) { localStorage.removeItem('da_data_cache'); }
+      // 1.5 Try localStorage cache (only for auto-load, not when user clicks Sync)
+      if (!interactive) {
+        const cachedDA = localStorage.getItem('da_data_cache');
+        if (cachedDA) {
+          try {
+            daData = JSON.parse(cachedDA);
+            populateDAChoices();
+            return;
+          } catch (e) { localStorage.removeItem('da_data_cache'); }
+        }
       }
 
       // 2. Re-read cached file handle (no prompt needed)
