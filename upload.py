@@ -2376,7 +2376,9 @@ def main():
                         "upload_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     if errors:
-                        updates["error_log"] = "; ".join(errors)[:200]
+                        # Strip newlines from Playwright error logs to prevent CSV corruption
+                        clean_errors = "; ".join(e.replace("\n", " ").replace("\r", "") for e in errors)
+                        updates["error_log"] = clean_errors[:200]
                     save_row_update(args.csv, row["upload_id"], updates)
 
                 # Summary line
