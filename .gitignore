@@ -1,6 +1,7 @@
 # Real data files — keep these local, never commit
 upload_queue.csv
 config.json
+da_data.json
 
 # Temporary local photo files used during upload
 temp/
@@ -11,8 +12,16 @@ temp/
 # Windows
 Thumbs.db
 
+# IDE / editor
+.claude/
+*.code-workspace
+
 # Playwright browser profile (contains login cookies)
 chrome-profile/
 
 # Error screenshots from upload.py
 error_*.png
+
+# Old / test files
+test_queue.csv
+upload_queue_old.csv
