@@ -1499,17 +1499,16 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     #    DA may auto-suggest/pre-populate tags — count existing before adding.
     existing_tag_count = page.evaluate("""
         (() => {
-            let count = document.querySelectorAll('[class*="tag-item"], [class*="tagItem"], [data-tag]').length;
-            if (count === 0) {
-                const allBtns = document.querySelectorAll('button');
-                const tagBtns = Array.from(allBtns).filter(b => {
-                    const rect = b.getBoundingClientRect();
-                    return rect.width > 20 && rect.width < 200 && rect.height > 15 && rect.height < 40
-                        && b.textContent.trim().length > 0 && b.textContent.trim().length < 30;
-                });
-                count = Math.max(0, tagBtns.length - 10);
-            }
-            return count;
+            // Count actual tag chips: small buttons with SVG close icons
+            const allBtns = Array.from(document.querySelectorAll('button'));
+            return allBtns.filter(b => {
+                const rect = b.getBoundingClientRect();
+                return rect.width > 20 && rect.width < 200
+                    && rect.height > 15 && rect.height < 40
+                    && b.querySelector('svg')
+                    && b.textContent.trim().length > 0
+                    && b.textContent.trim().length < 30;
+            }).length;
         })()
     """)
     remaining_slots = max(0, TAG_LIMIT - existing_tag_count)
@@ -1538,36 +1537,38 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             page.wait_for_timeout(300)
         print(f"    Tags entered: {len(tags_to_add)}")
 
-        # DA auto-applies suggested tags as we type — remove excess if over 30.
-        page.wait_for_timeout(1000)  # Let DA finish auto-applying
-        removed = page.evaluate(f"""
+        # DA may auto-apply suggested tags as we type — remove excess if over 30.
+        # Tag chips have SVG close icons; suggestion buttons don't.
+        page.wait_for_timeout(1000)
+        excess_result = page.evaluate(f"""
             (() => {{
                 const LIMIT = {TAG_LIMIT};
-                // Find all tag chip remove buttons (x/close icons inside tag chips)
-                // DA tag chips are buttons with an 'x' or SVG close icon
+                // Tag chips: small buttons that contain an SVG (close/remove icon)
                 const allBtns = Array.from(document.querySelectorAll('button'));
-                // Tag chips: small buttons with short text and a sibling/child close icon
-                const tagArea = document.querySelector('[class*="tag"], [class*="Tag"]');
-                if (!tagArea) return 0;
-                const chips = tagArea.querySelectorAll('button');
-                const count = chips.length;
-                if (count <= LIMIT) return 0;
-                // Remove from the end (most recently auto-added) until at limit
+                const tagChips = allBtns.filter(b => {{
+                    const rect = b.getBoundingClientRect();
+                    return rect.width > 20 && rect.width < 200
+                        && rect.height > 15 && rect.height < 40
+                        && b.querySelector('svg')
+                        && b.textContent.trim().length > 0
+                        && b.textContent.trim().length < 30;
+                }});
+                const count = tagChips.length;
+                if (count <= LIMIT) return {{ count, removed: 0 }};
+                // Remove excess from the end by clicking their SVG close icons
                 let removed = 0;
-                for (let i = count - 1; i >= 0 && (count - removed) > LIMIT; i--) {{
-                    // Look for close/remove icon within or near the chip
-                    const closeBtn = chips[i].querySelector('svg, [class*="close"], [class*="remove"]')
-                        || chips[i];
-                    if (closeBtn) {{
-                        closeBtn.click();
-                        removed++;
-                    }}
+                for (let i = tagChips.length - 1; i >= 0 && (count - removed) > LIMIT; i--) {{
+                    const svg = tagChips[i].querySelector('svg');
+                    if (svg) {{ svg.click(); removed++; }}
                 }}
-                return removed;
+                return {{ count, removed }};
             }})()
         """)
+        chip_count = excess_result.get("count", 0)
+        removed = excess_result.get("removed", 0)
+        print(f"    Tag chips (with close icon): {chip_count}")
         if removed > 0:
-            print(f"    Removed {removed} excess tags (DA auto-suggested)")
+            print(f"    Removed {removed} excess tags")
     else:
         print("    WARNING: Could not find tag input")
 
@@ -1883,20 +1884,16 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             // Title: input[name="title"]
             const titleEl = document.querySelector('input[name="title"]');
             const title = titleEl ? titleEl.value.trim() : '';
-            // Tags: count elements that look like tag chips (buttons inside tag area)
-            // Try multiple selectors for tag chips
-            let tagCount = document.querySelectorAll('[class*="tag-item"], [class*="tagItem"], [data-tag]').length;
-            if (tagCount === 0) {
-                // Fallback: count small buttons near the tag input area
-                const allBtns = document.querySelectorAll('button');
-                const tagBtns = Array.from(allBtns).filter(b => {
-                    const rect = b.getBoundingClientRect();
-                    return rect.width > 20 && rect.width < 200 && rect.height > 15 && rect.height < 40
-                        && b.textContent.trim().length > 0 && b.textContent.trim().length < 30;
-                });
-                // Subtract known buttons (Submit, Save, etc)
-                tagCount = Math.max(0, tagBtns.length - 10);
-            }
+            // Tags: count buttons with SVG close icons (actual tag chips, not suggestions)
+            const allBtns = Array.from(document.querySelectorAll('button'));
+            let tagCount = allBtns.filter(b => {
+                const rect = b.getBoundingClientRect();
+                return rect.width > 20 && rect.width < 200
+                    && rect.height > 15 && rect.height < 40
+                    && b.querySelector('svg')
+                    && b.textContent.trim().length > 0
+                    && b.textContent.trim().length < 30;
+            }).length;
             return { tagCount, title, valid: title.length > 0 };
         })()
     """)
