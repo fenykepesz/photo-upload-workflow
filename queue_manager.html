@@ -1272,13 +1272,6 @@
               </div>
             </div>
           </div>
-          <div class="fg form-full">
-            <label>Facebook Caption <span style="font-weight:400;opacity:.6">(optional — omit social links; uses main
-                caption if blank)</span></label>
-            <textarea id="m-caption-fb" rows="2"
-              placeholder="Leave blank to use main caption (auto-strips social links)"></textarea>
-          </div>
-
           <div class="form-section">Notes</div>
           <div class="fg form-full">
             <label>Notes / Overrides</label>
@@ -1306,7 +1299,7 @@
 
     const COLS = ['upload_id', 'scheduled_date', 'scheduled_time',
       'stash_url_nsfw', 'stash_url_safe', 'title', 'caption', 'keywords',
-      'da_nsfw_flag', 'category_500px', 'category_35p', 'caption_fb',
+      'da_nsfw_flag', 'category_500px', 'category_35p',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups'];
@@ -1628,7 +1621,7 @@
     }
     function clearForm() {
       ['m-date', 'm-time', 'm-nsfw', 'm-safe', 'm-title', 'm-caption', 'm-keywords',
-        'm-caption-fb', 'm-notes', 'm-model-name'].forEach(id => {
+        'm-notes', 'm-model-name'].forEach(id => {
           const el = document.getElementById(id); if (el) el.value = '';
         });
       // Clear DA Gallery checkboxes
@@ -1669,7 +1662,6 @@
       document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
       document.getElementById('m-cat-500px').value = r.category_500px || '';
       document.getElementById('m-cat-35p').value = r.category_35p || '';
-      document.getElementById('m-caption-fb').value = r.caption_fb || '';
       document.getElementById('m-status').value = r.status || 'Pending';
       document.getElementById('m-notes').value = r.notes || '';
       document.getElementById('m-model-name').value = r.model_name || '';
@@ -1732,7 +1724,6 @@
         da_nsfw_flag: document.getElementById('m-nsfw-flag').checked ? 'TRUE' : 'FALSE',
         category_500px: document.getElementById('m-cat-500px').value,
         category_35p: document.getElementById('m-cat-35p').value,
-        caption_fb: document.getElementById('m-caption-fb').value.trim(),
         platforms,
         status: document.getElementById('m-status').value || 'Approved',
         model_name: document.getElementById('m-model-name').value.trim(),

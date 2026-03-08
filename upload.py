@@ -36,7 +36,7 @@ TEMP_DIR = SCRIPT_DIR / "temp"
 COLS = [
     "upload_id", "scheduled_date", "scheduled_time",
     "stash_url_nsfw", "stash_url_safe", "title", "caption", "keywords",
-    "da_nsfw_flag", "category_500px", "category_35p", "caption_fb",
+    "da_nsfw_flag", "category_500px", "category_35p",
     "platforms", "status", "upload_timestamp",
     "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups",
