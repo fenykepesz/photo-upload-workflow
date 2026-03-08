@@ -647,30 +647,37 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
     except Exception:
         pass  # Not critical
 
-    # Adult content checkbox — may be inside a popup triggered by the label area
+    # Adult content checkbox — use JS to find and check it directly
     if nsfw:
         print("  Setting adult content flag...")
-        try:
-            # Scroll to and click the "Adult content" label area to reveal the checkbox popup
-            ac_label = page.locator('text="Adult cont"').first
-            ac_label.scroll_into_view_if_needed()
-            ac_label.click(timeout=2000)
-            page.wait_for_timeout(500)
-            # Try clicking the checkbox input directly
-            cb = page.locator('input[type="checkbox"]').last
-            if cb.is_visible(timeout=2000) and not cb.is_checked():
-                cb.click(timeout=3000)
-                print("    Adult content checked")
-            else:
-                print("    Adult content already checked or not found via input")
-        except Exception:
-            try:
-                # Fallback: broader text match for "Adult content 18"
-                page.locator('text=/Adult content 18/').first.scroll_into_view_if_needed()
-                page.locator('text=/Adult content 18/').first.click(timeout=3000)
-                print("    Adult content checked (fallback)")
-            except Exception as e:
-                print(f"    WARNING: Could not check adult content: {e}")
+        checked = page.evaluate("""
+            (() => {
+                // Find all checkboxes on the page
+                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+                for (const cb of checkboxes) {
+                    // Check if this checkbox or its parent/label contains "Adult content" text
+                    const parent = cb.closest('label, div, span, td') || cb.parentElement;
+                    const nearby = parent ? parent.textContent : '';
+                    if (nearby.includes('Adult content') || nearby.includes('adult content')) {
+                        if (!cb.checked) {
+                            cb.click();
+                            return 'checked';
+                        }
+                        return 'already_checked';
+                    }
+                }
+                // Fallback: look for any element with "Adult content 18" text and click it
+                const els = document.querySelectorAll('*');
+                for (const el of els) {
+                    if (el.children.length === 0 && el.textContent.includes('Adult content 18')) {
+                        el.click();
+                        return 'clicked_text';
+                    }
+                }
+                return 'not_found';
+            })()
+        """)
+        print(f"    Adult content: {checked}")
 
     page.wait_for_timeout(1000)
 
