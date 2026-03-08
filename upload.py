@@ -1499,13 +1499,24 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     #    DA may auto-suggest/pre-populate tags — count existing before adding.
     existing_tag_count = page.evaluate("""
         (() => {
-            // Count actual tag chips: small buttons with SVG close icons
+            // Find the vertical zone between "Tags" and "Suggested tags" labels
+            // Tag chips live here; suggestion buttons are below "Suggested tags"
+            const labels = Array.from(document.querySelectorAll('label, legend, [class*="label"], h2, h3, h4'));
+            let tagsTop = 0, suggestedTop = Infinity;
+            for (const l of labels) {
+                const text = l.textContent.trim();
+                const top = l.getBoundingClientRect().top;
+                if (text === 'Tags' && top > 100) tagsTop = top;
+                if (text === 'Suggested tags') suggestedTop = top;
+            }
+            if (tagsTop === 0) return 0;
+            // Count small buttons between Tags and Suggested tags labels
             const allBtns = Array.from(document.querySelectorAll('button'));
             return allBtns.filter(b => {
                 const rect = b.getBoundingClientRect();
-                return rect.width > 20 && rect.width < 200
+                return rect.top > tagsTop && rect.top < suggestedTop
+                    && rect.width > 20 && rect.width < 200
                     && rect.height > 15 && rect.height < 40
-                    && b.querySelector('svg')
                     && b.textContent.trim().length > 0
                     && b.textContent.trim().length < 30;
             }).length;
@@ -1537,38 +1548,48 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             page.wait_for_timeout(300)
         print(f"    Tags entered: {len(tags_to_add)}")
 
-        # DA may auto-apply suggested tags as we type — remove excess if over 30.
-        # Tag chips have SVG close icons; suggestion buttons don't.
+        # DA may auto-apply suggested tags — count chips in the Tags zone and remove excess.
         page.wait_for_timeout(1000)
         excess_result = page.evaluate(f"""
             (() => {{
                 const LIMIT = {TAG_LIMIT};
-                // Tag chips: small buttons that contain an SVG (close/remove icon)
+                // Find the vertical zone between "Tags" and "Suggested tags" labels
+                const labels = Array.from(document.querySelectorAll('label, legend, [class*="label"], h2, h3, h4'));
+                let tagsTop = 0, suggestedTop = Infinity;
+                for (const l of labels) {{
+                    const text = l.textContent.trim();
+                    const top = l.getBoundingClientRect().top;
+                    if (text === 'Tags' && top > 100) tagsTop = top;
+                    if (text === 'Suggested tags') suggestedTop = top;
+                }}
+                if (tagsTop === 0) return {{ count: 0, removed: 0 }};
+                // Count small buttons in the Tags zone (between Tags and Suggested tags)
                 const allBtns = Array.from(document.querySelectorAll('button'));
                 const tagChips = allBtns.filter(b => {{
                     const rect = b.getBoundingClientRect();
-                    return rect.width > 20 && rect.width < 200
+                    return rect.top > tagsTop && rect.top < suggestedTop
+                        && rect.width > 20 && rect.width < 200
                         && rect.height > 15 && rect.height < 40
-                        && b.querySelector('svg')
                         && b.textContent.trim().length > 0
                         && b.textContent.trim().length < 30;
                 }});
                 const count = tagChips.length;
                 if (count <= LIMIT) return {{ count, removed: 0 }};
-                // Remove excess from the end by clicking their SVG close icons
+                // Remove excess from the end by clicking SVG close icon or the button itself
                 let removed = 0;
                 for (let i = tagChips.length - 1; i >= 0 && (count - removed) > LIMIT; i--) {{
                     const svg = tagChips[i].querySelector('svg');
                     if (svg) {{ svg.click(); removed++; }}
+                    else {{ tagChips[i].click(); removed++; }}
                 }}
                 return {{ count, removed }};
             }})()
         """)
         chip_count = excess_result.get("count", 0)
         removed = excess_result.get("removed", 0)
-        print(f"    Tag chips (with close icon): {chip_count}")
+        print(f"    Tag chips in Tags zone: {chip_count}")
         if removed > 0:
-            print(f"    Removed {removed} excess tags")
+            print(f"    Removed {removed} excess tags (over {TAG_LIMIT})")
     else:
         print("    WARNING: Could not find tag input")
 
@@ -1884,16 +1905,27 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             // Title: input[name="title"]
             const titleEl = document.querySelector('input[name="title"]');
             const title = titleEl ? titleEl.value.trim() : '';
-            // Tags: count buttons with SVG close icons (actual tag chips, not suggestions)
-            const allBtns = Array.from(document.querySelectorAll('button'));
-            let tagCount = allBtns.filter(b => {
-                const rect = b.getBoundingClientRect();
-                return rect.width > 20 && rect.width < 200
-                    && rect.height > 15 && rect.height < 40
-                    && b.querySelector('svg')
-                    && b.textContent.trim().length > 0
-                    && b.textContent.trim().length < 30;
-            }).length;
+            // Tags: count buttons in the vertical zone between "Tags" and "Suggested tags" labels
+            const labels = Array.from(document.querySelectorAll('label, legend, [class*="label"], h2, h3, h4'));
+            let tagsTop = 0, suggestedTop = Infinity;
+            for (const l of labels) {
+                const text = l.textContent.trim();
+                const top = l.getBoundingClientRect().top;
+                if (text === 'Tags' && top > 100) tagsTop = top;
+                if (text === 'Suggested tags') suggestedTop = top;
+            }
+            let tagCount = 0;
+            if (tagsTop > 0) {
+                const allBtns = Array.from(document.querySelectorAll('button'));
+                tagCount = allBtns.filter(b => {
+                    const rect = b.getBoundingClientRect();
+                    return rect.top > tagsTop && rect.top < suggestedTop
+                        && rect.width > 20 && rect.width < 200
+                        && rect.height > 15 && rect.height < 40
+                        && b.textContent.trim().length > 0
+                        && b.textContent.trim().length < 30;
+                }).length;
+            }
             return { tagCount, title, valid: title.length > 0 };
         })()
     """)
