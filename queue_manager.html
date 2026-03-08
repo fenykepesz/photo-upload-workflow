@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Photo Upload Queue Manager</title>
+  <script>const t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
   <style>
     *,
     *::before,
@@ -31,6 +32,23 @@
       --teal: #00cfb4;
       --radius: 7px;
       --shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    [data-theme="light"] {
+      --bg: #f0f0f4;
+      --surface: #ffffff;
+      --surface2: #f5f5f8;
+      --surface3: #eaeaef;
+      --border: #d4d4dc;
+      --text: #1a1a2e;
+      --muted: #6e6e82;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    .required-star::after {
+      content: ' *';
+      color: var(--error);
+      font-weight: 700;
     }
 
     body {
@@ -838,6 +856,7 @@
       </svg>
       Photo Upload Queue <span>· v2 Sta.sh</span>
     </div>
+    <button class="icon-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode"></button>
     <div class="sep"></div>
     <button class="btn" onclick="loadCSV()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -941,8 +960,8 @@
           <polyline points="21 15 16 10 5 21" />
         </svg>
         <h2>No queue loaded</h2>
-        <p>Load your upload_queue.csv from Google Drive,<br>or add your first photo to get started.</p>
-        <button class="btn btn-primary" onclick="loadCSV()">Load CSV from Google Drive</button>
+        <p>Load your upload_queue.csv to get started,<br>or add your first photo.</p>
+        <button class="btn btn-primary" onclick="loadCSV()">Load CSV</button>
       </div>
       <table id="main-table" style="display:none">
         <thead>
@@ -1325,20 +1344,28 @@
     }
 
     // ── FILE IO ────────────────────────────────────────────────────────────────────
+    function cacheCSV(csvText, name) {
+      try { localStorage.setItem('csv_cache', csvText); localStorage.setItem('csv_filename', name); } catch (e) { }
+    }
     async function loadCSV() {
       try {
         if ('showOpenFilePicker' in window) {
           const [fh] = await showOpenFilePicker({ types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }] });
           fileHandle = fh;
           const file = await fh.getFile();
-          rows = parseCSV(await file.text());
+          const txt = await file.text();
+          rows = parseCSV(txt);
+          cacheCSV(txt, fh.name);
           document.getElementById('file-label').textContent = '📄 ' + fh.name;
         } else {
           const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.csv' });
           inp.onchange = async e => {
             const f = e.target.files[0]; if (!f) return;
-            rows = parseCSV(await f.text());
+            const txt = await f.text();
+            rows = parseCSV(txt);
+            cacheCSV(txt, f.name);
             document.getElementById('file-label').textContent = '📄 ' + f.name;
+            document.getElementById('btn-save').disabled = false;
             refresh();
           };
           inp.click(); return;
@@ -1348,8 +1375,18 @@
         refresh();
       } catch (e) { if (e.name !== 'AbortError') toast('Load error: ' + e.message, 'error'); }
     }
+    function autoLoadCSV() {
+      const cached = localStorage.getItem('csv_cache');
+      if (!cached) return;
+      rows = parseCSV(cached);
+      const name = localStorage.getItem('csv_filename') || 'upload_queue.csv';
+      document.getElementById('file-label').textContent = '📄 ' + name + ' (cached)';
+      document.getElementById('btn-save').disabled = false;
+      refresh();
+    }
     async function saveCSV() {
       const csv = toCSV(rows);
+      cacheCSV(csv, localStorage.getItem('csv_filename') || 'upload_queue.csv');
       try {
         if (fileHandle) {
           const w = await fileHandle.createWritable();
@@ -1605,6 +1642,7 @@
       clearForm();
       document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
       document.getElementById('p-da').checked = true;
+      updateRequiredFields();
       document.getElementById('overlay').classList.add('open');
     }
     function openEditModal() { if (selId) openEditById(selId); }
@@ -1656,6 +1694,7 @@
       document.getElementById('p-vk').checked = pls.includes('VK');
       document.getElementById('p-x').checked = pls.includes('X');
       document.getElementById('p-bsky').checked = pls.includes('BSKY');
+      updateRequiredFields();
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
@@ -1668,6 +1707,9 @@
       if (!nsfw) { toast('Please enter the Sta.sh NSFW URL', 'error'); return; }
       const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
+      if (!document.getElementById('m-title').value.trim()) { toast('Title is required', 'error'); return; }
+      if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
+      if (platforms.includes('35P') && !document.getElementById('m-cat-35p').value) { toast('35photo category is required', 'error'); return; }
 
       const existing = editId ? rows.find(r => r.upload_id === editId) : null;
       const entry = {
@@ -1737,6 +1779,24 @@
         document.getElementById('m-nsfw-flag').checked = true;
       }
     });
+    function updateRequiredFields() {
+      const any = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky']
+        .some(id => document.getElementById(id)?.checked);
+      const need500 = document.getElementById('p-500')?.checked;
+      const need35 = document.getElementById('p-35')?.checked;
+      toggleStar('m-title', any);
+      toggleStar('m-cat-500px', need500);
+      toggleStar('m-cat-35p', need35);
+    }
+    function toggleStar(inputId, required) {
+      const label = document.getElementById(inputId)?.closest('.fg')?.querySelector('label');
+      if (label) label.classList.toggle('required-star', !!required);
+    }
+    ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', updateRequiredFields);
+    });
+
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         if (document.getElementById('overlay').classList.contains('open')) closeModal();
@@ -1750,22 +1810,38 @@
       loadDAData(true);
     }
 
+    function cacheDAData() {
+      try { localStorage.setItem('da_data_cache', JSON.stringify(daData)); } catch (e) { }
+    }
     async function loadDAData(interactive = false) {
       // 1. Try fetch (works when served via HTTP)
       try {
         const res = await fetch('da_data.json');
         if (!res.ok) throw new Error('fetch failed');
         daData = await res.json();
+        cacheDAData();
         populateDAChoices();
         if (interactive) toast('Galleries & Groups synced', 'success');
         return;
       } catch (e) { /* fetch fails on file:// — try file handle or picker */ }
+
+      // 1.5 Try localStorage cache
+      const cachedDA = localStorage.getItem('da_data_cache');
+      if (cachedDA) {
+        try {
+          daData = JSON.parse(cachedDA);
+          populateDAChoices();
+          if (interactive) toast('Galleries & Groups loaded from cache', 'success');
+          return;
+        } catch (e) { localStorage.removeItem('da_data_cache'); }
+      }
 
       // 2. Re-read cached file handle (no prompt needed)
       if (daDataHandle) {
         try {
           const file = await daDataHandle.getFile();
           daData = JSON.parse(await file.text());
+          cacheDAData();
           populateDAChoices();
           if (interactive) toast('Galleries & Groups synced', 'success');
           return;
@@ -1782,6 +1858,7 @@
             daDataHandle = fh;
             const file = await fh.getFile();
             daData = JSON.parse(await file.text());
+            cacheDAData();
             populateDAChoices();
             toast('Galleries & Groups loaded from ' + fh.name, 'success');
           } else {
@@ -1789,6 +1866,7 @@
             inp.onchange = async ev => {
               const f = ev.target.files[0]; if (!f) return;
               daData = JSON.parse(await f.text());
+              cacheDAData();
               populateDAChoices();
               toast('Galleries & Groups loaded from ' + f.name, 'success');
             };
@@ -1825,7 +1903,23 @@
       sel.style.display = cb.checked ? 'inline-block' : 'none';
     }
 
+    // ── THEME ──────────────────────────────────────────────────────────────────
+    function toggleTheme() {
+      const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeIcon();
+    }
+    function updateThemeIcon() {
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      document.getElementById('theme-toggle').innerHTML = isLight
+        ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+        : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>';
+    }
+    updateThemeIcon();
+
     // INIT
+    autoLoadCSV();
     loadDAData(false);
     applyFilters(); updateStats();
   </script>
