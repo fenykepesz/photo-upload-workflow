@@ -1537,6 +1537,37 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             page.keyboard.press("Enter")
             page.wait_for_timeout(300)
         print(f"    Tags entered: {len(tags_to_add)}")
+
+        # DA auto-applies suggested tags as we type — remove excess if over 30.
+        page.wait_for_timeout(1000)  # Let DA finish auto-applying
+        removed = page.evaluate(f"""
+            (() => {{
+                const LIMIT = {TAG_LIMIT};
+                // Find all tag chip remove buttons (x/close icons inside tag chips)
+                // DA tag chips are buttons with an 'x' or SVG close icon
+                const allBtns = Array.from(document.querySelectorAll('button'));
+                // Tag chips: small buttons with short text and a sibling/child close icon
+                const tagArea = document.querySelector('[class*="tag"], [class*="Tag"]');
+                if (!tagArea) return 0;
+                const chips = tagArea.querySelectorAll('button');
+                const count = chips.length;
+                if (count <= LIMIT) return 0;
+                // Remove from the end (most recently auto-added) until at limit
+                let removed = 0;
+                for (let i = count - 1; i >= 0 && (count - removed) > LIMIT; i--) {{
+                    // Look for close/remove icon within or near the chip
+                    const closeBtn = chips[i].querySelector('svg, [class*="close"], [class*="remove"]')
+                        || chips[i];
+                    if (closeBtn) {{
+                        closeBtn.click();
+                        removed++;
+                    }}
+                }}
+                return removed;
+            }})()
+        """)
+        if removed > 0:
+            print(f"    Removed {removed} excess tags (DA auto-suggested)")
     else:
         print("    WARNING: Could not find tag input")
 
