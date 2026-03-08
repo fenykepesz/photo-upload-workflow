@@ -1569,13 +1569,16 @@
       tryOembed(r.stash_url_nsfw, true);
     }
 
-    async function tryOembed(stashUrl, userTriggered = false) {
+    function tryOembed(stashUrl, userTriggered = false) {
       if (!stashUrl) return;
-      const oEmbedUrl = `https://backend.deviantart.com/oembed?url=${encodeURIComponent(stashUrl)}&format=json`;
-      try {
-        const res = await fetch(oEmbedUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+      if (userTriggered) {
+        document.getElementById('preview-ph').innerHTML = `<small style="color:var(--muted)">Loading preview...</small>`;
+      }
+      const cbName = '_oembedCb_' + Date.now();
+      const script = document.createElement('script');
+      const cleanup = () => { delete window[cbName]; script.remove(); };
+      window[cbName] = function(data) {
+        cleanup();
         const thumb = data.thumbnail_url || data.url;
         if (thumb) {
           const img = document.getElementById('preview-img');
@@ -1588,11 +1591,15 @@
             if (userTriggered) toast('Could not load image. Open on Sta.sh instead.', 'info');
           };
         }
-      } catch (e) {
+      };
+      script.src = `https://backend.deviantart.com/oembed?url=${encodeURIComponent(stashUrl)}&format=jsonp&callback=${cbName}`;
+      script.onerror = () => {
+        cleanup();
         if (userTriggered) {
-          document.getElementById('preview-ph').innerHTML = `<small style="color:var(--muted)">Preview not available due to browser security.<br>Use the "View on Sta.sh" links below.</small>`;
+          document.getElementById('preview-ph').innerHTML = `<small style="color:var(--muted)">Preview not available.<br>Use the "View on Sta.sh" links below.</small>`;
         }
-      }
+      };
+      document.head.appendChild(script);
     }
 
     // ── QUICK STATUS ───────────────────────────────────────────────────────────────
