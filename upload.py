@@ -1503,11 +1503,9 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             return document.querySelectorAll('span[class*="reset-button"][class*="ds-card"]').length;
         })()
     """)
-    remaining_slots = max(0, TAG_LIMIT - existing_tag_count)
     if existing_tag_count > 0:
-        print(f"  DA has {existing_tag_count} pre-existing tags, room for {remaining_slots} more")
-    tags_to_add = tags[:remaining_slots]
-    print(f"  Adding {len(tags_to_add)} of {len(tags)} tags...")
+        print(f"  DA has {existing_tag_count} pre-existing tags")
+    print(f"  Adding tags (limit {TAG_LIMIT}, have {len(tags)})...")
     tag_activated = page.evaluate("""
         (() => {
             const inputs = Array.from(document.querySelectorAll('input'));
@@ -1523,42 +1521,23 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     """)
     if tag_activated:
         page.wait_for_timeout(500)
-        for tag in tags_to_add:
+        entered = 0
+        for tag in tags:
+            # Check chip count before each tag — stop at limit
+            chip_count = page.evaluate(
+                "(() => document.querySelectorAll('span[class*=\"reset-button\"][class*=\"ds-card\"]').length)()"
+            )
+            if chip_count >= TAG_LIMIT:
+                print(f"    Reached {TAG_LIMIT} tag chips, stopping ({entered} tags entered)")
+                break
             page.keyboard.type(tag, delay=50)
             page.keyboard.press("Enter")
-            page.wait_for_timeout(200)
-            # Dismiss autocomplete suggestion to prevent concatenation with next tag
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(200)
-        print(f"    Tags entered: {len(tags_to_add)}")
-
-        # DA may auto-apply suggested tags — count chips and remove excess via Backspace.
-        page.wait_for_timeout(1000)
-        chip_count = page.evaluate("""
-            (() => document.querySelectorAll('span[class*="reset-button"][class*="ds-card"]').length)()
-        """)
-        print(f"    Tag chips total: {chip_count}")
-        if chip_count > TAG_LIMIT:
-            # Focus tag input and press Backspace to remove excess tags from the end
-            excess = chip_count - TAG_LIMIT
-            print(f"    Removing {excess} excess tags via Backspace...")
-            page.evaluate("""
-                (() => {
-                    const inputs = Array.from(document.querySelectorAll('input'));
-                    const tagInput = inputs.find(el =>
-                        el.type === 'text' && el.name !== 'title' && el.placeholder !== 'Search'
-                    );
-                    if (tagInput) { tagInput.focus(); tagInput.click(); }
-                })()
-            """)
-            page.wait_for_timeout(300)
-            for _ in range(excess):
-                page.keyboard.press("Backspace")
-                page.wait_for_timeout(200)
-            final_count = page.evaluate("""
-                (() => document.querySelectorAll('span[class*="reset-button"][class*="ds-card"]').length)()
-            """)
-            print(f"    After removal: {final_count} tags")
+            page.wait_for_timeout(400)
+            entered += 1
+        final_count = page.evaluate(
+            "(() => document.querySelectorAll('span[class*=\"reset-button\"][class*=\"ds-card\"]').length)()"
+        )
+        print(f"    Tags: {entered} entered, {final_count} chips total")
     else:
         print("    WARNING: Could not find tag input")
 
