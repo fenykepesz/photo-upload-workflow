@@ -1548,6 +1548,31 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
             page.wait_for_timeout(300)
         print(f"    Tags entered: {len(tags_to_add)}")
 
+        # Diagnostic: dump what elements exist near the tag input after entering tags
+        tag_diag = page.evaluate("""
+            (() => {
+                const inputs = Array.from(document.querySelectorAll('input'));
+                const tagInput = inputs.find(el =>
+                    el.type === 'text' && el.name !== 'title' && el.placeholder !== 'Search'
+                );
+                if (!tagInput) return 'no_tag_input_found';
+                // Walk up several parent levels and describe children
+                const levels = [];
+                let container = tagInput.parentElement;
+                for (let i = 0; i < 4; i++) {
+                    if (!container) break;
+                    const kids = Array.from(container.children).slice(0, 15).map(c => {
+                        const r = c.getBoundingClientRect();
+                        return `<${c.tagName}> cls="${(c.className||'').toString().slice(0,40)}" text="${c.textContent.trim().slice(0,20)}" ${Math.round(r.width)}x${Math.round(r.height)}`;
+                    });
+                    levels.push(`L${i} <${container.tagName}> cls="${(container.className||'').toString().slice(0,40)}": [${kids.join(' | ')}]`);
+                    container = container.parentElement;
+                }
+                return levels.join('\\n');
+            })()
+        """)
+        print(f"    TAG AREA DIAGNOSTIC:\\n{tag_diag}")
+
         # DA may auto-apply suggested tags — count chips in the Tags zone and remove excess.
         page.wait_for_timeout(1000)
         excess_result = page.evaluate(f"""
