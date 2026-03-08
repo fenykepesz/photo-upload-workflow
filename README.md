@@ -216,12 +216,12 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 - Posts a photo with a short text to the user's **Bluesky timeline**
 - Text is composed from the photo **title + hashtags** from keywords, respecting the **300-character limit**
 - Hashtags are added one by one until the limit is reached
-- **NSFW handling:** If `da_nsfw_flag` is `TRUE`, the photo is uploaded with Bluesky's **Labels** content warning (adult content)
+- **NSFW handling:** If a content warning dialog appears automatically, Bluesky's **Nudity** label is selected
 - Uses the browser compose flow: no API keys or app passwords needed
 
 ### Facebook
 
-- Posts a photo with the **title as caption** to the user's **personal timeline**
+- Posts a photo with **model credit + caption** to the user's **personal timeline** (no social links)
 - **NSFW safety:** If `da_nsfw_flag` is `TRUE`, only the safe image (`stash_url_safe`) is used — if missing, the upload **fails** (NSFW photos are never uploaded to Facebook)
 - For non-NSFW photos, uses the standard `stash_url_nsfw` image
 - Uses the browser "Create post" flow: open composer, write caption, attach photo, post
@@ -249,9 +249,10 @@ TheSpiritofArt:Featured,Street-Shooters:Candid
 
 ### Model Credit
 
-If `model_name` is set (e.g. `Elena`), this line is appended to descriptions:
+If `model_name` is set (e.g. `Elena`), this is prepended to descriptions (before the caption):
 
-> Model: Elena. Please respect the model.
+> Model: Elena
+> Please respect the model.
 
 ### Social Links
 
