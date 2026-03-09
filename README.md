@@ -93,8 +93,8 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `upload_id` | Unique ID | `PH-2026-001` |
 | `scheduled_date` | Date to publish (`YYYY-MM-DD`) | `2026-03-01` |
 | `scheduled_time` | Time of day (informational) | `10:00` |
-| `stash_url_nsfw` | Sta.sh URL for the photo | `https://sta.sh/0abc123` |
-| `stash_url_safe` | Sta.sh URL for safe crop (used by Facebook) | |
+| `stash_url_nsfw` | Sta.sh URL for the photo (primary image) | `https://sta.sh/0abc123` |
+| `stash_url_safe` | Sta.sh URL for safe crop (used for NSFW photos on Facebook) | |
 | `title` | Photo title | `The Delivery Man, Bangkok` |
 | `caption` | Description/caption | `A candid moment on the streets...` |
 | `keywords` | Comma-separated tags | `Bangkok,street,Fujifilm` |
@@ -125,6 +125,7 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `Approved` | Ready for upload (script picks up these rows) |
 | `Uploaded` | Successfully published to all target platforms |
 | `Partial` | Some platforms succeeded; check `error_log` |
+| `Skipped` | Manually skipped or deferred |
 | `Failed` | All platforms failed; check `error_log` |
 
 ---
@@ -208,14 +209,16 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 
 - Posts a photo with a short text to the user's **X.com timeline**
 - Text is composed from the photo **title + hashtags** from keywords, respecting the **280-character limit**
-- Hashtags are added one by one until the limit is reached
+- Title and hashtags are separated by a blank line
+- Hashtags are added one by one until the limit is reached; hyphens are stripped from tags
 - Uses the browser compose flow: no API keys or developer account needed
 
 ### Bluesky
 
 - Posts a photo with a short text to the user's **Bluesky timeline**
 - Text is composed from the photo **title + hashtags** from keywords, respecting the **300-character limit**
-- Hashtags are added one by one until the limit is reached
+- Title and hashtags are separated by a blank line
+- Hashtags are added one by one until the limit is reached; hyphens are stripped from tags
 - **NSFW handling:** If a content warning dialog appears automatically, Bluesky's **Nudity** label is selected
 - Uses the browser compose flow: no API keys or app passwords needed
 
