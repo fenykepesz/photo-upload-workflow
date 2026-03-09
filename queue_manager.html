@@ -1306,10 +1306,24 @@
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
     function parseCSV(txt) {
-      const lines = txt.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-      if (!lines.length) return [];
-      const hdr = parseLine(lines[0]);
-      return lines.slice(1).filter(l => l.trim()).map(l => {
+      const text = txt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      // Split into logical rows respecting quoted fields that span multiple lines
+      const rows = [];
+      let cur = '', inQ = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"') {
+          if (inQ && i + 1 < text.length && text[i + 1] === '"') { cur += '""'; i++; }
+          else { inQ = !inQ; cur += c; }
+        } else if (c === '\n' && !inQ) {
+          if (cur.trim()) rows.push(cur);
+          cur = '';
+        } else { cur += c; }
+      }
+      if (cur.trim()) rows.push(cur);
+      if (!rows.length) return [];
+      const hdr = parseLine(rows[0]);
+      return rows.slice(1).map(l => {
         const vals = parseLine(l), obj = {};
         hdr.forEach((h, i) => obj[h] = vals[i] || '');
         return obj;
@@ -1381,6 +1395,12 @@
       const csv = toCSV(rows);
       cacheCSV(csv, localStorage.getItem('csv_filename') || 'upload_queue.csv');
       try {
+        if (!fileHandle && 'showSaveFilePicker' in window) {
+          fileHandle = await showSaveFilePicker({
+            suggestedName: localStorage.getItem('csv_filename') || 'upload_queue.csv',
+            types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }]
+          });
+        }
         if (fileHandle) {
           const w = await fileHandle.createWritable();
           await w.write(csv); await w.close();
@@ -1391,7 +1411,7 @@
           URL.revokeObjectURL(url);
           toast('Downloaded CSV', 'info');
         }
-      } catch (e) { toast('Save error: ' + e.message, 'error'); }
+      } catch (e) { if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error'); }
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────

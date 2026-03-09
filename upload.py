@@ -102,7 +102,7 @@ def save_row_update(csv_path, upload_id, updates):
             fieldnames.append(key)
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -851,34 +851,46 @@ BSKY_CHAR_LIMIT = 300
 
 
 def build_x_post_text(title, keywords_str):
-    """Build a tweet from title + hashtags, fitting within 280 characters."""
+    """Build a tweet from title + hashtags, fitting within 280 characters.
+    Title and hashtags are separated by a blank line. Hyphens are stripped from tags."""
     text = title.strip()
     if not keywords_str:
         return text[:X_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    hashtags = ""
     for tag in tags:
-        hashtag = "#" + tag.replace(" ", "")
-        candidate = text + " " + hashtag
-        if len(candidate) <= X_CHAR_LIMIT:
-            text = candidate
+        hashtag = "#" + tag.replace(" ", "").replace("-", "")
+        sep = " " if hashtags else ""
+        candidate_tags = hashtags + sep + hashtag
+        full = text + "\n\n" + candidate_tags
+        if len(full) <= X_CHAR_LIMIT:
+            hashtags = candidate_tags
         else:
             break
+    if hashtags:
+        text = text + "\n\n" + hashtags
     return text
 
 
 def build_bsky_post_text(title, keywords_str):
-    """Build a Bluesky post from title + hashtags, fitting within 300 characters."""
+    """Build a Bluesky post from title + hashtags, fitting within 300 characters.
+    Title and hashtags are separated by a blank line. Hyphens are stripped from tags."""
     text = title.strip()
     if not keywords_str:
         return text[:BSKY_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    hashtags = ""
     for tag in tags:
-        hashtag = "#" + tag.replace(" ", "")
-        candidate = text + " " + hashtag
-        if len(candidate) <= BSKY_CHAR_LIMIT:
-            text = candidate
+        hashtag = "#" + tag.replace(" ", "").replace("-", "")
+        sep = " " if hashtags else ""
+        candidate_tags = hashtags + sep + hashtag
+        full = text + "\n\n" + candidate_tags
+        if len(full) <= BSKY_CHAR_LIMIT:
+            hashtags = candidate_tags
         else:
             break
+    if hashtags:
+        text = text + "\n\n" + hashtags
     return text
 
 
