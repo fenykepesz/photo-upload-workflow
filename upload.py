@@ -1181,42 +1181,58 @@ def resolve_fb_names(page, profile_urls_str):
     """
     Given a comma-separated string of Facebook profile URLs,
     visit each profile and extract the display name.
+    Uses mobile Facebook (m.facebook.com) for server-rendered HTML,
+    falls back to desktop if needed.
     Returns list of display names (skips unresolvable profiles).
     """
     REJECT_NAMES = {"facebook", "log in", "log into facebook", "notifications",
-                    "page not found", "content not found", ""}
+                    "page not found", "content not found", "meta",
+                    "welcome to facebook", ""}
     if not profile_urls_str or not profile_urls_str.strip():
         return []
     urls = [u.strip() for u in profile_urls_str.split(",") if u.strip()]
     names = []
+
+    # Warm up session — visit Facebook first so cookies are active
+    try:
+        page.goto("https://m.facebook.com/", wait_until="domcontentloaded", timeout=10000)
+        page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
     for url in urls:
         try:
-            # Normalize URL
             if not url.startswith("http"):
                 url = "https://" + url
-            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+
+            # Extract profile slug for mobile URL
+            mobile_url = url.replace("www.facebook.com", "m.facebook.com")
+            if "m.facebook.com" not in mobile_url:
+                mobile_url = url.replace("facebook.com", "m.facebook.com")
+
+            # Try mobile Facebook first (server-rendered, name in HTML)
+            page.goto(mobile_url, wait_until="domcontentloaded", timeout=15000)
             page.wait_for_timeout(3000)
 
-            # Wait for the profile page to fully render (not a redirect page)
-            # Facebook profile pages have an h1 with the person's name
-            # but we may land on Notifications or other pages if redirected
             name = page.evaluate("""() => {
-                // Check we're actually on a profile page (URL contains the profile slug)
-                const url = window.location.href;
-
-                // Method 1: Look for the profile name in structured data
+                // Mobile FB profile: name is in <title>, og:title, or a strong/h1 tag
                 const ogTitle = document.querySelector('meta[property="og:title"]');
                 if (ogTitle) {
                     const val = ogTitle.getAttribute('content')?.trim();
-                    if (val) return val;
+                    if (val && val.toLowerCase() !== 'facebook') return val;
                 }
 
-                // Method 2: Page title (most reliable)
                 const title = document.title || '';
-                const cleaned = title.replace(/\\s*[|\\-–]\\s*Facebook.*$/i, '').trim();
-                if (cleaned) return cleaned;
+                let cleaned = title.replace(/\\s*[|\\-–]\\s*Facebook.*$/i, '').trim();
+                if (cleaned && cleaned.toLowerCase() !== 'facebook') return cleaned;
 
-                // Method 3: h1 on the page
+                // Mobile-specific selectors
+                const nameEl = document.querySelector(
+                    '#cover-name-root strong, [data-sigil="profile-name"], ' +
+                    'h1 span, h3 span strong'
+                );
+                if (nameEl) return nameEl.textContent.trim();
+
                 const h1 = document.querySelector('h1');
                 if (h1) return h1.textContent.trim();
 
@@ -1226,6 +1242,30 @@ def resolve_fb_names(page, profile_urls_str):
             if name and name.lower() not in REJECT_NAMES:
                 names.append(name)
                 print(f"    Resolved: {url} → {name}")
+                continue
+
+            # Fallback: try desktop version with full JS rendering
+            page.goto(url, wait_until="networkidle", timeout=20000)
+            page.wait_for_timeout(5000)
+
+            name = page.evaluate("""() => {
+                const ogTitle = document.querySelector('meta[property="og:title"]');
+                if (ogTitle) {
+                    const val = ogTitle.getAttribute('content')?.trim();
+                    if (val && val.toLowerCase() !== 'facebook') return val;
+                }
+                const title = document.title || '';
+                const cleaned = title.replace(/\\s*[|\\-–]\\s*Facebook.*$/i, '').trim();
+                if (cleaned && cleaned.toLowerCase() !== 'facebook') return cleaned;
+                // Try profile-specific h1 (React-rendered)
+                const h1 = document.querySelector('h1');
+                if (h1) return h1.textContent.trim();
+                return '';
+            }""")
+
+            if name and name.lower() not in REJECT_NAMES:
+                names.append(name)
+                print(f"    Resolved (desktop): {url} → {name}")
             else:
                 print(f"    WARNING: Could not resolve name from {url} (got: '{name}')")
         except Exception as e:
@@ -1380,26 +1420,29 @@ def upload_to_fb(page, caption, image_path, location="", tag_names=None, feeling
         return False
 
     # ── Check In to Location ──
+    # Scope all inputs to the composer dialog to avoid matching the main FB search bar.
+    dialog = page.locator('[role="dialog"]').last
     if location:
         print(f"  Checking in to: {location}")
         try:
             if fb_clear_and_click("Check in"):
-                page.wait_for_timeout(1500)
-                # Type in the location search input
-                search_input = page.locator(
+                page.wait_for_timeout(2000)
+                # Search input WITHIN the composer dialog only
+                search_input = dialog.locator(
                     'input[placeholder*="location" i], input[placeholder*="Where" i], '
-                    'input[type="search"], input[aria-label*="location" i]'
+                    'input[aria-label*="location" i], input[aria-label*="Search" i], '
+                    'input[type="search"]'
                 )
                 if search_input.count() > 0:
                     search_input.first.fill(location, timeout=5000)
                     page.wait_for_timeout(2500)
-                    # Click the first result
-                    result = page.locator('[role="option"], [role="listbox"] [role="button"]').first
+                    # Click the first result within the dialog
+                    result = dialog.locator('[role="option"], [role="listbox"] [role="button"]').first
                     result.click(timeout=5000)
                     page.wait_for_timeout(1000)
                     print(f"    Location set: {location}")
                 else:
-                    print(f"    WARNING: Location search input not found")
+                    print(f"    WARNING: Location search input not found in dialog")
             else:
                 print(f"    WARNING: Check-in button not found in composer")
         except Exception as e:
@@ -1410,28 +1453,30 @@ def upload_to_fb(page, caption, image_path, location="", tag_names=None, feeling
         print(f"  Tagging people: {', '.join(tag_names)}")
         try:
             if fb_clear_and_click("Tag people"):
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(2000)
                 for name in tag_names:
                     try:
-                        tag_search = page.locator(
+                        # Search within the dialog only
+                        tag_search = dialog.locator(
                             'input[placeholder*="tag" i], input[placeholder*="friend" i], '
-                            'input[type="search"], input[aria-label*="tag" i]'
+                            'input[aria-label*="tag" i], input[aria-label*="Search" i], '
+                            'input[type="search"]'
                         )
                         if tag_search.count() > 0:
                             tag_search.first.fill(name, timeout=5000)
                             page.wait_for_timeout(2500)
-                            # Click the first matching result
-                            match = page.locator('[role="option"], [role="listbox"] [role="button"]').first
+                            # Click the first matching result within the dialog
+                            match = dialog.locator('[role="option"], [role="listbox"] [role="button"]').first
                             match.click(timeout=5000)
                             page.wait_for_timeout(1000)
                             print(f"    Tagged: {name}")
                         else:
-                            print(f"    WARNING: Tag search input not found")
+                            print(f"    WARNING: Tag search input not found in dialog")
                     except Exception as e:
                         print(f"    WARNING: Could not tag {name}: {e}")
                 # Close/confirm the tag dialog
                 try:
-                    done_btn = page.locator('[aria-label="Done"], [aria-label="Save"]')
+                    done_btn = dialog.locator('[aria-label="Done"], [aria-label="Save"]')
                     if done_btn.count() > 0:
                         done_btn.first.click(timeout=3000)
                         page.wait_for_timeout(1000)
@@ -1462,21 +1507,21 @@ def upload_to_fb(page, caption, image_path, location="", tag_names=None, feeling
                         page.wait_for_timeout(1000)
                 except Exception:
                     pass  # May not have tabs
-                # Search for the feeling
-                feeling_search = page.locator(
+                # Search for the feeling within the dialog
+                feeling_search = dialog.locator(
                     'input[placeholder*="Search" i], input[type="search"]'
                 )
                 if feeling_search.count() > 0:
                     feeling_search.first.fill(feeling, timeout=5000)
                     page.wait_for_timeout(2000)
-                    # Click the first matching feeling
-                    result = page.locator('[role="option"], [role="listbox"] [role="button"], [role="menuitem"]').first
+                    # Click the first matching feeling within the dialog
+                    result = dialog.locator('[role="option"], [role="listbox"] [role="button"], [role="menuitem"]').first
                     result.click(timeout=5000)
                     page.wait_for_timeout(1000)
                     print(f"    Feeling set: {feeling}")
                 else:
                     # No search — try clicking the feeling text directly
-                    feeling_option = page.locator(f'text="{feeling}"').first
+                    feeling_option = dialog.locator(f'text="{feeling}"').first
                     feeling_option.click(timeout=5000)
                     page.wait_for_timeout(1000)
                     print(f"    Feeling set: {feeling}")
