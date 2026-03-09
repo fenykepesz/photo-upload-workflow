@@ -1183,6 +1183,8 @@ def resolve_fb_names(page, profile_urls_str):
     visit each profile and extract the display name.
     Returns list of display names (skips unresolvable profiles).
     """
+    REJECT_NAMES = {"facebook", "log in", "log into facebook", "notifications",
+                    "page not found", "content not found", ""}
     if not profile_urls_str or not profile_urls_str.strip():
         return []
     urls = [u.strip() for u in profile_urls_str.split(",") if u.strip()]
@@ -1193,20 +1195,39 @@ def resolve_fb_names(page, profile_urls_str):
             if not url.startswith("http"):
                 url = "https://" + url
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            page.wait_for_timeout(2000)
-            # Try to get the profile name from the h1 or title
+            page.wait_for_timeout(3000)
+
+            # Wait for the profile page to fully render (not a redirect page)
+            # Facebook profile pages have an h1 with the person's name
+            # but we may land on Notifications or other pages if redirected
             name = page.evaluate("""() => {
-                const h1 = document.querySelector('h1');
-                if (h1 && h1.textContent.trim()) return h1.textContent.trim();
+                // Check we're actually on a profile page (URL contains the profile slug)
+                const url = window.location.href;
+
+                // Method 1: Look for the profile name in structured data
+                const ogTitle = document.querySelector('meta[property="og:title"]');
+                if (ogTitle) {
+                    const val = ogTitle.getAttribute('content')?.trim();
+                    if (val) return val;
+                }
+
+                // Method 2: Page title (most reliable)
                 const title = document.title || '';
-                // Facebook titles are usually "Name | Facebook" or "Name - Facebook"
-                return title.replace(/\\s*[|\\-–]\\s*Facebook.*$/i, '').trim();
+                const cleaned = title.replace(/\\s*[|\\-–]\\s*Facebook.*$/i, '').trim();
+                if (cleaned) return cleaned;
+
+                // Method 3: h1 on the page
+                const h1 = document.querySelector('h1');
+                if (h1) return h1.textContent.trim();
+
+                return '';
             }""")
-            if name and name.lower() not in ("facebook", "log in", "log into facebook"):
+
+            if name and name.lower() not in REJECT_NAMES:
                 names.append(name)
                 print(f"    Resolved: {url} → {name}")
             else:
-                print(f"    WARNING: Could not resolve name from {url}")
+                print(f"    WARNING: Could not resolve name from {url} (got: '{name}')")
         except Exception as e:
             print(f"    WARNING: Could not visit {url}: {e}")
     return names
@@ -1314,133 +1335,9 @@ def upload_to_fb(page, caption, image_path, location="", tag_names=None, feeling
 
     page.wait_for_timeout(1000)
 
-    # ── Check In to Location ──
-    if location:
-        print(f"  Checking in to: {location}")
-        try:
-            # Click the "Check in" button in the composer toolbar
-            checkin_btn = page.locator(
-                '[aria-label*="Check in"], [aria-label*="check in"], '
-                '[aria-label*="Location"], [aria-label*="location"]'
-            )
-            if checkin_btn.count() > 0:
-                checkin_btn.first.click(timeout=5000)
-                page.wait_for_timeout(1500)
-                # Type in the location search input
-                search_input = page.locator(
-                    'input[placeholder*="location"], input[placeholder*="Where"], '
-                    'input[type="search"], input[aria-label*="location"]'
-                )
-                if search_input.count() > 0:
-                    search_input.first.fill(location, timeout=5000)
-                    page.wait_for_timeout(2000)
-                    # Click the first result
-                    result = page.locator('[role="option"], [role="listbox"] [role="button"]').first
-                    result.click(timeout=5000)
-                    page.wait_for_timeout(1000)
-                    print(f"    Location set: {location}")
-                else:
-                    print(f"    WARNING: Location search input not found")
-            else:
-                print(f"    WARNING: Check-in button not found in composer")
-        except Exception as e:
-            print(f"    WARNING: Could not set location: {e}")
-
-    # ── Tag People ──
-    if tag_names:
-            print(f"  Tagging people: {', '.join(tag_names)}")
-            try:
-                tag_btn = page.locator(
-                    '[aria-label*="Tag people"], [aria-label*="tag people"], '
-                    '[aria-label*="Tag People"]'
-                )
-                if tag_btn.count() > 0:
-                    tag_btn.first.click(timeout=5000)
-                    page.wait_for_timeout(1500)
-                    for name in tag_names:
-                        try:
-                            tag_search = page.locator(
-                                'input[placeholder*="tag"], input[placeholder*="friend"], '
-                                'input[type="search"], input[aria-label*="tag"]'
-                            )
-                            if tag_search.count() > 0:
-                                tag_search.first.fill(name, timeout=5000)
-                                page.wait_for_timeout(2000)
-                                # Click the first matching result
-                                match = page.locator('[role="option"], [role="listbox"] [role="button"]').first
-                                match.click(timeout=5000)
-                                page.wait_for_timeout(1000)
-                                print(f"    Tagged: {name}")
-                            else:
-                                print(f"    WARNING: Tag search input not found")
-                        except Exception as e:
-                            print(f"    WARNING: Could not tag {name}: {e}")
-                    # Close/confirm the tag dialog
-                    try:
-                        done_btn = page.locator('[aria-label="Done"], [aria-label="Save"]')
-                        if done_btn.count() > 0:
-                            done_btn.first.click(timeout=3000)
-                            page.wait_for_timeout(1000)
-                    except Exception:
-                        pass  # Dialog may auto-close
-                else:
-                    print(f"    WARNING: Tag People button not found in composer")
-            except Exception as e:
-                print(f"    WARNING: Could not tag people: {e}")
-
-    # ── Feeling/Activity ──
-    if feeling:
-        print(f"  Setting feeling: {feeling}")
-        try:
-            feeling_btn = page.locator(
-                '[aria-label*="Feeling"], [aria-label*="feeling"], '
-                '[aria-label*="Activity"], [aria-label*="activity"]'
-            )
-            if feeling_btn.count() > 0:
-                feeling_btn.first.click(timeout=5000)
-                page.wait_for_timeout(1500)
-                # Click the "Feelings" tab if it exists
-                try:
-                    feelings_tab = page.locator('text="Feelings"')
-                    if feelings_tab.count() > 0:
-                        feelings_tab.first.click(timeout=3000)
-                        page.wait_for_timeout(1000)
-                except Exception:
-                    pass  # May not have tabs
-                # Search for the feeling
-                feeling_search = page.locator(
-                    'input[placeholder*="Search"], input[placeholder*="search"], '
-                    'input[type="search"]'
-                )
-                if feeling_search.count() > 0:
-                    feeling_search.first.fill(feeling, timeout=5000)
-                    page.wait_for_timeout(1500)
-                    # Click the first matching feeling
-                    result = page.locator('[role="option"], [role="listbox"] [role="button"], [role="menuitem"]').first
-                    result.click(timeout=5000)
-                    page.wait_for_timeout(1000)
-                    print(f"    Feeling set: {feeling}")
-                else:
-                    # No search — try clicking the feeling text directly
-                    feeling_option = page.locator(f'text="{feeling}"').first
-                    feeling_option.click(timeout=5000)
-                    page.wait_for_timeout(1000)
-                    print(f"    Feeling set: {feeling}")
-            else:
-                print(f"    WARNING: Feeling/Activity button not found in composer")
-        except Exception as e:
-            print(f"    WARNING: Could not set feeling: {e}")
-
-    page.wait_for_timeout(1000)
-
-    if no_submit:
-        print("  --no-submit: skipping post")
-        return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
-
-    # Submit — Facebook has overlay divs that intercept pointer events.
-    # Use elementsFromPoint() to find and disable ALL overlays above the button.
-    print("  Posting...")
-
+    # ── Helper: clear overlay divs and click a button by aria-label ──
+    # Facebook has overlay divs that intercept pointer events on toolbar buttons.
+    # Use elementsFromPoint() to find and disable ALL overlays above the target.
     def fb_clear_and_click(aria_label):
         """Find an enabled button by aria-label, disable overlays above it, then click."""
         info = page.evaluate("""(label) => {
@@ -1481,6 +1378,121 @@ def upload_to_fb(page, caption, image_path, location="", tag_names=None, feeling
                 btn.click(timeout=5000)
                 return True
         return False
+
+    # ── Check In to Location ──
+    if location:
+        print(f"  Checking in to: {location}")
+        try:
+            if fb_clear_and_click("Check in"):
+                page.wait_for_timeout(1500)
+                # Type in the location search input
+                search_input = page.locator(
+                    'input[placeholder*="location" i], input[placeholder*="Where" i], '
+                    'input[type="search"], input[aria-label*="location" i]'
+                )
+                if search_input.count() > 0:
+                    search_input.first.fill(location, timeout=5000)
+                    page.wait_for_timeout(2500)
+                    # Click the first result
+                    result = page.locator('[role="option"], [role="listbox"] [role="button"]').first
+                    result.click(timeout=5000)
+                    page.wait_for_timeout(1000)
+                    print(f"    Location set: {location}")
+                else:
+                    print(f"    WARNING: Location search input not found")
+            else:
+                print(f"    WARNING: Check-in button not found in composer")
+        except Exception as e:
+            print(f"    WARNING: Could not set location: {e}")
+
+    # ── Tag People ──
+    if tag_names:
+        print(f"  Tagging people: {', '.join(tag_names)}")
+        try:
+            if fb_clear_and_click("Tag people"):
+                page.wait_for_timeout(1500)
+                for name in tag_names:
+                    try:
+                        tag_search = page.locator(
+                            'input[placeholder*="tag" i], input[placeholder*="friend" i], '
+                            'input[type="search"], input[aria-label*="tag" i]'
+                        )
+                        if tag_search.count() > 0:
+                            tag_search.first.fill(name, timeout=5000)
+                            page.wait_for_timeout(2500)
+                            # Click the first matching result
+                            match = page.locator('[role="option"], [role="listbox"] [role="button"]').first
+                            match.click(timeout=5000)
+                            page.wait_for_timeout(1000)
+                            print(f"    Tagged: {name}")
+                        else:
+                            print(f"    WARNING: Tag search input not found")
+                    except Exception as e:
+                        print(f"    WARNING: Could not tag {name}: {e}")
+                # Close/confirm the tag dialog
+                try:
+                    done_btn = page.locator('[aria-label="Done"], [aria-label="Save"]')
+                    if done_btn.count() > 0:
+                        done_btn.first.click(timeout=3000)
+                        page.wait_for_timeout(1000)
+                except Exception:
+                    pass  # Dialog may auto-close
+            else:
+                print(f"    WARNING: Tag People button not found in composer")
+        except Exception as e:
+            print(f"    WARNING: Could not tag people: {e}")
+
+    # ── Feeling/Activity ──
+    if feeling:
+        print(f"  Setting feeling: {feeling}")
+        try:
+            # Try multiple aria-label variants for the feeling button
+            clicked = False
+            for label in ["Feeling/activity", "Feeling/Activity", "Feeling", "Activity"]:
+                if fb_clear_and_click(label):
+                    clicked = True
+                    break
+            if clicked:
+                page.wait_for_timeout(1500)
+                # Click the "Feelings" tab if tabs exist
+                try:
+                    feelings_tab = page.locator('text="Feelings"')
+                    if feelings_tab.count() > 0:
+                        feelings_tab.first.click(timeout=3000)
+                        page.wait_for_timeout(1000)
+                except Exception:
+                    pass  # May not have tabs
+                # Search for the feeling
+                feeling_search = page.locator(
+                    'input[placeholder*="Search" i], input[type="search"]'
+                )
+                if feeling_search.count() > 0:
+                    feeling_search.first.fill(feeling, timeout=5000)
+                    page.wait_for_timeout(2000)
+                    # Click the first matching feeling
+                    result = page.locator('[role="option"], [role="listbox"] [role="button"], [role="menuitem"]').first
+                    result.click(timeout=5000)
+                    page.wait_for_timeout(1000)
+                    print(f"    Feeling set: {feeling}")
+                else:
+                    # No search — try clicking the feeling text directly
+                    feeling_option = page.locator(f'text="{feeling}"').first
+                    feeling_option.click(timeout=5000)
+                    page.wait_for_timeout(1000)
+                    print(f"    Feeling set: {feeling}")
+            else:
+                print(f"    WARNING: Feeling/Activity button not found in composer")
+        except Exception as e:
+            print(f"    WARNING: Could not set feeling: {e}")
+
+    page.wait_for_timeout(1000)
+
+    if no_submit:
+        print("  --no-submit: skipping post")
+        return {"success": True, "url_fb": "NO_SUBMIT", "error": ""}
+
+    # Submit
+    print("  Posting...")
 
     try:
         # Try Post/Share first (standard post flow), then Next (multi-step flow)
