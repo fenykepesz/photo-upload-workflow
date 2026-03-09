@@ -1355,6 +1355,19 @@
               <option>Portrait</option>
             </select>
           </div>
+          <div class="form-section" id="fb-settings-section" style="display:none">Facebook Settings</div>
+          <div class="fg fb-setting" style="display:none">
+            <label>Location <span style="font-weight:400;opacity:.6">(check-in)</span></label>
+            <input type="text" id="m-fb-location" placeholder="e.g. Budapest, Hungary">
+          </div>
+          <div class="fg fb-setting" style="display:none">
+            <label>Tag People <span style="font-weight:400;opacity:.6">(Facebook profile URLs, comma-separated)</span></label>
+            <input type="text" id="m-fb-tag-people" placeholder="e.g. https://facebook.com/john.doe">
+          </div>
+          <div class="fg fb-setting" style="display:none">
+            <label>Feeling <span style="font-weight:400;opacity:.6">(feeling/activity)</span></label>
+            <input type="text" id="m-fb-feeling" placeholder="e.g. inspired, grateful, creative">
+          </div>
           <div class="form-section">DeviantArt Advanced</div>
           <div class="form-full">
             <div class="auto-row">
@@ -1428,6 +1441,7 @@
     const COLS = ['upload_id', 'scheduled_date', 'scheduled_time',
       'stash_url_nsfw', 'stash_url_safe', 'title', 'caption', 'keywords',
       'da_nsfw_flag', 'category_500px', 'category_35p',
+      'fb_location', 'fb_tag_people', 'fb_feeling',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups'];
@@ -1783,7 +1797,11 @@
       document.getElementById('m-status').value = 'Approved';
       document.getElementById('m-cat-500px').value = '';
       document.getElementById('m-cat-35p').value = '';
+      document.getElementById('m-fb-location').value = '';
+      document.getElementById('m-fb-tag-people').value = '';
+      document.getElementById('m-fb-feeling').value = '';
       ['p-da', 'p-500', 'p-fb', 'p-35'].forEach(id => document.getElementById(id).checked = false);
+      updateFbSettings();
     }
     function openAddModal() {
       editId = null;
@@ -1792,6 +1810,7 @@
       document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
       document.getElementById('p-da').checked = true;
       updateRequiredFields();
+      updateFbSettings();
       document.getElementById('overlay').classList.add('open');
     }
     function openEditModal() { if (selId) openEditById(selId); }
@@ -1810,6 +1829,9 @@
       document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
       document.getElementById('m-cat-500px').value = r.category_500px || '';
       document.getElementById('m-cat-35p').value = r.category_35p || '';
+      document.getElementById('m-fb-location').value = r.fb_location || '';
+      document.getElementById('m-fb-tag-people').value = r.fb_tag_people || '';
+      document.getElementById('m-fb-feeling').value = r.fb_feeling || '';
       document.getElementById('m-status').value = r.status || 'Pending';
       document.getElementById('m-notes').value = r.notes || '';
       document.getElementById('m-model-name').value = r.model_name || '';
@@ -1843,6 +1865,7 @@
       document.getElementById('p-x').checked = pls.includes('X');
       document.getElementById('p-bsky').checked = pls.includes('BSKY');
       updateRequiredFields();
+      updateFbSettings();
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
@@ -1872,6 +1895,9 @@
         da_nsfw_flag: document.getElementById('m-nsfw-flag').checked ? 'TRUE' : 'FALSE',
         category_500px: document.getElementById('m-cat-500px').value,
         category_35p: document.getElementById('m-cat-35p').value,
+        fb_location: document.getElementById('m-fb-location').value.trim(),
+        fb_tag_people: document.getElementById('m-fb-tag-people').value.trim(),
+        fb_feeling: document.getElementById('m-fb-feeling').value.trim(),
         platforms,
         status: document.getElementById('m-status').value || 'Approved',
         model_name: document.getElementById('m-model-name').value.trim(),
@@ -1940,9 +1966,14 @@
       const label = document.getElementById(inputId)?.closest('.fg')?.querySelector('label');
       if (label) label.classList.toggle('required-star', !!required);
     }
+    function updateFbSettings() {
+      const show = document.getElementById('p-fb')?.checked;
+      document.getElementById('fb-settings-section').style.display = show ? '' : 'none';
+      document.querySelectorAll('.fb-setting').forEach(el => el.style.display = show ? '' : 'none');
+    }
     ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('change', updateRequiredFields);
+      if (el) el.addEventListener('change', () => { updateRequiredFields(); updateFbSettings(); });
     });
 
     document.addEventListener('keydown', e => {

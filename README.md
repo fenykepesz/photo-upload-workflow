@@ -101,6 +101,9 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `da_nsfw_flag` | Mark as Mature/NSFW (all platforms) | `TRUE` / `FALSE` |
 | `category_500px` | 500px category name | `Travel` |
 | `category_35p` | 35photo style/category | `City/Architecture` |
+| `fb_location` | Facebook check-in location | `Budapest, Hungary` |
+| `fb_tag_people` | Facebook profile URLs to tag (comma-separated) | `https://facebook.com/john.doe` |
+| `fb_feeling` | Facebook feeling/activity | `inspired` |
 | `platforms` | Comma-separated target platforms | `DA,500PX,35P,VK,X,BSKY,FB` |
 | `status` | Current state | `Approved` / `Uploaded` / `Partial` / `Failed` |
 | `upload_timestamp` | Filled automatically after upload | `2026-03-01 15:12:18` |
@@ -227,6 +230,9 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 - Posts a photo with **model credit + caption** to the user's **personal timeline** (no social links)
 - **NSFW safety:** If `da_nsfw_flag` is `TRUE`, only the safe image (`stash_url_safe`) is used — if missing, the upload **fails** (NSFW photos are never uploaded to Facebook)
 - For non-NSFW photos, uses the standard `stash_url_nsfw` image
+- **Check-in:** If `fb_location` is set, checks in to that location via the composer's location feature
+- **Tag People:** If `fb_tag_people` contains Facebook profile URLs, resolves display names from each profile and tags them in the post. The tagged person must be a Facebook friend.
+- **Feeling/Activity:** If `fb_feeling` is set (e.g. `inspired`), adds the feeling to the post header
 - Uses the browser "Create post" flow: open composer, write caption, attach photo, post
 - No API app registration needed — uses existing browser session cookies
 

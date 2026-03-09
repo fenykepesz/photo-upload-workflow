@@ -1177,10 +1177,47 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
 
 
 # ── Facebook Upload ──────────────────────────────────────────────
-def upload_to_fb(page, caption, image_path, no_submit=False):
+def resolve_fb_names(page, profile_urls_str):
+    """
+    Given a comma-separated string of Facebook profile URLs,
+    visit each profile and extract the display name.
+    Returns list of display names (skips unresolvable profiles).
+    """
+    if not profile_urls_str or not profile_urls_str.strip():
+        return []
+    urls = [u.strip() for u in profile_urls_str.split(",") if u.strip()]
+    names = []
+    for url in urls:
+        try:
+            # Normalize URL
+            if not url.startswith("http"):
+                url = "https://" + url
+            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            page.wait_for_timeout(2000)
+            # Try to get the profile name from the h1 or title
+            name = page.evaluate("""() => {
+                const h1 = document.querySelector('h1');
+                if (h1 && h1.textContent.trim()) return h1.textContent.trim();
+                const title = document.title || '';
+                // Facebook titles are usually "Name | Facebook" or "Name - Facebook"
+                return title.replace(/\\s*[|\\-–]\\s*Facebook.*$/i, '').trim();
+            }""")
+            if name and name.lower() not in ("facebook", "log in", "log into facebook"):
+                names.append(name)
+                print(f"    Resolved: {url} → {name}")
+            else:
+                print(f"    WARNING: Could not resolve name from {url}")
+        except Exception as e:
+            print(f"    WARNING: Could not visit {url}: {e}")
+    return names
+
+
+def upload_to_fb(page, caption, image_path, location="", tag_names=None, feeling="", no_submit=False):
     """
     Post a photo with caption to Facebook personal timeline via browser automation.
-    Flow: home → open composer → attach photo → write caption → Next → Post.
+    Flow: home → open composer → attach photo → write caption →
+          check in → tag people → feeling → Next → Post.
+    tag_names: list of resolved display names (from resolve_fb_names).
     Returns {"success": bool, "url_fb": str, "error": str}
     """
     if not image_path or not Path(image_path).exists():
@@ -1274,6 +1311,125 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
             print(f"    WARNING: No visible textbox found")
     except Exception as e:
         print(f"    WARNING: Could not write caption: {e}")
+
+    page.wait_for_timeout(1000)
+
+    # ── Check In to Location ──
+    if location:
+        print(f"  Checking in to: {location}")
+        try:
+            # Click the "Check in" button in the composer toolbar
+            checkin_btn = page.locator(
+                '[aria-label*="Check in"], [aria-label*="check in"], '
+                '[aria-label*="Location"], [aria-label*="location"]'
+            )
+            if checkin_btn.count() > 0:
+                checkin_btn.first.click(timeout=5000)
+                page.wait_for_timeout(1500)
+                # Type in the location search input
+                search_input = page.locator(
+                    'input[placeholder*="location"], input[placeholder*="Where"], '
+                    'input[type="search"], input[aria-label*="location"]'
+                )
+                if search_input.count() > 0:
+                    search_input.first.fill(location, timeout=5000)
+                    page.wait_for_timeout(2000)
+                    # Click the first result
+                    result = page.locator('[role="option"], [role="listbox"] [role="button"]').first
+                    result.click(timeout=5000)
+                    page.wait_for_timeout(1000)
+                    print(f"    Location set: {location}")
+                else:
+                    print(f"    WARNING: Location search input not found")
+            else:
+                print(f"    WARNING: Check-in button not found in composer")
+        except Exception as e:
+            print(f"    WARNING: Could not set location: {e}")
+
+    # ── Tag People ──
+    if tag_names:
+            print(f"  Tagging people: {', '.join(tag_names)}")
+            try:
+                tag_btn = page.locator(
+                    '[aria-label*="Tag people"], [aria-label*="tag people"], '
+                    '[aria-label*="Tag People"]'
+                )
+                if tag_btn.count() > 0:
+                    tag_btn.first.click(timeout=5000)
+                    page.wait_for_timeout(1500)
+                    for name in tag_names:
+                        try:
+                            tag_search = page.locator(
+                                'input[placeholder*="tag"], input[placeholder*="friend"], '
+                                'input[type="search"], input[aria-label*="tag"]'
+                            )
+                            if tag_search.count() > 0:
+                                tag_search.first.fill(name, timeout=5000)
+                                page.wait_for_timeout(2000)
+                                # Click the first matching result
+                                match = page.locator('[role="option"], [role="listbox"] [role="button"]').first
+                                match.click(timeout=5000)
+                                page.wait_for_timeout(1000)
+                                print(f"    Tagged: {name}")
+                            else:
+                                print(f"    WARNING: Tag search input not found")
+                        except Exception as e:
+                            print(f"    WARNING: Could not tag {name}: {e}")
+                    # Close/confirm the tag dialog
+                    try:
+                        done_btn = page.locator('[aria-label="Done"], [aria-label="Save"]')
+                        if done_btn.count() > 0:
+                            done_btn.first.click(timeout=3000)
+                            page.wait_for_timeout(1000)
+                    except Exception:
+                        pass  # Dialog may auto-close
+                else:
+                    print(f"    WARNING: Tag People button not found in composer")
+            except Exception as e:
+                print(f"    WARNING: Could not tag people: {e}")
+
+    # ── Feeling/Activity ──
+    if feeling:
+        print(f"  Setting feeling: {feeling}")
+        try:
+            feeling_btn = page.locator(
+                '[aria-label*="Feeling"], [aria-label*="feeling"], '
+                '[aria-label*="Activity"], [aria-label*="activity"]'
+            )
+            if feeling_btn.count() > 0:
+                feeling_btn.first.click(timeout=5000)
+                page.wait_for_timeout(1500)
+                # Click the "Feelings" tab if it exists
+                try:
+                    feelings_tab = page.locator('text="Feelings"')
+                    if feelings_tab.count() > 0:
+                        feelings_tab.first.click(timeout=3000)
+                        page.wait_for_timeout(1000)
+                except Exception:
+                    pass  # May not have tabs
+                # Search for the feeling
+                feeling_search = page.locator(
+                    'input[placeholder*="Search"], input[placeholder*="search"], '
+                    'input[type="search"]'
+                )
+                if feeling_search.count() > 0:
+                    feeling_search.first.fill(feeling, timeout=5000)
+                    page.wait_for_timeout(1500)
+                    # Click the first matching feeling
+                    result = page.locator('[role="option"], [role="listbox"] [role="button"], [role="menuitem"]').first
+                    result.click(timeout=5000)
+                    page.wait_for_timeout(1000)
+                    print(f"    Feeling set: {feeling}")
+                else:
+                    # No search — try clicking the feeling text directly
+                    feeling_option = page.locator(f'text="{feeling}"').first
+                    feeling_option.click(timeout=5000)
+                    page.wait_for_timeout(1000)
+                    print(f"    Feeling set: {feeling}")
+            else:
+                print(f"    WARNING: Feeling/Activity button not found in composer")
+        except Exception as e:
+            print(f"    WARNING: Could not set feeling: {e}")
 
     page.wait_for_timeout(1000)
 
@@ -2249,6 +2405,15 @@ def main():
                     else:
                         print(f"\n  ── Facebook Upload ──")
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+                        fb_location = row.get("fb_location", "").strip()
+                        fb_feeling = row.get("fb_feeling", "").strip()
+                        fb_tag_urls = row.get("fb_tag_people", "").strip()
+
+                        # Resolve tag people names from profile URLs BEFORE opening composer
+                        fb_tag_names = []
+                        if fb_tag_urls:
+                            print("  Resolving tagged people...")
+                            fb_tag_names = resolve_fb_names(page, fb_tag_urls)
 
                         # NSFW safety: never upload NSFW image to Facebook
                         # If NSFW, require stash_url_safe; if missing, fail hard
@@ -2264,7 +2429,9 @@ def main():
                                 print(f"    Caption: {fb_caption[:80]}...")
                                 print(f"    Using safe image (NSFW flag set)")
                                 try:
-                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, args.no_submit)
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path,
+                                                             location=fb_location, tag_names=fb_tag_names,
+                                                             feeling=fb_feeling, no_submit=args.no_submit)
                                 except Exception as e:
                                     result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
                                 finally:
@@ -2287,7 +2454,9 @@ def main():
                             print(f"    Caption: {fb_caption[:80]}...")
 
                             try:
-                                result_fb = upload_to_fb(page, fb_caption, image_path, args.no_submit)
+                                result_fb = upload_to_fb(page, fb_caption, image_path,
+                                                         location=fb_location, tag_names=fb_tag_names,
+                                                         feeling=fb_feeling, no_submit=args.no_submit)
                             except Exception as e:
                                 result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
 
