@@ -290,6 +290,39 @@ Social media links from `config.json` are appended to descriptions on DA and 500
 
 ---
 
+## AI Metadata Generation
+
+The queue manager dashboard includes built-in AI-powered metadata generation using the Anthropic Claude Vision API. Instead of manually writing titles, captions, and keywords, you can generate them directly from the photo.
+
+### Setup
+
+1. Get an API key from [console.anthropic.com](https://console.anthropic.com/)
+2. In the queue manager, click the key icon in the header bar
+3. Enter your API key — it's stored in your browser's `localStorage`
+
+### How to Use
+
+1. Create or edit an entry and enter a Sta.sh URL
+2. Click **Generate with AI** in the Metadata section
+3. The AI analyzes the photo thumbnail (loaded via Sta.sh oEmbed) and returns:
+   - **3 title options** — click to select
+   - **3 caption options** — click to select
+   - **30 keywords** — displayed as removable chips
+   - **Suggested categories** for 500px and 35photo
+4. Click **Apply Selected** to fill the form fields
+5. Edit the results as needed before saving
+
+If the Sta.sh thumbnail can't be loaded (e.g., NSFW/private items), a file picker appears as a fallback to select the image from your computer.
+
+### Notes
+
+- Uses Claude Sonnet (`claude-sonnet-4-5-20250929`) for fast, cost-effective vision analysis
+- API calls go directly from your browser to the Anthropic API — no server needed
+- Typical cost: ~$0.01–0.03 per generation
+- Keywords are generated in CamelCase format (e.g., `streetPhotography`, `blackAndWhite`)
+
+---
+
 ## Adding New Entries
 
 1. Open `queue_manager.html` in your browser, or edit `upload_queue.csv` directly
