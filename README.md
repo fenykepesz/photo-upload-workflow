@@ -316,9 +316,8 @@ If the Sta.sh thumbnail can't be loaded (e.g., NSFW/private items), a file picke
 
 ### Notes
 
-- Uses Claude Sonnet (`claude-sonnet-4-5-20250929`) for fast, cost-effective vision analysis
+- Three model options (selectable in Settings): Opus 4.6 (best quality), Sonnet 4.5 (balanced, default), Haiku 4.5 (fastest/cheapest)
 - API calls go directly from your browser to the Anthropic API — no server needed
-- Typical cost: ~$0.01–0.03 per generation
 - Keywords are generated in CamelCase format (e.g., `streetPhotography`, `blackAndWhite`)
 
 ---
