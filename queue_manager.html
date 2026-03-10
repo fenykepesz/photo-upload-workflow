@@ -1295,7 +1295,8 @@
           <div class="fg form-full">
             <label>Model Name <span style="font-weight:400;opacity:.6">(if provided, adds "Please respect the
                 model")</span></label>
-            <input type="text" id="m-model-name" placeholder="e.g. Elena">
+            <input type="text" id="m-model-name" placeholder="e.g. Elena" list="model-name-list" autocomplete="off">
+            <datalist id="model-name-list"></datalist>
           </div>
 
           <div class="form-section">Platform Settings</div>
@@ -1559,7 +1560,7 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); }
 
     function applyFilters() {
       const s = document.getElementById('f-search').value.toLowerCase();
@@ -1815,6 +1816,7 @@
       const r = rows.find(x => x.upload_id === id); if (!r) return;
       editId = id;
       document.getElementById('modal-title').textContent = `Edit — ${id}`;
+      refreshModelNameList();
       clearForm();
       document.getElementById('m-date').value = r.scheduled_date || '';
       document.getElementById('m-time').value = r.scheduled_time || '10:00';
@@ -1917,6 +1919,7 @@
         toast(`Added ${entry.upload_id}`, 'success');
       }
 
+      saveModelName(entry.model_name);
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
@@ -2148,6 +2151,44 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ai-prompt-input').value = AI_PROMPT_DEFAULT;
     }
     updateAiKeyIcon();
+
+    // ── MODEL NAME AUTOCOMPLETE ───────────────────────────────────────────────────
+    function getModelNames() {
+      try { return JSON.parse(localStorage.getItem('model_names') || '[]'); }
+      catch { return []; }
+    }
+    function saveModelName(name) {
+      if (!name) return;
+      const names = getModelNames();
+      if (!names.some(n => n.toLowerCase() === name.toLowerCase())) {
+        names.push(name);
+        names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('model_names', JSON.stringify(names));
+      }
+      refreshModelNameList();
+    }
+    function refreshModelNameList() {
+      const dl = document.getElementById('model-name-list');
+      if (!dl) return;
+      dl.innerHTML = getModelNames().map(n => `<option value="${h(n)}">`).join('');
+    }
+    function seedModelNames() {
+      const names = getModelNames();
+      let added = false;
+      rows.forEach(r => {
+        const n = (r.model_name || '').trim();
+        if (n && !names.some(x => x.toLowerCase() === n.toLowerCase())) {
+          names.push(n);
+          added = true;
+        }
+      });
+      if (added) {
+        names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('model_names', JSON.stringify(names));
+        refreshModelNameList();
+      }
+    }
+    refreshModelNameList();
 
     function getOembedThumbnail(stashUrl) {
       return new Promise((resolve, reject) => {
