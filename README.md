@@ -92,7 +92,7 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 |---|---|---|
 | `upload_id` | Unique ID | `PH-2026-001` |
 | `scheduled_date` | Date to publish (`YYYY-MM-DD`) | `2026-03-01` |
-| `scheduled_time` | Time of day (informational) | `10:00` |
+| `scheduled_time` | Time of day (rows are skipped until this time passes) | `10:00` |
 | `stash_url_nsfw` | Sta.sh URL for the photo (primary image) | `https://sta.sh/0abc123` |
 | `stash_url_safe` | Sta.sh URL for safe crop (used for NSFW photos on Facebook) | |
 | `title` | Photo title | `The Delivery Man, Bangkok` |
@@ -208,17 +208,15 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 ### X.com (Twitter)
 
 - Posts a photo with a short text to the user's **X.com timeline**
-- Text is composed from the photo **title + hashtags** from keywords, respecting the **280-character limit**
-- Title and hashtags are separated by a blank line
-- Hashtags are added one by one until the limit is reached; hyphens are stripped from tags
+- Text is composed from the photo **title + up to 5 hashtags** from keywords, respecting the **280-character limit**
+- Title and hashtags are separated by a blank line; hyphens are stripped from tags
 - Uses the browser compose flow: no API keys or developer account needed
 
 ### Bluesky
 
 - Posts a photo with a short text to the user's **Bluesky timeline**
-- Text is composed from the photo **title + hashtags** from keywords, respecting the **300-character limit**
-- Title and hashtags are separated by a blank line
-- Hashtags are added one by one until the limit is reached; hyphens are stripped from tags
+- Text is composed from the photo **title + up to 5 hashtags** from keywords, respecting the **300-character limit**
+- Title and hashtags are separated by a blank line; hyphens are stripped from tags
 - **NSFW handling:** If a content warning dialog appears automatically, Bluesky's **Nudity** label is selected
 - Uses the browser compose flow: no API keys or app passwords needed
 
@@ -308,9 +306,9 @@ The queue manager dashboard includes built-in AI-powered metadata generation usi
 1. Create or edit an entry and enter a Sta.sh URL
 2. Click **Generate with AI** in the Metadata section
 3. The AI analyzes the photo thumbnail (loaded via Sta.sh oEmbed) and returns:
-   - **3 title options** — click to select
-   - **3 caption options** — click to select
-   - **30 keywords** — displayed as removable chips
+   - **3 title options** (Poetic/Artistic, Minimalist, Technical) — click to select
+   - **3 caption options** (Poetic/Artistic, Minimalist, Technical) — click to select
+   - **30 single-word keywords** — displayed as removable chips
    - **Suggested categories** for 500px and 35photo
 4. Click **Apply Selected** to fill the form fields
 5. Edit the results as needed before saving
@@ -320,8 +318,10 @@ If the Sta.sh thumbnail can't be loaded (e.g., NSFW/private items), a file picke
 ### Notes
 
 - Three model options (selectable in Settings): Opus 4.6 (best quality), Sonnet 4.5 (balanced, default), Haiku 4.5 (fastest/cheapest)
+- The AI prompt is fully customizable in the Settings dialog (with Reset to Default)
 - API calls go directly from your browser to the Anthropic API — no server needed
-- Keywords are generated in CamelCase format (e.g., `streetPhotography`, `blackAndWhite`)
+- Keywords are generated as single words (e.g., `portrait`, `fashion`, `monochrome`)
+- Model names autocomplete from previously used names (stored in browser)
 
 ---
 
