@@ -115,6 +115,7 @@ def get_row_platforms(row):
 
 
 def filter_rows(rows, target_id=None):
+    now = datetime.now()
     targets = []
     for row in rows:
         # Specific row requested
@@ -125,6 +126,22 @@ def filter_rows(rows, target_id=None):
         else:
             if row.get("status", "").strip() != "Approved":
                 continue
+
+        # Check scheduled date/time — skip rows not yet due
+        sched_date = row.get("scheduled_date", "").strip()
+        sched_time = row.get("scheduled_time", "").strip()
+        if sched_date:
+            try:
+                if sched_time:
+                    scheduled = datetime.strptime(f"{sched_date} {sched_time}", "%Y-%m-%d %H:%M")
+                else:
+                    scheduled = datetime.strptime(sched_date, "%Y-%m-%d")
+                if scheduled > now:
+                    if target_id:
+                        print(f"NOTE: {row['upload_id']} is scheduled for {sched_date} {sched_time} — not yet due")
+                    continue
+            except ValueError:
+                pass  # Unparseable date — let it through
 
         # Must have at least one supported platform
         platforms = get_row_platforms(row)
@@ -850,21 +867,26 @@ X_CHAR_LIMIT = 280
 BSKY_CHAR_LIMIT = 300
 
 
-def build_x_post_text(title, keywords_str):
+def build_x_post_text(title, keywords_str, max_tags=5):
     """Build a tweet from title + hashtags, fitting within 280 characters.
-    Title and hashtags are separated by a blank line. Hyphens are stripped from tags."""
+    Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
+    Limited to max_tags hashtags."""
     text = title.strip()
     if not keywords_str:
         return text[:X_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
     hashtags = ""
+    tag_count = 0
     for tag in tags:
+        if tag_count >= max_tags:
+            break
         hashtag = "#" + tag.replace(" ", "").replace("-", "")
         sep = " " if hashtags else ""
         candidate_tags = hashtags + sep + hashtag
         full = text + "\n\n" + candidate_tags
         if len(full) <= X_CHAR_LIMIT:
             hashtags = candidate_tags
+            tag_count += 1
         else:
             break
     if hashtags:
@@ -872,21 +894,26 @@ def build_x_post_text(title, keywords_str):
     return text
 
 
-def build_bsky_post_text(title, keywords_str):
+def build_bsky_post_text(title, keywords_str, max_tags=5):
     """Build a Bluesky post from title + hashtags, fitting within 300 characters.
-    Title and hashtags are separated by a blank line. Hyphens are stripped from tags."""
+    Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
+    Limited to max_tags hashtags."""
     text = title.strip()
     if not keywords_str:
         return text[:BSKY_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
     hashtags = ""
+    tag_count = 0
     for tag in tags:
+        if tag_count >= max_tags:
+            break
         hashtag = "#" + tag.replace(" ", "").replace("-", "")
         sep = " " if hashtags else ""
         candidate_tags = hashtags + sep + hashtag
         full = text + "\n\n" + candidate_tags
         if len(full) <= BSKY_CHAR_LIMIT:
             hashtags = candidate_tags
+            tag_count += 1
         else:
             break
     if hashtags:
@@ -916,6 +943,8 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
         return {"success": False, "url_x": "", "error": "Not logged into X — run --login first"}
 
     # Write post text — find the tweet composer contenteditable
+    # Use simulated paste (ClipboardEvent) instead of execCommand('insertText')
+    # because DraftJS duplicates text when insertText contains newlines.
     print("  Writing post text...")
     try:
         caption_ok = page.evaluate("""(text) => {
@@ -938,7 +967,13 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
             if (best) {
                 best.focus();
                 best.click();
-                document.execCommand('insertText', false, text);
+                // Simulate paste event — DraftJS handles paste correctly
+                const dt = new DataTransfer();
+                dt.setData('text/plain', text);
+                const evt = new ClipboardEvent('paste', {
+                    clipboardData: dt, bubbles: true, cancelable: true
+                });
+                best.dispatchEvent(evt);
                 return {found: true, tag: best.tagName, class: best.className?.substring(0, 80),
                         rect: {top: best.getBoundingClientRect().top,
                                width: best.getBoundingClientRect().width}};
