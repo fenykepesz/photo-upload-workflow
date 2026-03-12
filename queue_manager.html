@@ -2407,6 +2407,22 @@ Return ONLY valid JSON, no markdown fences:
       container.style.display = 'none';
     }
 
+    // Auto-reload CSV from disk when tab regains focus (after upload.py modifies it)
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState !== 'visible' || !fileHandle) return;
+      try {
+        const file = await fileHandle.getFile();
+        const txt = await file.text();
+        const cached = localStorage.getItem('csv_cache');
+        if (txt !== cached) {
+          rows = parseCSV(txt);
+          cacheCSV(txt, fileHandle.name);
+          refresh();
+          toast('CSV reloaded — updated by upload script', 'info');
+        }
+      } catch (e) { /* permission revoked or file gone */ }
+    });
+
     // INIT
     autoLoadCSV();
     loadDAData(false);
