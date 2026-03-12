@@ -950,7 +950,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.4.2</span>
+      Photo Upload Queue <span>· v1.5.0</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1358,6 +1358,10 @@
             </select>
           </div>
           <div class="fg">
+            <label>500px Location</label>
+            <input type="text" id="m-loc-500px" placeholder="e.g. Tel Aviv, Israel">
+          </div>
+          <div class="fg">
             <label>35photo Category</label>
             <select id="m-cat-35p">
               <option value="">— select —</option>
@@ -1447,7 +1451,7 @@
       'da_nsfw_flag', 'category_500px', 'category_35p',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
-      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups'];
+      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
     function parseCSV(txt) {
@@ -1786,7 +1790,7 @@
     }
     function clearForm() {
       ['m-date', 'm-time', 'm-nsfw', 'm-safe', 'm-title', 'm-caption', 'm-keywords',
-        'm-notes', 'm-model-name'].forEach(id => {
+        'm-notes', 'm-model-name', 'm-loc-500px'].forEach(id => {
           const el = document.getElementById(id); if (el) el.value = '';
         });
       // Clear DA Gallery checkboxes
@@ -1831,6 +1835,7 @@
       document.getElementById('m-status').value = r.status || 'Pending';
       document.getElementById('m-notes').value = r.notes || '';
       document.getElementById('m-model-name').value = r.model_name || '';
+      document.getElementById('m-loc-500px').value = r.location_500px || '';
 
       // Set Galleries
       const gList = (r.da_gallery || 'Featured').split(',').map(g => g.trim());
@@ -1876,6 +1881,7 @@
       if (!document.getElementById('m-title').value.trim()) { toast('Title is required', 'error'); return; }
       if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
       if (platforms.includes('35P') && !document.getElementById('m-cat-35p').value) { toast('35photo category is required', 'error'); return; }
+      if (needsModelName() && !document.getElementById('m-model-name').value.trim()) { toast('Model name is required for this category', 'error'); return; }
 
       const existing = editId ? rows.find(r => r.upload_id === editId) : null;
       const entry = {
@@ -1893,6 +1899,7 @@
         platforms,
         status: document.getElementById('m-status').value || 'Approved',
         model_name: document.getElementById('m-model-name').value.trim(),
+        location_500px: document.getElementById('m-loc-500px').value.trim(),
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
           const folder = c.closest('.da-group-row').querySelector('.da-group-folder').value;
@@ -1946,6 +1953,13 @@
         document.getElementById('m-nsfw-flag').checked = true;
       }
     });
+    function needsModelName() {
+      const cat500 = document.getElementById('m-cat-500px').value;
+      const cat35 = document.getElementById('m-cat-35p').value;
+      const model500 = ['Fashion', 'People', 'Nude'];
+      const model35 = ['Portrait', 'Female portrait', 'Fine Nudes'];
+      return model500.includes(cat500) || model35.includes(cat35);
+    }
     function updateRequiredFields() {
       const any = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky']
         .some(id => document.getElementById(id)?.checked);
@@ -1953,13 +1967,19 @@
       const need35 = document.getElementById('p-35')?.checked;
       toggleStar('m-title', any);
       toggleStar('m-cat-500px', need500);
+      toggleStar('m-loc-500px', need500);
       toggleStar('m-cat-35p', need35);
+      toggleStar('m-model-name', needsModelName());
     }
     function toggleStar(inputId, required) {
       const label = document.getElementById(inputId)?.closest('.fg')?.querySelector('label');
       if (label) label.classList.toggle('required-star', !!required);
     }
     ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', updateRequiredFields);
+    });
+    ['m-cat-500px', 'm-cat-35p'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', updateRequiredFields);
     });

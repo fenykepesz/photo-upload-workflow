@@ -99,7 +99,7 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `caption` | Description/caption | `A candid moment on the streets...` |
 | `keywords` | Comma-separated tags | `Bangkok,street,Fujifilm` |
 | `da_nsfw_flag` | Mark as Mature/NSFW (all platforms) | `TRUE` / `FALSE` |
-| `category_500px` | 500px category name | `Travel` |
+| `category_500px` | 500px category name (Fashion/People/Nude require model_name) | `Travel` |
 | `category_35p` | 35photo style/category | `City/Architecture` |
 | `platforms` | Comma-separated target platforms | `DA,500PX,35P,VK,X,BSKY,FB` |
 | `status` | Current state | `Approved` / `Uploaded` / `Partial` / `Failed` |
@@ -113,9 +113,10 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `url_fb` | Facebook post URL (filled automatically) | |
 | `notes` | Free-form notes | `Golden mount. XT-20` |
 | `error_log` | Errors during upload (filled automatically) | |
-| `model_name` | Model name (optional) | `Elena` |
+| `model_name` | Model name (required for Fashion/People/Nude/Portrait categories) | `Elena` |
 | `da_gallery` | DA galleries (comma-separated) | `Featured,Travel` |
 | `da_groups` | DA groups (`Group:Folder` format) | `TheSpiritofArt:Featured` |
+| `location_500px` | 500px location (skipped if EXIF provides it) | `Tel Aviv, Israel` |
 
 ### Status Values
 
@@ -189,7 +190,8 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 
 - Requires a **file upload** (not a URL) — the script downloads the original image from Sta.sh automatically, preserving EXIF data
 - Uses 500px's 3-step upload wizard: file upload, details, publish
-- Fills: title, description, category, keywords, NSFW flag
+- Fills: title, description, category, keywords, location, NSFW flag
+- **Location**: If the photo has EXIF GPS data, 500px auto-fills the location field — the script leaves it as-is. If no EXIF location, the script uses the `location_500px` value from the queue and picks the first autocomplete suggestion
 - Downloaded images are stored temporarily in `temp/` and cleaned up after upload
 
 ### 35photo.pro
@@ -254,6 +256,8 @@ If `model_name` is set (e.g. `Elena`), this is prepended to descriptions (before
 
 > Model: Elena
 > Please respect the model.
+
+**Note:** Model name is **required** when the 500px category is Fashion, People, or Nude, or when the 35photo category is Portrait, Female portrait, or Fine Nudes.
 
 ### Social Links
 

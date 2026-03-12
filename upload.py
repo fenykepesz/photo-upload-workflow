@@ -39,7 +39,7 @@ COLS = [
     "da_nsfw_flag", "category_500px", "category_35p",
     "platforms", "status", "upload_timestamp",
     "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
-    "notes", "error_log", "model_name", "da_gallery", "da_groups",
+    "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -462,24 +462,27 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
         page.click('#category-input')
         page.wait_for_timeout(500)
         try:
-            selected = page.evaluate("""(cat) => {
-                // Try Ant Design option items first
-                const selectors = ['[class*="StyledName"]', '.ant-select-item', '[class*="Option"]'];
-                for (const sel of selectors) {
-                    const items = document.querySelectorAll(sel);
-                    for (const item of items) {
-                        if (item.textContent.trim() === cat) { item.click(); return true; }
-                    }
-                }
-                // Broadest fallback: any element with exact text match in dropdown area
-                const all = document.querySelectorAll('[class*="dropdown"] *, [class*="select"] *, [role="listbox"] *');
-                for (const item of all) {
-                    if (item.textContent.trim() === cat && item.children.length === 0) {
-                        item.click(); return true;
-                    }
-                }
-                return false;
-            }""", category)
+            # Get position of the dropdown to hover over it for scrolling
+            first_opt = page.locator('[class*="DropdownOption"], [role="option"]').first
+            box = first_opt.bounding_box()
+            selected = False
+            if box:
+                # Hover over the dropdown area
+                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                for _scroll in range(25):
+                    result = page.evaluate("""(cat) => {
+                        const options = document.querySelectorAll('[class*="DropdownOption"], [role="option"]');
+                        for (const item of options) {
+                            if (item.textContent.trim() === cat) { item.click(); return true; }
+                        }
+                        return false;
+                    }""", category)
+                    if result:
+                        selected = True
+                        break
+                    # Mouse wheel scroll down over the dropdown
+                    page.mouse.wheel(0, 120)
+                    page.wait_for_timeout(200)
             if not selected:
                 print(f"    WARNING: Could not select category '{category}' via JS")
         except Exception as e:
