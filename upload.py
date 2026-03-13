@@ -170,7 +170,7 @@ def build_description(row, config):
     # Model credit (before caption, on its own line)
     model = row.get("model_name", "").strip()
     if model:
-        parts.append(f"Model: {model}\nPlease respect the model.\n\n")
+        parts.append(f"Model: {model}\n\nPlease respect the model.\n\n")
 
     parts.append(row.get("caption", "").strip())
 
@@ -194,7 +194,7 @@ def build_description_fb(row):
 
     model = row.get("model_name", "").strip()
     if model:
-        parts.append(f"Model: {model}\nPlease respect the model.\n\n")
+        parts.append(f"Model: {model}\n\nPlease respect the model.\n\n")
 
     parts.append(row.get("caption", "").strip())
 
@@ -523,31 +523,13 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 page.wait_for_timeout(300)
                 page.keyboard.type(location, delay=50)
                 page.wait_for_timeout(3000)  # wait for autocomplete suggestions
-                # Click the first suggestion containing the query text
-                clicked = page.evaluate("""(query) => {
-                    const input = document.querySelector('input[placeholder*="Location"]');
-                    if (!input) return {ok: false, reason: 'no input'};
-                    const rect = input.getBoundingClientRect();
-                    const lq = query.toLowerCase();
-                    // Search broadly — location suggestions use different components than category
-                    const all = document.querySelectorAll('div, li, a, span');
-                    for (const el of all) {
-                        const r = el.getBoundingClientRect();
-                        const text = el.textContent.trim();
-                        if (r.top >= rect.bottom + 2 && r.top < rect.bottom + 400
-                            && r.height > 20 && r.height < 80 && r.width > 100
-                            && text.toLowerCase().includes(lq)
-                            && el.children.length <= 3) {
-                            el.click();
-                            return {ok: true, text: text.substring(0, 60)};
-                        }
-                    }
-                    return {ok: false, reason: 'no matching suggestions', inputVal: input.value};
-                }""", location)
-                if clicked.get("ok"):
-                    print(f"    Selected: {clicked.get('text')}")
-                else:
-                    print(f"    WARNING: No location suggestion found ({clicked.get('reason')})")
+                # Click the first suggestion using Playwright text locator
+                try:
+                    suggestion = page.locator(f'text=/{location},/i').first
+                    suggestion.click(timeout=5000)
+                    print(f"    Selected location suggestion")
+                except Exception:
+                    print(f"    WARNING: No location suggestion found")
                 page.wait_for_timeout(5000)
             else:
                 print(f"  Location already set (EXIF): {has_location}")
