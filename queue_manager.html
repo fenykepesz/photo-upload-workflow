@@ -1301,7 +1301,10 @@
 
           <div class="form-section">Platform Settings</div>
           <div class="fg form-full">
-            <label>Target Platforms</label>
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+              <label style="margin-bottom:0">Target Platforms</label>
+              <button class="btn-link" onclick="toggleAllPlatforms()" style="font-size:11px">Select / Deselect All</button>
+            </div>
             <div class="platform-checks">
               <label><input type="checkbox" id="p-da"> DeviantArt</label>
               <label><input type="checkbox" id="p-500"> 500px</label>
@@ -1804,7 +1807,7 @@
       document.getElementById('m-status').value = 'Approved';
       document.getElementById('m-cat-500px').value = '';
       document.getElementById('m-cat-35p').value = '';
-      ['p-da', 'p-500', 'p-fb', 'p-35'].forEach(id => document.getElementById(id).checked = false);
+      ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'].forEach(id => document.getElementById(id).checked = true);
     }
     function openAddModal() {
       editId = null;
@@ -1974,6 +1977,12 @@
     function toggleStar(inputId, required) {
       const label = document.getElementById(inputId)?.closest('.fg')?.querySelector('label');
       if (label) label.classList.toggle('required-star', !!required);
+    }
+    function toggleAllPlatforms() {
+      const ids = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'];
+      const allChecked = ids.every(id => document.getElementById(id)?.checked);
+      ids.forEach(id => { const el = document.getElementById(id); if (el) el.checked = !allChecked; });
+      updateRequiredFields();
     }
     ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'].forEach(id => {
       const el = document.getElementById(id);
