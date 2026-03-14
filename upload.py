@@ -1244,10 +1244,10 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
 
 
 # ── Facebook Upload ──────────────────────────────────────────────
-def upload_to_fb(page, caption, image_path, no_submit=False):
+def upload_to_fb(page, caption, image_path, location="", no_submit=False):
     """
     Post a photo with caption to Facebook personal timeline via browser automation.
-    Flow: home → open composer → attach photo → write caption → Next → Post.
+    Flow: home → open composer → attach photo → set location → write caption → Next → Post.
     Returns {"success": bool, "url_fb": str, "error": str}
     """
     if not image_path or not Path(image_path).exists():
@@ -1310,6 +1310,117 @@ def upload_to_fb(page, caption, image_path, no_submit=False):
     # Wait for photo to upload/process
     print("  Waiting for photo to process...")
     page.wait_for_timeout(5000)
+
+    # Location — click the red pin icon ("Check in") in the composer's "Add to your post" bar.
+    # IMPORTANT: Multiple [aria-label="Check in"] exist on page. We must find the one INSIDE
+    # the composer dialog (near "Add to your post" label), NOT the standalone check-in button.
+    if location:
+        try:
+            print(f"  Setting location: {location}")
+
+            # Step 1: Pick the [aria-label="Check in"] button with the HIGHEST Y value.
+            # Multiple Check-in buttons exist; the toolbar one is always at the bottom of the
+            # composer (highest Y). The standalone check-in is higher up on the page.
+            btn_pos = page.evaluate("""() => {
+                const btns = document.querySelectorAll('[aria-label="Check in"]');
+                if (btns.length === 0) return {ok: false, reason: 'no [aria-label="Check in"] found'};
+
+                let best = null;
+                let bestY = -1;
+                for (const btn of btns) {
+                    const r = btn.getBoundingClientRect();
+                    const cy = r.top + r.height / 2;
+                    if (r.width > 0 && r.height > 0 && cy > bestY) {
+                        bestY = cy;
+                        best = btn;
+                    }
+                }
+
+                if (!best) return {ok: false, reason: 'no visible Check-in button'};
+
+                const r = best.getBoundingClientRect();
+                const cx = r.left + r.width / 2;
+                const cy = r.top + r.height / 2;
+
+                // Clear all overlays above the button
+                const stack = document.elementsFromPoint(cx, cy);
+                let cleared = 0;
+                for (const el of stack) {
+                    if (el === best || best.contains(el) || el.contains(best)) break;
+                    el.style.pointerEvents = 'none';
+                    cleared++;
+                }
+                return {ok: true, x: cx, y: cy, cleared: cleared,
+                        btnY: Math.round(cy)};
+            }""")
+            if not btn_pos.get("ok"):
+                raise Exception(btn_pos.get("reason"))
+            print(f"    Clicked Check-in pin at y={btn_pos['btnY']}")
+            page.mouse.click(btn_pos["x"], btn_pos["y"])
+
+            # Wait for the location search panel to appear
+            page.wait_for_timeout(3000)
+
+            # Step 2: Type location in the search field
+            page.keyboard.type(location, delay=50)
+            print(f"    Typed: {location}")
+            page.wait_for_timeout(3000)
+
+            # Step 3: Click first matching result
+            picked = page.evaluate("""(query) => {
+                const q = query.toLowerCase();
+                // Find the "Results" heading to only match items below it
+                let resultsTop = 0;
+                const spans = document.querySelectorAll('span');
+                for (const s of spans) {
+                    if (s.textContent.trim() === 'Results') {
+                        resultsTop = s.getBoundingClientRect().bottom;
+                        break;
+                    }
+                }
+                // Check <li>, <div role="option">, <div role="button"> as possible result containers
+                const candidates = document.querySelectorAll('li, [role="option"], [role="listbox"] [role="button"]');
+                const matches = [];
+                for (const el of candidates) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0 || r.height < 20) continue;
+                    if (resultsTop > 0 && r.top < resultsTop) continue;
+                    const text = el.textContent.trim();
+                    if (text.toLowerCase().includes(q)) {
+                        matches.push({text: text.substring(0, 80), top: Math.round(r.top),
+                                      x: r.left + r.width / 2, y: r.top + r.height / 2});
+                    }
+                }
+                // If no text match, just grab the first result item below resultsTop
+                if (matches.length === 0 && resultsTop > 0) {
+                    for (const el of candidates) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 20 && r.top > resultsTop) {
+                            matches.push({text: el.textContent.trim().substring(0, 80),
+                                          top: Math.round(r.top),
+                                          x: r.left + r.width / 2, y: r.top + r.height / 2});
+                            break;
+                        }
+                    }
+                }
+                if (matches.length === 0) return {ok: false, reason: 'no matching results', resultsTop: resultsTop};
+                return {ok: true, x: matches[0].x, y: matches[0].y,
+                        text: matches[0].text,
+                        all: matches.map(m => m.text)};
+            }""", location)
+            if picked.get("ok"):
+                print(f"    Results: {picked['all']}")
+                page.mouse.click(picked["x"], picked["y"])
+                print(f"    Selected: {picked.get('text')}")
+            else:
+                print(f"    WARNING: {picked.get('reason')} (resultsTop={picked.get('resultsTop')})")
+                try:
+                    page.locator('[aria-label="Back"]').first.click(timeout=3000)
+                except Exception:
+                    pass
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            print(f"    WARNING: Could not set location: {e}")
 
     # Write caption AFTER photo — Facebook resets text when a photo is attached
     # Facebook has multiple textboxes; the caption is the topmost one (smallest top value)
@@ -2315,6 +2426,7 @@ def main():
                         print(f"\n  FB: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── Facebook Upload ──")
+                        location_fb = row.get("location_500px", "").strip()
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
 
                         # NSFW safety: never upload NSFW image to Facebook
@@ -2331,7 +2443,7 @@ def main():
                                 print(f"    Caption: {fb_caption[:80]}...")
                                 print(f"    Using safe image (NSFW flag set)")
                                 try:
-                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, args.no_submit)
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, args.no_submit)
                                 except Exception as e:
                                     result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
                                 finally:
@@ -2354,7 +2466,7 @@ def main():
                             print(f"    Caption: {fb_caption[:80]}...")
 
                             try:
-                                result_fb = upload_to_fb(page, fb_caption, image_path, args.no_submit)
+                                result_fb = upload_to_fb(page, fb_caption, image_path, location_fb, args.no_submit)
                             except Exception as e:
                                 result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
 

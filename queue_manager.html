@@ -152,6 +152,16 @@
       opacity: 0.85;
     }
 
+    .btn-warning {
+      background: var(--warning);
+      border-color: var(--warning);
+      color: #000;
+    }
+
+    .btn-warning:hover {
+      opacity: 0.85;
+    }
+
     .btn-ghost {
       background: transparent;
       border-color: transparent;
@@ -950,7 +960,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.5.0</span>
+      Photo Upload Queue <span>· v1.6.0</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1218,6 +1228,7 @@
         </div>
         <div class="dp-row">
           <button class="btn btn-sm btn-primary" onclick="openEditModal()" style="flex:1">✎ Edit</button>
+          <button class="btn btn-sm btn-warning" onclick="resetById(selId)" style="flex:1">↻ Re-upload</button>
           <button class="btn btn-sm btn-danger" onclick="deleteSel()" style="flex:1">✕ Delete</button>
         </div>
       </div>
@@ -1783,6 +1794,23 @@
       if (selId === id) closeDetail();
       refresh(); toast('Deleted', 'info');
       saveCSV();
+    }
+
+    function resetById(id) {
+      const r = rows.find(x => x.upload_id === id);
+      if (!r) return;
+      const urls = ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb']
+        .filter(k => r[k]);
+      const msg = urls.length
+        ? `Reset ${id} for re-upload?\n\nThis will clear ${urls.length} upload URL(s):\n${urls.map(k => '  ' + k + ': ' + r[k]).join('\n')}\n\nStatus will be set back to Approved.`
+        : `Reset ${id} for re-upload?\n\nNo upload URLs found — status will be set back to Approved.`;
+      if (!confirm(msg)) return;
+      for (const k of ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb','upload_timestamp','error_log']) {
+        r[k] = '';
+      }
+      r.status = 'Approved';
+      selectRow(id); refresh(); saveCSV();
+      toast(`Reset ${id} — ready for re-upload`, 'success');
     }
 
     // ── MODAL ──────────────────────────────────────────────────────────────────────
