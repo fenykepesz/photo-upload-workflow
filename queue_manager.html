@@ -960,7 +960,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.6.2</span>
+      Photo Upload Queue <span>· v1.6.3</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1230,6 +1230,9 @@
           <button class="btn btn-sm btn-primary" onclick="openEditModal()" style="flex:1">✎ Edit</button>
           <button class="btn btn-sm btn-warning" onclick="resetById(selId)" style="flex:1">↻ Re-upload</button>
           <button class="btn btn-sm btn-danger" onclick="deleteSel()" style="flex:1">✕ Delete</button>
+        </div>
+        <div class="dp-row" id="dp-retry-row" style="display:none">
+          <button class="btn btn-sm" onclick="retryFailed(selId)" style="flex:1;background:var(--purple);border-color:var(--purple);color:#fff">↻ Retry failed</button>
         </div>
       </div>
     </div>
@@ -1678,37 +1681,28 @@
 
       const isUrl = v => v && v.startsWith('http');
 
-      const daw = document.getElementById('dp-deviationwrap');
-      daw.style.display = isUrl(r.da_deviation_url) ? '' : 'none';
-      if (isUrl(r.da_deviation_url)) { document.getElementById('dp-deviation').href = r.da_deviation_url; }
-
-      const u500 = document.getElementById('dp-500pxwrap');
-      u500.style.display = isUrl(r.url_500px) ? '' : 'none';
-      if (isUrl(r.url_500px)) { document.getElementById('dp-500px').href = r.url_500px; }
-
-      const u35 = document.getElementById('dp-35pwrap');
-      u35.style.display = isUrl(r.url_35p) ? '' : 'none';
-      if (isUrl(r.url_35p)) { document.getElementById('dp-35p').href = r.url_35p; }
-
-      const uvk = document.getElementById('dp-vkwrap');
-      uvk.style.display = isUrl(r.url_vk) ? '' : 'none';
-      if (isUrl(r.url_vk)) { document.getElementById('dp-vk').href = r.url_vk; }
-
-      const ux = document.getElementById('dp-xwrap');
-      ux.style.display = isUrl(r.url_x) ? '' : 'none';
-      if (isUrl(r.url_x)) { document.getElementById('dp-x').href = r.url_x; }
-
-      const ubsky = document.getElementById('dp-bskywrap');
-      ubsky.style.display = isUrl(r.url_bsky) ? '' : 'none';
-      if (isUrl(r.url_bsky)) { document.getElementById('dp-bsky').href = r.url_bsky; }
-
-      const ufb = document.getElementById('dp-fbwrap');
-      ufb.style.display = isUrl(r.url_fb) ? '' : 'none';
-      if (isUrl(r.url_fb)) { document.getElementById('dp-fb').href = r.url_fb; }
+      function showPlatUrl(wrapId, linkId, val, label) {
+        const wrap = document.getElementById(wrapId);
+        const link = document.getElementById(linkId);
+        const v = (val || '').trim();
+        wrap.style.display = v ? '' : 'none';
+        if (isUrl(val)) { link.href = val; link.textContent = label + ' \u2197'; }
+        else if (v) { link.removeAttribute('href'); link.textContent = '\u2713 Uploaded (no link)'; }
+      }
+      showPlatUrl('dp-deviationwrap', 'dp-deviation', r.da_deviation_url, 'View on DA');
+      showPlatUrl('dp-500pxwrap', 'dp-500px', r.url_500px, 'View on 500px');
+      showPlatUrl('dp-35pwrap', 'dp-35p', r.url_35p, 'View on 35photo');
+      showPlatUrl('dp-vkwrap', 'dp-vk', r.url_vk, 'View on VK');
+      showPlatUrl('dp-xwrap', 'dp-x', r.url_x, 'View on X');
+      showPlatUrl('dp-bskywrap', 'dp-bsky', r.url_bsky, 'View on Bluesky');
+      showPlatUrl('dp-fbwrap', 'dp-fb', r.url_fb, 'View on Facebook');
 
       const errs = document.getElementById('dp-errsec');
       errs.style.display = r.error_log ? '' : 'none';
       document.getElementById('dp-ferror').textContent = r.error_log || '';
+
+      document.getElementById('dp-retry-row').style.display =
+        (r.status === 'Partial' || r.status === 'Failed') ? '' : 'none';
 
       document.getElementById('dp-fmodel').textContent = r.model_name || '—';
       document.getElementById('dp-fdagallery').textContent = r.da_gallery || 'Featured';
@@ -1814,6 +1808,35 @@
       r.status = 'Approved';
       selectRow(id); refresh(); saveCSV();
       toast(`Reset ${id} — ready for re-upload`, 'success');
+    }
+
+    function retryFailed(id) {
+      const r = rows.find(x => x.upload_id === id);
+      if (!r) return;
+      if (r.status !== 'Partial' && r.status !== 'Failed') {
+        toast('Only Partial/Failed rows can be retried', 'error'); return;
+      }
+      const platMap = { DA:'da_deviation_url', '500PX':'url_500px', '35P':'url_35p',
+        VK:'url_vk', X:'url_x', BSKY:'url_bsky', FB:'url_fb' };
+      const selected = (r.platforms || '').split(',').map(p => p.trim()).filter(Boolean);
+      const willRetry = [], alreadyDone = [];
+      for (const p of selected) {
+        const f = platMap[p];
+        if (!f) continue;
+        (r[f] || '').trim() ? alreadyDone.push(p) : willRetry.push(p);
+      }
+      if (willRetry.length === 0) {
+        toast('All platforms already uploaded — use Re-upload to reset everything', 'info'); return;
+      }
+      let msg = `Retry failed platforms for ${id}?\n\n`;
+      msg += `Will retry (${willRetry.length}): ${willRetry.join(', ')}\n`;
+      if (alreadyDone.length) msg += `Already done (${alreadyDone.length}): ${alreadyDone.join(', ')} (will be skipped)\n`;
+      msg += `\nError log will be cleared. Status will be set to Approved.`;
+      if (!confirm(msg)) return;
+      r.error_log = '';
+      r.status = 'Approved';
+      selectRow(id); refresh(); saveCSV();
+      toast(`${id} — retrying ${willRetry.join(', ')}`, 'success');
     }
 
     // ── MODAL ──────────────────────────────────────────────────────────────────────
