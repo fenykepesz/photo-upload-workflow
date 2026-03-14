@@ -522,14 +522,38 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 loc_input.click()
                 page.wait_for_timeout(300)
                 page.keyboard.type(location, delay=50)
-                page.wait_for_timeout(3000)  # wait for autocomplete suggestions
-                # Click the first suggestion using Playwright text locator
-                try:
-                    suggestion = page.locator(f'text=/{location},/i').first
-                    suggestion.click(timeout=5000)
-                    print(f"    Selected location suggestion")
-                except Exception:
-                    print(f"    WARNING: No location suggestion found")
+                page.wait_for_timeout(5000)  # wait for autocomplete suggestions
+                # Click the first suggestion containing the query text
+                clicked = page.evaluate(r"""(query) => {
+                    const input = document.querySelector('input[placeholder*="Location"]');
+                    if (!input) return {ok: false, reason: 'no input'};
+                    const rect = input.getBoundingClientRect();
+                    // Split query into words for flexible matching
+                    // "San Francisco, USA" matches "San Francisco, CA, USA" (all words present)
+                    const words = query.toLowerCase().replace(/[,-]/g, ' ').split(/\s+/).filter(w => w.length > 0);
+                    const matchesQuery = (text) => {
+                        const lt = text.toLowerCase();
+                        return words.every(w => lt.includes(w));
+                    };
+                    // Search broadly — location suggestions use different components than category
+                    const all = document.querySelectorAll('div, li, a, span');
+                    for (const el of all) {
+                        const r = el.getBoundingClientRect();
+                        const text = el.textContent.trim();
+                        if (r.top >= rect.bottom + 2 && r.top < rect.bottom + 400
+                            && r.height > 20 && r.height < 80 && r.width > 100
+                            && matchesQuery(text)
+                            && el.children.length <= 3) {
+                            el.click();
+                            return {ok: true, text: text.substring(0, 60)};
+                        }
+                    }
+                    return {ok: false, reason: 'no matching suggestions', inputVal: input.value};
+                }""", location)
+                if clicked.get("ok"):
+                    print(f"    Selected: {clicked.get('text')}")
+                else:
+                    print(f"    WARNING: No location suggestion found ({clicked.get('reason')})")
                 page.wait_for_timeout(5000)
             else:
                 print(f"  Location already set (EXIF): {has_location}")
@@ -1368,7 +1392,8 @@ def upload_to_fb(page, caption, image_path, location="", no_submit=False):
 
             # Step 3: Click first matching result
             picked = page.evaluate("""(query) => {
-                const q = query.toLowerCase();
+                const norm = s => s.toLowerCase().replace(/-/g, ' ');
+                const q = norm(query);
                 // Find the "Results" heading to only match items below it
                 let resultsTop = 0;
                 const spans = document.querySelectorAll('span');
@@ -1386,7 +1411,7 @@ def upload_to_fb(page, caption, image_path, location="", no_submit=False):
                     if (r.width === 0 || r.height === 0 || r.height < 20) continue;
                     if (resultsTop > 0 && r.top < resultsTop) continue;
                     const text = el.textContent.trim();
-                    if (text.toLowerCase().includes(q)) {
+                    if (norm(text).includes(q)) {
                         matches.push({text: text.substring(0, 80), top: Math.round(r.top),
                                       x: r.left + r.width / 2, y: r.top + r.height / 2});
                     }
