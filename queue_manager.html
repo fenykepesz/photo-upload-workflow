@@ -960,7 +960,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.6.1</span>
+      Photo Upload Queue <span>· v1.6.2</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1309,6 +1309,11 @@
             <input type="text" id="m-model-name" placeholder="e.g. Elena" list="model-name-list" autocomplete="off">
             <datalist id="model-name-list"></datalist>
           </div>
+          <div class="fg form-full">
+            <label>Location <span style="font-weight:400;opacity:.6">(used by 500px &amp; Facebook)</span></label>
+            <input type="text" id="m-loc-500px" placeholder="e.g. Tel Aviv, Israel" list="location-list" autocomplete="off">
+            <datalist id="location-list"></datalist>
+          </div>
 
           <div class="form-section">Platform Settings</div>
           <div class="fg form-full">
@@ -1370,10 +1375,6 @@
               <option>Urban Exploration</option>
               <option>Wedding</option>
             </select>
-          </div>
-          <div class="fg">
-            <label>500px Location</label>
-            <input type="text" id="m-loc-500px" placeholder="e.g. Tel Aviv, Israel">
           </div>
           <div class="fg">
             <label>35photo Category</label>
@@ -1455,7 +1456,7 @@
   <script>
     // ── STATE ──────────────────────────────────────────────────────────────────────
     let rows = [], filtered = [], selId = null, editId = null, fileHandle = null;
-    let sortField = 'scheduled_date', sortDir = 1;
+    let sortField = 'scheduled_date', sortDir = -1;
 
     let daData = { galleries: ['Featured'], groups: {} };
     let daDataHandle = null;
@@ -1578,7 +1579,7 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); }
 
     function applyFilters() {
       const s = document.getElementById('f-search').value.toLowerCase();
@@ -1675,33 +1676,35 @@
       tsw.style.display = r.upload_timestamp ? '' : 'none';
       if (r.upload_timestamp) document.getElementById('dp-fts').textContent = r.upload_timestamp;
 
+      const isUrl = v => v && v.startsWith('http');
+
       const daw = document.getElementById('dp-deviationwrap');
-      daw.style.display = r.da_deviation_url ? '' : 'none';
-      if (r.da_deviation_url) { const el = document.getElementById('dp-deviation'); el.href = r.da_deviation_url; }
+      daw.style.display = isUrl(r.da_deviation_url) ? '' : 'none';
+      if (isUrl(r.da_deviation_url)) { document.getElementById('dp-deviation').href = r.da_deviation_url; }
 
       const u500 = document.getElementById('dp-500pxwrap');
-      u500.style.display = r.url_500px ? '' : 'none';
-      if (r.url_500px) { document.getElementById('dp-500px').href = r.url_500px; }
+      u500.style.display = isUrl(r.url_500px) ? '' : 'none';
+      if (isUrl(r.url_500px)) { document.getElementById('dp-500px').href = r.url_500px; }
 
       const u35 = document.getElementById('dp-35pwrap');
-      u35.style.display = r.url_35p ? '' : 'none';
-      if (r.url_35p) { document.getElementById('dp-35p').href = r.url_35p; }
+      u35.style.display = isUrl(r.url_35p) ? '' : 'none';
+      if (isUrl(r.url_35p)) { document.getElementById('dp-35p').href = r.url_35p; }
 
       const uvk = document.getElementById('dp-vkwrap');
-      uvk.style.display = r.url_vk ? '' : 'none';
-      if (r.url_vk) { document.getElementById('dp-vk').href = r.url_vk; }
+      uvk.style.display = isUrl(r.url_vk) ? '' : 'none';
+      if (isUrl(r.url_vk)) { document.getElementById('dp-vk').href = r.url_vk; }
 
       const ux = document.getElementById('dp-xwrap');
-      ux.style.display = r.url_x ? '' : 'none';
-      if (r.url_x) { document.getElementById('dp-x').href = r.url_x; }
+      ux.style.display = isUrl(r.url_x) ? '' : 'none';
+      if (isUrl(r.url_x)) { document.getElementById('dp-x').href = r.url_x; }
 
       const ubsky = document.getElementById('dp-bskywrap');
-      ubsky.style.display = r.url_bsky ? '' : 'none';
-      if (r.url_bsky) { document.getElementById('dp-bsky').href = r.url_bsky; }
+      ubsky.style.display = isUrl(r.url_bsky) ? '' : 'none';
+      if (isUrl(r.url_bsky)) { document.getElementById('dp-bsky').href = r.url_bsky; }
 
       const ufb = document.getElementById('dp-fbwrap');
-      ufb.style.display = r.url_fb ? '' : 'none';
-      if (r.url_fb) { document.getElementById('dp-fb').href = r.url_fb; }
+      ufb.style.display = isUrl(r.url_fb) ? '' : 'none';
+      if (isUrl(r.url_fb)) { document.getElementById('dp-fb').href = r.url_fb; }
 
       const errs = document.getElementById('dp-errsec');
       errs.style.display = r.error_log ? '' : 'none';
@@ -1958,6 +1961,7 @@
       }
 
       saveModelName(entry.model_name);
+      saveLocation(entry.location_500px);
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
@@ -2247,6 +2251,44 @@ Return ONLY valid JSON, no markdown fences:
       }
     }
     refreshModelNameList();
+
+    // ── LOCATION AUTOCOMPLETE ─────────────────────────────────────────────────────
+    function getLocations() {
+      try { return JSON.parse(localStorage.getItem('locations') || '[]'); }
+      catch { return []; }
+    }
+    function saveLocation(loc) {
+      if (!loc) return;
+      const locs = getLocations();
+      if (!locs.some(l => l.toLowerCase() === loc.toLowerCase())) {
+        locs.push(loc);
+        locs.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('locations', JSON.stringify(locs));
+      }
+      refreshLocationList();
+    }
+    function refreshLocationList() {
+      const dl = document.getElementById('location-list');
+      if (!dl) return;
+      dl.innerHTML = getLocations().map(l => `<option value="${h(l)}">`).join('');
+    }
+    function seedLocations() {
+      const locs = getLocations();
+      let added = false;
+      rows.forEach(r => {
+        const l = (r.location_500px || '').trim();
+        if (l && !locs.some(x => x.toLowerCase() === l.toLowerCase())) {
+          locs.push(l);
+          added = true;
+        }
+      });
+      if (added) {
+        locs.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('locations', JSON.stringify(locs));
+        refreshLocationList();
+      }
+    }
+    refreshLocationList();
 
     function getOembedThumbnail(stashUrl) {
       return new Promise((resolve, reject) => {

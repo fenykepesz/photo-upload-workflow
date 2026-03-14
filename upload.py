@@ -2368,7 +2368,7 @@ def main():
 
                         # Update CSV with VK result
                         url_vk = result_vk.get("url_vk", "")
-                        if url_vk and url_vk not in ("NO_SUBMIT",):
+                        if url_vk and url_vk not in ("NO_SUBMIT", "UPLOADED"):
                             save_row_update(args.csv, row["upload_id"], {"url_vk": url_vk})
 
                 # ── X (between VK and DA) ────────────────────────
@@ -2404,7 +2404,7 @@ def main():
 
                         # Update CSV with X result
                         url_x = result_x.get("url_x", "")
-                        if url_x and url_x not in ("NO_SUBMIT",):
+                        if url_x and url_x not in ("NO_SUBMIT", "UPLOADED"):
                             save_row_update(args.csv, row["upload_id"], {"url_x": url_x})
 
                 # ── BSKY (between X and FB) ─────────────────────
@@ -2441,7 +2441,7 @@ def main():
 
                         # Update CSV with BSKY result
                         url_bsky = result_bsky.get("url_bsky", "")
-                        if url_bsky and url_bsky not in ("NO_SUBMIT",):
+                        if url_bsky and url_bsky not in ("NO_SUBMIT", "UPLOADED"):
                             save_row_update(args.csv, row["upload_id"], {"url_bsky": url_bsky})
 
                 # ── FB (between BSKY and DA) ───────────────────────
@@ -2505,7 +2505,7 @@ def main():
 
                         # Update CSV with FB result
                         url_fb = result_fb.get("url_fb", "")
-                        if url_fb and url_fb not in ("NO_SUBMIT",):
+                        if url_fb and url_fb not in ("NO_SUBMIT", "UPLOADED"):
                             save_row_update(args.csv, row["upload_id"], {"url_fb": url_fb})
 
                 # ── DA (must run last — consumes Sta.sh) ──────────
