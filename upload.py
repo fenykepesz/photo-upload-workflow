@@ -1500,36 +1500,47 @@ def upload_to_fb(page, caption, image_path, location="", tag_people="", no_submi
                 for i, handle in enumerate(handles):
                     print(f"    Searching for: {handle}")
 
-                    # Find and click the search input
-                    search_input = page.locator('input[placeholder="Search"]').first
-                    search_input.click(timeout=5000)
-                    page.wait_for_timeout(500)
-
-                    # Clear any previous text and type the handle
-                    page.keyboard.press("Control+a")
+                    # Type handle directly — focus is already in the search input
                     page.keyboard.type(handle, delay=50)
+                    print(f"    Typed: {handle}")
                     page.wait_for_timeout(3000)
 
-                    # Click the first search result below the search box
+                    # Click the first search result — same pattern as location
                     picked = page.evaluate(r"""() => {
+                        // Find "SEARCH" or "SUGGESTIONS" heading to anchor results
+                        let resultsTop = 0;
+                        const spans = document.querySelectorAll('span');
+                        for (const s of spans) {
+                            const t = s.textContent.trim().toUpperCase();
+                            if (t === 'SEARCH' || t === 'SUGGESTIONS') {
+                                resultsTop = s.getBoundingClientRect().bottom;
+                                break;
+                            }
+                        }
+                        // Also find the search input for position reference
                         const input = document.querySelector('input[placeholder="Search"]');
-                        if (!input) return {ok: false, reason: 'no search input'};
-                        const rect = input.getBoundingClientRect();
+                        if (!resultsTop && input) {
+                            resultsTop = input.getBoundingClientRect().bottom + 10;
+                        }
+                        if (!resultsTop) return {ok: false, reason: 'no results heading or search input'};
 
-                        const candidates = document.querySelectorAll(
-                            'li, [role="option"], [role="listitem"], [role="button"]');
+                        // Find candidates below the heading, within the panel (not sidebar)
+                        const candidates = document.querySelectorAll('li, [role="option"], [role="listitem"]');
                         for (const el of candidates) {
                             const r = el.getBoundingClientRect();
-                            if (r.width === 0 || r.height === 0 || r.height < 20) continue;
-                            if (r.top < rect.bottom + 2) continue;
-                            if (r.top > rect.bottom + 500) continue;
+                            if (r.width === 0 || r.height === 0 || r.height < 30) continue;
+                            if (r.top < resultsTop) continue;
+                            if (r.top > resultsTop + 500) continue;
+                            // Must be within the panel (left half of screen, not sidebar)
+                            if (r.left > 600) continue;
                             const text = el.textContent.trim();
                             if (text.length > 0 && text.length < 100) {
                                 return {ok: true, text: text.substring(0, 60),
+                                        top: Math.round(r.top),
                                         x: r.left + r.width / 2, y: r.top + r.height / 2};
                             }
                         }
-                        return {ok: false, reason: 'no search results found'};
+                        return {ok: false, reason: 'no search results found', resultsTop: resultsTop};
                     }""")
 
                     if picked.get("ok"):
@@ -1540,12 +1551,29 @@ def upload_to_fb(page, caption, image_path, location="", tag_people="", no_submi
 
                     page.wait_for_timeout(1500)
 
+                    # Clear search for next handle — select all and delete
+                    if i < len(handles) - 1:
+                        page.keyboard.press("Control+a")
+                        page.keyboard.press("Backspace")
+                        page.wait_for_timeout(500)
+
                 # Click Done to close the tag panel
-                try:
-                    done_btn = page.locator('text="Done"').first
-                    done_btn.click(timeout=3000)
+                done = page.evaluate(r"""() => {
+                    const btns = document.querySelectorAll('div, span, a');
+                    for (const el of btns) {
+                        if (el.textContent.trim() === 'Done') {
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0 && r.left < 600) {
+                                return {ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2};
+                            }
+                        }
+                    }
+                    return {ok: false};
+                }""")
+                if done.get("ok"):
+                    page.mouse.click(done["x"], done["y"])
                     print(f"    Closed tag panel")
-                except Exception:
+                else:
                     print(f"    WARNING: Could not find Done button")
                 page.wait_for_timeout(2000)
             except Exception as e:
