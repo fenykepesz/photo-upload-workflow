@@ -960,7 +960,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.6.3</span>
+      Photo Upload Queue <span>· v1.8.0</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1134,6 +1134,10 @@
           <div class="dp-field">
             <div class="dp-label">Model Name</div>
             <div class="dp-value" id="dp-fmodel">—</div>
+          </div>
+          <div class="dp-field" id="dp-ftagpeoplewrap" style="display:none">
+            <div class="dp-label">FB Tagged</div>
+            <div class="dp-value" id="dp-ftagpeople">—</div>
           </div>
         </div>
 
@@ -1389,6 +1393,10 @@
               <option>Portrait</option>
             </select>
           </div>
+          <div class="fg form-full">
+            <label>FB Tag People <span style="font-weight:400;opacity:.6">(comma-separated handles)</span></label>
+            <input type="text" id="m-fb-tag-people" placeholder="e.g. tammy.miller.1447, john.doe">
+          </div>
           <div class="form-section">DeviantArt Advanced</div>
           <div class="form-full">
             <div class="auto-row">
@@ -1469,7 +1477,7 @@
       'da_nsfw_flag', 'category_500px', 'category_35p',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
-      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px'];
+      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_tag_people'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
     function parseCSV(txt) {
@@ -1705,6 +1713,8 @@
         (r.status === 'Partial' || r.status === 'Failed') ? '' : 'none';
 
       document.getElementById('dp-fmodel').textContent = r.model_name || '—';
+      document.getElementById('dp-ftagpeople').textContent = r.fb_tag_people || '—';
+      document.getElementById('dp-ftagpeoplewrap').style.display = r.fb_tag_people ? '' : 'none';
       document.getElementById('dp-fdagallery').textContent = r.da_gallery || 'Featured';
       document.getElementById('dp-fdagroups').textContent = r.da_groups || '—';
 
@@ -1861,6 +1871,7 @@
       document.getElementById('m-status').value = 'Approved';
       document.getElementById('m-cat-500px').value = '';
       document.getElementById('m-cat-35p').value = '';
+      document.getElementById('m-fb-tag-people').value = '';
       ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'].forEach(id => document.getElementById(id).checked = true);
     }
     function openAddModal() {
@@ -1893,6 +1904,7 @@
       document.getElementById('m-notes').value = r.notes || '';
       document.getElementById('m-model-name').value = r.model_name || '';
       document.getElementById('m-loc-500px').value = r.location_500px || '';
+      document.getElementById('m-fb-tag-people').value = r.fb_tag_people || '';
 
       // Set Galleries
       const gList = (r.da_gallery || 'Featured').split(',').map(g => g.trim());
@@ -1957,6 +1969,7 @@
         status: document.getElementById('m-status').value || 'Approved',
         model_name: document.getElementById('m-model-name').value.trim(),
         location_500px: document.getElementById('m-loc-500px').value.trim(),
+        fb_tag_people: document.getElementById('m-fb-tag-people').value.trim(),
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
           const folder = c.closest('.da-group-row').querySelector('.da-group-folder').value;
