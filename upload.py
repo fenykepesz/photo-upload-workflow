@@ -40,6 +40,7 @@ COLS = [
     "platforms", "status", "upload_timestamp",
     "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
+    "fb_feeling",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -1268,10 +1269,10 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
 
 
 # ── Facebook Upload ──────────────────────────────────────────────
-def upload_to_fb(page, caption, image_path, location="", no_submit=False):
+def upload_to_fb(page, caption, image_path, location="", feeling="", no_submit=False):
     """
     Post a photo with caption to Facebook personal timeline via browser automation.
-    Flow: home → open composer → attach photo → set location → write caption → Next → Post.
+    Flow: home → open composer → attach photo → set location → set feeling → write caption → Next → Post.
     Returns {"success": bool, "url_fb": str, "error": str}
     """
     if not image_path or not Path(image_path).exists():
@@ -1446,6 +1447,89 @@ def upload_to_fb(page, caption, image_path, location="", no_submit=False):
             page.wait_for_timeout(2000)
         except Exception as e:
             print(f"    WARNING: Could not set location: {e}")
+
+    # Feeling — click the smiley icon ("Feeling/activity") in the "Add to your post" bar.
+    # Same pattern as location: multiple buttons may exist; pick the one with highest Y.
+    if feeling:
+        try:
+            print(f"  Setting feeling: {feeling}")
+
+            btn_pos = page.evaluate(r"""() => {
+                const labels = ['Feeling/activity', 'Feeling/Activity', 'Feeling / activity'];
+                let allBtns = [];
+                for (const label of labels) {
+                    const found = document.querySelectorAll('[aria-label="' + label + '"]');
+                    for (const b of found) allBtns.push(b);
+                }
+                if (allBtns.length === 0) return {ok: false, reason: 'no Feeling/activity button found'};
+
+                let best = null;
+                let bestY = -1;
+                for (const btn of allBtns) {
+                    const r = btn.getBoundingClientRect();
+                    const cy = r.top + r.height / 2;
+                    if (r.width > 0 && r.height > 0 && cy > bestY) {
+                        bestY = cy;
+                        best = btn;
+                    }
+                }
+                if (!best) return {ok: false, reason: 'no visible Feeling/activity button'};
+
+                const r = best.getBoundingClientRect();
+                const cx = r.left + r.width / 2;
+                const cy = r.top + r.height / 2;
+
+                const stack = document.elementsFromPoint(cx, cy);
+                let cleared = 0;
+                for (const el of stack) {
+                    if (el === best || best.contains(el) || el.contains(best)) break;
+                    el.style.pointerEvents = 'none';
+                    cleared++;
+                }
+                return {ok: true, x: cx, y: cy, cleared: cleared, btnY: Math.round(cy)};
+            }""")
+
+            if not btn_pos.get("ok"):
+                raise Exception(btn_pos.get("reason"))
+            print(f"    Clicked Feeling/activity at y={btn_pos['btnY']}")
+            page.mouse.click(btn_pos["x"], btn_pos["y"])
+            page.wait_for_timeout(3000)
+
+            picked = page.evaluate(r"""(target) => {
+                const q = target.toLowerCase().trim();
+                const candidates = document.querySelectorAll(
+                    '[role="button"], [role="option"], [role="listitem"], li, div[tabindex]');
+                const matches = [];
+                for (const el of candidates) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0 || r.height < 15) continue;
+                    const text = el.textContent.trim().toLowerCase();
+                    if (text === q || text.startsWith(q)) {
+                        matches.push({
+                            text: el.textContent.trim().substring(0, 40),
+                            top: Math.round(r.top),
+                            x: r.left + r.width / 2,
+                            y: r.top + r.height / 2
+                        });
+                    }
+                }
+                if (matches.length === 0) return {ok: false, reason: 'no matching feeling: ' + target};
+                matches.sort((a, b) => a.top - b.top);
+                return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
+            }""", feeling)
+
+            if picked.get("ok"):
+                page.mouse.click(picked["x"], picked["y"])
+                print(f"    Selected feeling: {picked.get('text')}")
+            else:
+                print(f"    WARNING: {picked.get('reason')}")
+                try:
+                    page.locator('[aria-label="Back"]').first.click(timeout=3000)
+                except Exception:
+                    pass
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            print(f"    WARNING: Could not set feeling: {e}")
 
     # Write caption AFTER photo — Facebook resets text when a photo is attached
     # Facebook has multiple textboxes; the caption is the topmost one (smallest top value)
@@ -2452,6 +2536,7 @@ def main():
                     else:
                         print(f"\n  ── Facebook Upload ──")
                         location_fb = row.get("location_500px", "").strip()
+                        feeling_fb = row.get("fb_feeling", "").strip()
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
 
                         # NSFW safety: never upload NSFW image to Facebook
@@ -2468,7 +2553,7 @@ def main():
                                 print(f"    Caption: {fb_caption[:80]}...")
                                 print(f"    Using safe image (NSFW flag set)")
                                 try:
-                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, args.no_submit)
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, feeling_fb, args.no_submit)
                                 except Exception as e:
                                     result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
                                 finally:
@@ -2491,7 +2576,7 @@ def main():
                             print(f"    Caption: {fb_caption[:80]}...")
 
                             try:
-                                result_fb = upload_to_fb(page, fb_caption, image_path, location_fb, args.no_submit)
+                                result_fb = upload_to_fb(page, fb_caption, image_path, location_fb, feeling_fb, args.no_submit)
                             except Exception as e:
                                 result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
 
