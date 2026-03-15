@@ -1505,49 +1505,46 @@ def upload_to_fb(page, caption, image_path, location="", tag_people="", no_submi
                     print(f"    Typed: {handle}")
                     page.wait_for_timeout(3000)
 
-                    # Click the first search result — same pattern as location
-                    picked = page.evaluate(r"""() => {
-                        // Find "SEARCH" or "SUGGESTIONS" heading to anchor results
+                    # Click the first search result — same evaluate pattern as location
+                    picked = page.evaluate("""() => {
+                        // Find "SEARCH" or "SUGGESTIONS" heading to only match items below it
                         let resultsTop = 0;
                         const spans = document.querySelectorAll('span');
                         for (const s of spans) {
-                            const t = s.textContent.trim().toUpperCase();
+                            const t = s.textContent.trim();
                             if (t === 'SEARCH' || t === 'SUGGESTIONS') {
                                 resultsTop = s.getBoundingClientRect().bottom;
                                 break;
                             }
                         }
-                        // Also find the search input for position reference
-                        const input = document.querySelector('input[placeholder="Search"]');
-                        if (!resultsTop && input) {
-                            resultsTop = input.getBoundingClientRect().bottom + 10;
+                        // Fallback: use search input position
+                        if (!resultsTop) {
+                            const input = document.querySelector('input[placeholder="Search"]');
+                            if (input) resultsTop = input.getBoundingClientRect().bottom + 5;
                         }
-                        if (!resultsTop) return {ok: false, reason: 'no results heading or search input'};
-
-                        // Find candidates below the heading, within the panel (not sidebar)
-                        const candidates = document.querySelectorAll('li, [role="option"], [role="listitem"]');
+                        if (!resultsTop) return {ok: false, reason: 'no heading or search input found'};
+                        // Grab the first result item below the heading
+                        const candidates = document.querySelectorAll('li, [role="option"], [role="listbox"] [role="button"]');
                         for (const el of candidates) {
                             const r = el.getBoundingClientRect();
-                            if (r.width === 0 || r.height === 0 || r.height < 30) continue;
+                            if (r.width === 0 || r.height === 0 || r.height < 20) continue;
                             if (r.top < resultsTop) continue;
                             if (r.top > resultsTop + 500) continue;
-                            // Must be within the panel (left half of screen, not sidebar)
-                            if (r.left > 600) continue;
                             const text = el.textContent.trim();
                             if (text.length > 0 && text.length < 100) {
-                                return {ok: true, text: text.substring(0, 60),
-                                        top: Math.round(r.top),
+                                return {ok: true, text: text.substring(0, 80),
                                         x: r.left + r.width / 2, y: r.top + r.height / 2};
                             }
                         }
-                        return {ok: false, reason: 'no search results found', resultsTop: resultsTop};
+                        return {ok: false, reason: 'no results found', resultsTop: resultsTop};
                     }""")
 
                     if picked.get("ok"):
+                        print(f"    Results: {picked['all']}")
                         page.mouse.click(picked["x"], picked["y"])
                         print(f"    Tagged: {picked.get('text')}")
                     else:
-                        print(f"    WARNING: Could not find '{handle}': {picked.get('reason')}")
+                        print(f"    WARNING: Could not find '{handle}': {picked.get('reason')} (resultsTop={picked.get('resultsTop')})")
 
                     page.wait_for_timeout(1500)
 
