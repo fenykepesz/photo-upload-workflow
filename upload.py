@@ -1500,51 +1500,142 @@ def upload_to_fb(page, caption, image_path, location="", tag_people="", no_submi
                 for i, handle in enumerate(handles):
                     print(f"    Searching for: {handle}")
 
-                    # Type handle directly — focus is already in the search input
+                    # Step 1: Find and click the tag people search input.
+                    # Must be in the CENTER of the page (left > 300) to avoid sidebar inputs.
+                    # The tag people panel is a modal in the center, its search input is at ~left=425.
+                    search_pos = page.evaluate("""() => {
+                        const inputs = document.querySelectorAll('input');
+                        let best = null;
+                        let bestY = -1;
+                        const found = [];
+                        for (const inp of inputs) {
+                            const r = inp.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0) continue;
+                            found.push({ph: inp.placeholder, type: inp.type, left: Math.round(r.left),
+                                        top: Math.round(r.top), w: Math.round(r.width)});
+                            // Must be in center area (tag people panel), not sidebar
+                            if (r.left < 300) continue;
+                            const ph = (inp.placeholder || '').trim().toLowerCase();
+                            if (ph.includes('search')) {
+                                const cy = r.top + r.height / 2;
+                                if (cy > bestY) {
+                                    bestY = cy;
+                                    best = inp;
+                                }
+                            }
+                        }
+                        if (!best) return {ok: false, reason: 'no center Search input found', inputs: found};
+                        const r = best.getBoundingClientRect();
+                        const cx = r.left + r.width / 2;
+                        const cy = r.top + r.height / 2;
+                        // Clear overlays
+                        const stack = document.elementsFromPoint(cx, cy);
+                        for (const el of stack) {
+                            if (el === best || best.contains(el) || el.contains(best)) break;
+                            el.style.pointerEvents = 'none';
+                        }
+                        return {ok: true, x: cx, y: cy, left: Math.round(r.left),
+                                top: Math.round(r.top), bottom: Math.round(r.bottom),
+                                placeholder: best.placeholder, inputs: found};
+                    }""")
+                    if not search_pos.get("ok"):
+                        print(f"    WARNING: {search_pos.get('reason')}")
+                        print(f"    All inputs: {search_pos.get('inputs')}")
+                        continue
+                    print(f"    Search input: placeholder='{search_pos.get('placeholder')}' at left={search_pos['left']}, y={search_pos['top']}")
+                    page.mouse.click(search_pos["x"], search_pos["y"])
+                    page.wait_for_timeout(500)
+
+                    # Step 2: Type the handle
                     page.keyboard.type(handle, delay=50)
                     print(f"    Typed: {handle}")
                     page.wait_for_timeout(3000)
 
-                    # Click the first search result — same evaluate pattern as location
+                    # Step 3: Click first search result — scope to panel container
+                    # by walking up the DOM from the search input. This avoids
+                    # matching sidebar elements that overlap in screen coordinates.
                     picked = page.evaluate("""() => {
-                        // Find "SEARCH" or "SUGGESTIONS" heading to only match items below it
+                        // Find the search input in center area (tag people panel)
+                        const inputs = document.querySelectorAll('input');
+                        let searchInput = null;
+                        let bestY = -1;
+                        for (const inp of inputs) {
+                            const r = inp.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0 || r.left < 300) continue;
+                            const ph = (inp.placeholder || '').trim().toLowerCase();
+                            if (ph.includes('search')) {
+                                const cy = r.top + r.height / 2;
+                                if (cy > bestY) { bestY = cy; searchInput = inp; }
+                            }
+                        }
+                        if (!searchInput) return {ok: false, reason: 'search input not found'};
+
+                        // Walk up from search input to find the panel container
+                        // (a reasonably-sized element, ~300-600px wide, >150px tall)
+                        let panel = searchInput;
+                        for (let i = 0; i < 20; i++) {
+                            if (!panel.parentElement) break;
+                            panel = panel.parentElement;
+                            const r = panel.getBoundingClientRect();
+                            if (r.width >= 280 && r.width <= 600 && r.height > 150) break;
+                        }
+                        const panelRect = panel.getBoundingClientRect();
+
+                        // Find the SEARCH or SUGGESTIONS heading within the panel
+                        // to anchor results BELOW it (skips the TAGGED chips section).
                         let resultsTop = 0;
-                        const spans = document.querySelectorAll('span');
-                        for (const s of spans) {
+                        const panelSpans = panel.querySelectorAll('span');
+                        for (const s of panelSpans) {
                             const t = s.textContent.trim();
                             if (t === 'SEARCH' || t === 'SUGGESTIONS') {
-                                resultsTop = s.getBoundingClientRect().bottom;
-                                break;
+                                const sr = s.getBoundingClientRect();
+                                if (sr.width > 0 && sr.height > 0) {
+                                    resultsTop = sr.bottom;
+                                    break;
+                                }
                             }
                         }
-                        // Fallback: use search input position
-                        if (!resultsTop) {
-                            const input = document.querySelector('input[placeholder="Search"]');
-                            if (input) resultsTop = input.getBoundingClientRect().bottom + 5;
-                        }
-                        if (!resultsTop) return {ok: false, reason: 'no heading or search input found'};
-                        // Grab the first result item below the heading
-                        const candidates = document.querySelectorAll('li, [role="option"], [role="listbox"] [role="button"]');
-                        for (const el of candidates) {
+                        // Fallback to search input bottom if no heading found
+                        if (!resultsTop) resultsTop = searchInput.getBoundingClientRect().bottom;
+
+                        const skip = new Set(['SEARCH','Search','Done','Next','Back','Cancel',
+                                              'Tag people','Tag People','SUGGESTIONS','TAGGED']);
+                        const els = panel.querySelectorAll('*');
+                        for (const el of els) {
                             const r = el.getBoundingClientRect();
-                            if (r.width === 0 || r.height === 0 || r.height < 20) continue;
                             if (r.top < resultsTop) continue;
-                            if (r.top > resultsTop + 500) continue;
+                            if (r.top > resultsTop + 200) continue;
+                            if (r.height < 30 || r.height > 80) continue;
+                            if (r.width < 100) continue;
                             const text = el.textContent.trim();
-                            if (text.length > 0 && text.length < 100) {
-                                return {ok: true, text: text.substring(0, 80),
-                                        x: r.left + r.width / 2, y: r.top + r.height / 2};
+                            if (text.length < 3 || text.length > 100) continue;
+                            if (skip.has(text)) continue;
+                            if (text.startsWith('SEARCH') || text.startsWith('SUGGESTIONS')
+                                || text.startsWith('TAGGED')) continue;
+                            const cx = r.left + r.width / 2;
+                            const cy = r.top + r.height / 2;
+                            // Clear overlays
+                            const stack = document.elementsFromPoint(cx, cy);
+                            for (const ov of stack) {
+                                if (ov === el || el.contains(ov) || ov.contains(el)) break;
+                                ov.style.pointerEvents = 'none';
                             }
+                            return {ok: true, text: text.substring(0, 80),
+                                    x: cx, y: cy, tag: el.tagName,
+                                    panelW: Math.round(panelRect.width),
+                                    panelH: Math.round(panelRect.height)};
                         }
-                        return {ok: false, reason: 'no results found', resultsTop: resultsTop};
+                        return {ok: false, reason: 'no result found in panel',
+                                panelW: Math.round(panelRect.width),
+                                panelH: Math.round(panelRect.height),
+                                panelTag: panel.tagName};
                     }""")
 
                     if picked.get("ok"):
-                        print(f"    Results: {picked['all']}")
                         page.mouse.click(picked["x"], picked["y"])
                         print(f"    Tagged: {picked.get('text')}")
                     else:
-                        print(f"    WARNING: Could not find '{handle}': {picked.get('reason')} (resultsTop={picked.get('resultsTop')})")
+                        print(f"    WARNING: Could not find '{handle}': {picked.get('reason')}")
 
                     page.wait_for_timeout(1500)
 
@@ -1554,18 +1645,51 @@ def upload_to_fb(page, caption, image_path, location="", tag_people="", no_submi
                         page.keyboard.press("Backspace")
                         page.wait_for_timeout(500)
 
-                # Click Done to close the tag panel
+                # Click Done — find it within the tag people panel (scoped via search input)
                 done = page.evaluate(r"""() => {
-                    const btns = document.querySelectorAll('div, span, a');
-                    for (const el of btns) {
-                        if (el.textContent.trim() === 'Done') {
+                    // Find the search input in center area to locate the panel
+                    const inputs = document.querySelectorAll('input');
+                    let searchInput = null;
+                    let bestY = -1;
+                    for (const inp of inputs) {
+                        const r = inp.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0 || r.left < 300) continue;
+                        const ph = (inp.placeholder || '').trim().toLowerCase();
+                        if (ph.includes('search')) {
+                            const cy = r.top + r.height / 2;
+                            if (cy > bestY) { bestY = cy; searchInput = inp; }
+                        }
+                    }
+                    if (!searchInput) return {ok: false, reason: 'no search input'};
+
+                    // Walk up to find the panel container
+                    let panel = searchInput;
+                    for (let i = 0; i < 20; i++) {
+                        if (!panel.parentElement) break;
+                        panel = panel.parentElement;
+                        const r = panel.getBoundingClientRect();
+                        if (r.width >= 280 && r.width <= 600 && r.height > 150) break;
+                    }
+
+                    // Find "Done" span/div within the panel
+                    const els = panel.querySelectorAll('span, div, a');
+                    for (const el of els) {
+                        if (el.textContent.trim() === 'Done' && el.children.length === 0) {
                             const r = el.getBoundingClientRect();
-                            if (r.width > 0 && r.height > 0 && r.left < 600) {
-                                return {ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2};
+                            if (r.width > 0 && r.height > 0) {
+                                const cx = r.left + r.width / 2;
+                                const cy = r.top + r.height / 2;
+                                // Clear overlays
+                                const stack = document.elementsFromPoint(cx, cy);
+                                for (const ov of stack) {
+                                    if (ov === el || el.contains(ov) || ov.contains(el)) break;
+                                    ov.style.pointerEvents = 'none';
+                                }
+                                return {ok: true, x: cx, y: cy};
                             }
                         }
                     }
-                    return {ok: false};
+                    return {ok: false, reason: 'Done not found in panel'};
                 }""")
                 if done.get("ok"):
                     page.mouse.click(done["x"], done["y"])

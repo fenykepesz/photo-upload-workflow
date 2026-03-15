@@ -1395,7 +1395,8 @@
           </div>
           <div class="fg form-full">
             <label>FB Tag People <span style="font-weight:400;opacity:.6">(comma-separated handles)</span></label>
-            <input type="text" id="m-fb-tag-people" placeholder="e.g. tammy.miller.1447, john.doe">
+            <input type="text" id="m-fb-tag-people" placeholder="e.g. tammy.miller.1447, john.doe" list="tag-people-list" autocomplete="off">
+            <datalist id="tag-people-list"></datalist>
           </div>
           <div class="form-section">DeviantArt Advanced</div>
           <div class="form-full">
@@ -1590,7 +1591,7 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); }
 
     function applyFilters() {
       const s = document.getElementById('f-search').value.toLowerCase();
@@ -1998,6 +1999,7 @@
 
       saveModelName(entry.model_name);
       saveLocation(entry.location_500px);
+      saveTagPeople(entry.fb_tag_people);
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
@@ -2325,6 +2327,53 @@ Return ONLY valid JSON, no markdown fences:
       }
     }
     refreshLocationList();
+
+    // ── TAG PEOPLE AUTOCOMPLETE ───────────────────────────────────────────────────
+    function getTagPeopleHandles() {
+      try { return JSON.parse(localStorage.getItem('tag_people_handles') || '[]'); }
+      catch { return []; }
+    }
+    function saveTagPeople(val) {
+      if (!val) return;
+      const handles = getTagPeopleHandles();
+      let added = false;
+      val.split(',').forEach(h => {
+        const t = h.trim();
+        if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+          handles.push(t);
+          added = true;
+        }
+      });
+      if (added) {
+        handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('tag_people_handles', JSON.stringify(handles));
+        refreshTagPeopleList();
+      }
+    }
+    function refreshTagPeopleList() {
+      const dl = document.getElementById('tag-people-list');
+      if (!dl) return;
+      dl.innerHTML = getTagPeopleHandles().map(t => `<option value="${h(t)}">`).join('');
+    }
+    function seedTagPeople() {
+      const handles = getTagPeopleHandles();
+      let added = false;
+      rows.forEach(r => {
+        (r.fb_tag_people || '').split(',').forEach(p => {
+          const t = p.trim();
+          if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+            handles.push(t);
+            added = true;
+          }
+        });
+      });
+      if (added) {
+        handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('tag_people_handles', JSON.stringify(handles));
+        refreshTagPeopleList();
+      }
+    }
+    refreshTagPeopleList();
 
     function getOembedThumbnail(stashUrl) {
       return new Promise((resolve, reject) => {
