@@ -40,7 +40,7 @@ COLS = [
     "platforms", "status", "upload_timestamp",
     "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
-    "fb_feeling",
+    "fb_feeling", "fb_tag_people",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -418,7 +418,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
             return {"success": False, "url_500px": "", "error": f"No file input: {e}"}
 
     # Wait for upload to process (500px extracts EXIF server-side)
-    page.wait_for_timeout(10000)
+    page.wait_for_timeout(45000)
 
     # ── Fill metadata fields ────────────────────────────────
     title = row.get("title", "").strip()
@@ -646,7 +646,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
     # Wait for upload to process and form to appear
     print("  Waiting for upload to complete...")
-    page.wait_for_timeout(15000)
+    page.wait_for_timeout(45000)
 
     # Scroll down to make the metadata form visible
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -889,9 +889,7 @@ def upload_to_vk(page, desc_full, image_path, no_submit=False):
 
     # Wait for photo to process
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(8000)
-
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(45000)
 
     # Click "Next" button
     print("  Clicking Next...")
@@ -1269,10 +1267,10 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
 
 
 # ── Facebook Upload ──────────────────────────────────────────────
-def upload_to_fb(page, caption, image_path, location="", feeling="", no_submit=False):
+def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people="", no_submit=False):
     """
     Post a photo with caption to Facebook personal timeline via browser automation.
-    Flow: home → open composer → attach photo → set location → set feeling → write caption → Next → Post.
+    Flow: home → open composer → attach photo → set location → set feeling → tag people → write caption → Next → Post.
     Returns {"success": bool, "url_fb": str, "error": str}
     """
     if not image_path or not Path(image_path).exists():
@@ -1530,6 +1528,258 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", no_submit=F
             page.wait_for_timeout(2000)
         except Exception as e:
             print(f"    WARNING: Could not set feeling: {e}")
+
+    # Tag people — click the "Tag people" icon in the "Add to your post" bar.
+    # Same pattern as location: highest Y button + overlay clearing.
+    if tag_people:
+        handles = [h.strip() for h in tag_people.split(",") if h.strip()]
+        if handles:
+            try:
+                print(f"  Tagging {len(handles)} people: {', '.join(handles)}")
+
+                btn_pos = page.evaluate(r"""() => {
+                    const labels = ['Tag people', 'Tag People', 'Tag friends'];
+                    let allBtns = [];
+                    for (const label of labels) {
+                        const found = document.querySelectorAll('[aria-label="' + label + '"]');
+                        for (const b of found) allBtns.push(b);
+                    }
+                    if (allBtns.length === 0) return {ok: false, reason: 'no Tag people button found'};
+
+                    let best = null;
+                    let bestY = -1;
+                    for (const btn of allBtns) {
+                        const r = btn.getBoundingClientRect();
+                        const cy = r.top + r.height / 2;
+                        if (r.width > 0 && r.height > 0 && cy > bestY) {
+                            bestY = cy;
+                            best = btn;
+                        }
+                    }
+                    if (!best) return {ok: false, reason: 'no visible Tag people button'};
+
+                    const r = best.getBoundingClientRect();
+                    const cx = r.left + r.width / 2;
+                    const cy = r.top + r.height / 2;
+
+                    const stack = document.elementsFromPoint(cx, cy);
+                    let cleared = 0;
+                    for (const el of stack) {
+                        if (el === best || best.contains(el) || el.contains(best)) break;
+                        el.style.pointerEvents = 'none';
+                        cleared++;
+                    }
+                    return {ok: true, x: cx, y: cy, cleared: cleared, btnY: Math.round(cy)};
+                }""")
+
+                if not btn_pos.get("ok"):
+                    raise Exception(btn_pos.get("reason"))
+                print(f"    Clicked Tag people at y={btn_pos['btnY']}")
+                page.mouse.click(btn_pos["x"], btn_pos["y"])
+                page.wait_for_timeout(3000)
+
+                for i, handle in enumerate(handles):
+                    print(f"    Searching for: {handle}")
+
+                    # Step 1: Find and click the tag people search input.
+                    # Must be in the CENTER of the page (left > 300) to avoid sidebar inputs.
+                    # The tag people panel is a modal in the center, its search input is at ~left=425.
+                    search_pos = page.evaluate("""() => {
+                        const inputs = document.querySelectorAll('input');
+                        let best = null;
+                        let bestY = -1;
+                        const found = [];
+                        for (const inp of inputs) {
+                            const r = inp.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0) continue;
+                            found.push({ph: inp.placeholder, type: inp.type, left: Math.round(r.left),
+                                        top: Math.round(r.top), w: Math.round(r.width)});
+                            // Must be in center area (tag people panel), not sidebar
+                            if (r.left < 300) continue;
+                            const ph = (inp.placeholder || '').trim().toLowerCase();
+                            if (ph.includes('search')) {
+                                const cy = r.top + r.height / 2;
+                                if (cy > bestY) {
+                                    bestY = cy;
+                                    best = inp;
+                                }
+                            }
+                        }
+                        if (!best) return {ok: false, reason: 'no center Search input found', inputs: found};
+                        const r = best.getBoundingClientRect();
+                        const cx = r.left + r.width / 2;
+                        const cy = r.top + r.height / 2;
+                        // Clear overlays
+                        const stack = document.elementsFromPoint(cx, cy);
+                        for (const el of stack) {
+                            if (el === best || best.contains(el) || el.contains(best)) break;
+                            el.style.pointerEvents = 'none';
+                        }
+                        return {ok: true, x: cx, y: cy, left: Math.round(r.left),
+                                top: Math.round(r.top), bottom: Math.round(r.bottom),
+                                placeholder: best.placeholder, inputs: found};
+                    }""")
+                    if not search_pos.get("ok"):
+                        print(f"    WARNING: {search_pos.get('reason')}")
+                        print(f"    All inputs: {search_pos.get('inputs')}")
+                        continue
+                    print(f"    Search input: placeholder='{search_pos.get('placeholder')}' at left={search_pos['left']}, y={search_pos['top']}")
+                    page.mouse.click(search_pos["x"], search_pos["y"])
+                    page.wait_for_timeout(500)
+
+                    # Step 2: Type the handle
+                    page.keyboard.type(handle, delay=50)
+                    print(f"    Typed: {handle}")
+                    page.wait_for_timeout(3000)
+
+                    # Step 3: Click first search result — scope to panel container
+                    # by walking up the DOM from the search input. This avoids
+                    # matching sidebar elements that overlap in screen coordinates.
+                    picked = page.evaluate("""() => {
+                        // Find the search input in center area (tag people panel)
+                        const inputs = document.querySelectorAll('input');
+                        let searchInput = null;
+                        let bestY = -1;
+                        for (const inp of inputs) {
+                            const r = inp.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0 || r.left < 300) continue;
+                            const ph = (inp.placeholder || '').trim().toLowerCase();
+                            if (ph.includes('search')) {
+                                const cy = r.top + r.height / 2;
+                                if (cy > bestY) { bestY = cy; searchInput = inp; }
+                            }
+                        }
+                        if (!searchInput) return {ok: false, reason: 'search input not found'};
+
+                        // Walk up from search input to find the panel container
+                        // (a reasonably-sized element, ~300-600px wide, >150px tall)
+                        let panel = searchInput;
+                        for (let i = 0; i < 20; i++) {
+                            if (!panel.parentElement) break;
+                            panel = panel.parentElement;
+                            const r = panel.getBoundingClientRect();
+                            if (r.width >= 280 && r.width <= 600 && r.height > 150) break;
+                        }
+                        const panelRect = panel.getBoundingClientRect();
+
+                        // Find the SEARCH or SUGGESTIONS heading within the panel
+                        // to anchor results BELOW it (skips the TAGGED chips section).
+                        let resultsTop = 0;
+                        const panelSpans = panel.querySelectorAll('span');
+                        for (const s of panelSpans) {
+                            const t = s.textContent.trim();
+                            if (t === 'SEARCH' || t === 'SUGGESTIONS') {
+                                const sr = s.getBoundingClientRect();
+                                if (sr.width > 0 && sr.height > 0) {
+                                    resultsTop = sr.bottom;
+                                    break;
+                                }
+                            }
+                        }
+                        // Fallback to search input bottom if no heading found
+                        if (!resultsTop) resultsTop = searchInput.getBoundingClientRect().bottom;
+
+                        const skip = new Set(['SEARCH','Search','Done','Next','Back','Cancel',
+                                              'Tag people','Tag People','SUGGESTIONS','TAGGED']);
+                        const els = panel.querySelectorAll('*');
+                        for (const el of els) {
+                            const r = el.getBoundingClientRect();
+                            if (r.top < resultsTop) continue;
+                            if (r.top > resultsTop + 200) continue;
+                            if (r.height < 30 || r.height > 80) continue;
+                            if (r.width < 100) continue;
+                            const text = el.textContent.trim();
+                            if (text.length < 3 || text.length > 100) continue;
+                            if (skip.has(text)) continue;
+                            if (text.startsWith('SEARCH') || text.startsWith('SUGGESTIONS')
+                                || text.startsWith('TAGGED')) continue;
+                            const cx = r.left + r.width / 2;
+                            const cy = r.top + r.height / 2;
+                            // Clear overlays
+                            const stack = document.elementsFromPoint(cx, cy);
+                            for (const ov of stack) {
+                                if (ov === el || el.contains(ov) || ov.contains(el)) break;
+                                ov.style.pointerEvents = 'none';
+                            }
+                            return {ok: true, text: text.substring(0, 80),
+                                    x: cx, y: cy, tag: el.tagName,
+                                    panelW: Math.round(panelRect.width),
+                                    panelH: Math.round(panelRect.height)};
+                        }
+                        return {ok: false, reason: 'no result found in panel',
+                                panelW: Math.round(panelRect.width),
+                                panelH: Math.round(panelRect.height),
+                                panelTag: panel.tagName};
+                    }""")
+
+                    if picked.get("ok"):
+                        page.mouse.click(picked["x"], picked["y"])
+                        print(f"    Tagged: {picked.get('text')}")
+                    else:
+                        print(f"    WARNING: Could not find '{handle}': {picked.get('reason')}")
+
+                    page.wait_for_timeout(1500)
+
+                    # Clear search for next handle — select all and delete
+                    if i < len(handles) - 1:
+                        page.keyboard.press("Control+a")
+                        page.keyboard.press("Backspace")
+                        page.wait_for_timeout(500)
+
+                # Click Done — find it within the tag people panel (scoped via search input)
+                done = page.evaluate(r"""() => {
+                    // Find the search input in center area to locate the panel
+                    const inputs = document.querySelectorAll('input');
+                    let searchInput = null;
+                    let bestY = -1;
+                    for (const inp of inputs) {
+                        const r = inp.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0 || r.left < 300) continue;
+                        const ph = (inp.placeholder || '').trim().toLowerCase();
+                        if (ph.includes('search')) {
+                            const cy = r.top + r.height / 2;
+                            if (cy > bestY) { bestY = cy; searchInput = inp; }
+                        }
+                    }
+                    if (!searchInput) return {ok: false, reason: 'no search input'};
+
+                    // Walk up to find the panel container
+                    let panel = searchInput;
+                    for (let i = 0; i < 20; i++) {
+                        if (!panel.parentElement) break;
+                        panel = panel.parentElement;
+                        const r = panel.getBoundingClientRect();
+                        if (r.width >= 280 && r.width <= 600 && r.height > 150) break;
+                    }
+
+                    // Find "Done" span/div within the panel
+                    const els = panel.querySelectorAll('span, div, a');
+                    for (const el of els) {
+                        if (el.textContent.trim() === 'Done' && el.children.length === 0) {
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0) {
+                                const cx = r.left + r.width / 2;
+                                const cy = r.top + r.height / 2;
+                                // Clear overlays
+                                const stack = document.elementsFromPoint(cx, cy);
+                                for (const ov of stack) {
+                                    if (ov === el || el.contains(ov) || ov.contains(el)) break;
+                                    ov.style.pointerEvents = 'none';
+                                }
+                                return {ok: true, x: cx, y: cy};
+                            }
+                        }
+                    }
+                    return {ok: false, reason: 'Done not found in panel'};
+                }""")
+                if done.get("ok"):
+                    page.mouse.click(done["x"], done["y"])
+                    print(f"    Closed tag panel")
+                else:
+                    print(f"    WARNING: Could not find Done button")
+                page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"    WARNING: Could not tag people: {e}")
 
     # Write caption AFTER photo — Facebook resets text when a photo is attached
     # Facebook has multiple textboxes; the caption is the topmost one (smallest top value)
@@ -2537,6 +2787,7 @@ def main():
                         print(f"\n  ── Facebook Upload ──")
                         location_fb = row.get("location_500px", "").strip()
                         feeling_fb = row.get("fb_feeling", "").strip()
+                        tag_people_fb = row.get("fb_tag_people", "").strip()
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
 
                         # NSFW safety: never upload NSFW image to Facebook
@@ -2553,7 +2804,7 @@ def main():
                                 print(f"    Caption: {fb_caption[:80]}...")
                                 print(f"    Using safe image (NSFW flag set)")
                                 try:
-                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, feeling_fb, args.no_submit)
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, feeling_fb, tag_people_fb, args.no_submit)
                                 except Exception as e:
                                     result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
                                 finally:
@@ -2576,7 +2827,7 @@ def main():
                             print(f"    Caption: {fb_caption[:80]}...")
 
                             try:
-                                result_fb = upload_to_fb(page, fb_caption, image_path, location_fb, feeling_fb, args.no_submit)
+                                result_fb = upload_to_fb(page, fb_caption, image_path, location_fb, feeling_fb, tag_people_fb, args.no_submit)
                             except Exception as e:
                                 result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
 
