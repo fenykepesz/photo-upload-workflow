@@ -418,7 +418,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
             return {"success": False, "url_500px": "", "error": f"No file input: {e}"}
 
     # Wait for upload to process (500px extracts EXIF server-side)
-    page.wait_for_timeout(10000)
+    page.wait_for_timeout(45000)
 
     # ── Fill metadata fields ────────────────────────────────
     title = row.get("title", "").strip()
@@ -646,7 +646,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
     # Wait for upload to process and form to appear
     print("  Waiting for upload to complete...")
-    page.wait_for_timeout(15000)
+    page.wait_for_timeout(45000)
 
     # Scroll down to make the metadata form visible
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -889,9 +889,7 @@ def upload_to_vk(page, desc_full, image_path, no_submit=False):
 
     # Wait for photo to process
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(8000)
-
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(45000)
 
     # Click "Next" button
     print("  Clicking Next...")

@@ -1530,11 +1530,38 @@
     function cacheCSV(csvText, name) {
       try { localStorage.setItem('csv_cache', csvText); localStorage.setItem('csv_filename', name); } catch (e) { }
     }
+    // Persist fileHandle in IndexedDB so it survives page reloads
+    function storeFileHandle(fh) {
+      try {
+        const req = indexedDB.open('qm_handles', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('handles');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('handles', 'readwrite');
+          tx.objectStore('handles').put(fh, 'csv');
+        };
+      } catch (e) {}
+    }
+    function getStoredFileHandle() {
+      return new Promise(resolve => {
+        try {
+          const req = indexedDB.open('qm_handles', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('handles');
+          req.onsuccess = () => {
+            const tx = req.result.transaction('handles', 'readonly');
+            const get = tx.objectStore('handles').get('csv');
+            get.onsuccess = () => resolve(get.result || null);
+            get.onerror = () => resolve(null);
+          };
+          req.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      });
+    }
     async function loadCSV() {
       try {
         if ('showOpenFilePicker' in window) {
           const [fh] = await showOpenFilePicker({ types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }] });
           fileHandle = fh;
+          storeFileHandle(fh);
           const file = await fh.getFile();
           const txt = await file.text();
           rows = parseCSV(txt);
@@ -1558,7 +1585,26 @@
         refresh();
       } catch (e) { if (e.name !== 'AbortError') toast('Load error: ' + e.message, 'error'); }
     }
-    function autoLoadCSV() {
+    async function autoLoadCSV() {
+      // Try to re-read from disk using stored fileHandle (always fresh)
+      const storedFH = await getStoredFileHandle();
+      if (storedFH) {
+        try {
+          // Check if we still have permission (no prompt for read)
+          if ((await storedFH.queryPermission({ mode: 'readwrite' })) === 'granted') {
+            fileHandle = storedFH;
+            const file = await storedFH.getFile();
+            const txt = await file.text();
+            rows = parseCSV(txt);
+            cacheCSV(txt, storedFH.name);
+            document.getElementById('file-label').textContent = '📄 ' + storedFH.name;
+            document.getElementById('btn-save').disabled = false;
+            refresh();
+            return;
+          }
+        } catch (e) { /* permission revoked or file gone — fall through to cache */ }
+      }
+      // Fallback: use localStorage cache
       const cached = localStorage.getItem('csv_cache');
       if (!cached) return;
       rows = parseCSV(cached);
@@ -1690,21 +1736,34 @@
 
       const isUrl = v => v && v.startsWith('http');
 
-      function showPlatUrl(wrapId, linkId, val, label) {
+      const isFailed = r.status === 'Partial' || r.status === 'Failed';
+      const reqPlats = (r.platforms || '').toUpperCase().split(',').map(s => s.trim());
+      function showPlatUrl(wrapId, linkId, val, label, platKey) {
         const wrap = document.getElementById(wrapId);
         const link = document.getElementById(linkId);
         const v = (val || '').trim();
-        wrap.style.display = v ? '' : 'none';
-        if (isUrl(val)) { link.href = val; link.textContent = label + ' \u2197'; }
-        else if (v) { link.removeAttribute('href'); link.textContent = '\u2713 Uploaded (no link)'; }
+        const requested = reqPlats.includes(platKey);
+        // Show row if: has a value, OR platform was requested and upload failed
+        if (v) {
+          wrap.style.display = '';
+          if (isUrl(val)) { link.href = val; link.textContent = label + ' \u2197'; link.style.color = ''; }
+          else { link.removeAttribute('href'); link.textContent = '\u2713 Uploaded (no link)'; link.style.color = ''; }
+        } else if (isFailed && requested) {
+          wrap.style.display = '';
+          link.removeAttribute('href');
+          link.textContent = '\u2717 ' + label.replace('View on ', '') + ' — Failed';
+          link.style.color = 'var(--error)';
+        } else {
+          wrap.style.display = 'none';
+        }
       }
-      showPlatUrl('dp-deviationwrap', 'dp-deviation', r.da_deviation_url, 'View on DA');
-      showPlatUrl('dp-500pxwrap', 'dp-500px', r.url_500px, 'View on 500px');
-      showPlatUrl('dp-35pwrap', 'dp-35p', r.url_35p, 'View on 35photo');
-      showPlatUrl('dp-vkwrap', 'dp-vk', r.url_vk, 'View on VK');
-      showPlatUrl('dp-xwrap', 'dp-x', r.url_x, 'View on X');
-      showPlatUrl('dp-bskywrap', 'dp-bsky', r.url_bsky, 'View on Bluesky');
-      showPlatUrl('dp-fbwrap', 'dp-fb', r.url_fb, 'View on Facebook');
+      showPlatUrl('dp-deviationwrap', 'dp-deviation', r.da_deviation_url, 'View on DA', 'DA');
+      showPlatUrl('dp-500pxwrap', 'dp-500px', r.url_500px, 'View on 500px', '500PX');
+      showPlatUrl('dp-35pwrap', 'dp-35p', r.url_35p, 'View on 35photo', '35P');
+      showPlatUrl('dp-vkwrap', 'dp-vk', r.url_vk, 'View on VK', 'VK');
+      showPlatUrl('dp-xwrap', 'dp-x', r.url_x, 'View on X', 'X');
+      showPlatUrl('dp-bskywrap', 'dp-bsky', r.url_bsky, 'View on Bluesky', 'BSKY');
+      showPlatUrl('dp-fbwrap', 'dp-fb', r.url_fb, 'View on Facebook', 'FB');
 
       const errs = document.getElementById('dp-errsec');
       errs.style.display = r.error_log ? '' : 'none';
@@ -2402,12 +2461,34 @@ Return ONLY valid JSON, no markdown fences:
     }
 
     function parseAiResponse(text) {
+      // 0. Detect model refusal (no JSON, just a refusal message)
+      if (!text.includes('{')) {
+        const lower = text.toLowerCase();
+        if (lower.includes("not able to") || lower.includes("can't assist") || lower.includes("cannot assist")
+            || lower.includes("i'm unable") || lower.includes("i cannot") || lower.includes("not able to generate")
+            || lower.includes("explicit") || lower.includes("nudity")) {
+          throw new Error('Model refused to process this image. Try a different model (e.g. Sonnet 4.5). Reason: ' + text.substring(0, 200));
+        }
+        throw new Error('AI returned no JSON. Response: ' + text.substring(0, 300));
+      }
+      // 1. Direct parse (pure JSON response)
       try { return JSON.parse(text); } catch {}
+      // 2. Extract from markdown code block
       const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (m) try { return JSON.parse(m[1]); } catch {}
+      if (m) try { return JSON.parse(m[1].trim()); } catch {}
+      // 3. Find the outermost { ... } with balanced braces
+      const start = text.indexOf('{');
+      if (start !== -1) {
+        let depth = 0;
+        for (let i = start; i < text.length; i++) {
+          if (text[i] === '{') depth++;
+          else if (text[i] === '}') { depth--; if (depth === 0) { try { return JSON.parse(text.substring(start, i + 1)); } catch {} break; } }
+        }
+      }
+      // 4. Greedy fallback
       const m2 = text.match(/\{[\s\S]*\}/);
       if (m2) try { return JSON.parse(m2[0]); } catch {}
-      throw new Error('Could not parse AI response as JSON');
+      throw new Error('Could not parse AI response as JSON. Response: ' + text.substring(0, 300));
     }
 
     async function callClaudeVision(imageSource) {
@@ -2428,7 +2509,15 @@ Return ONLY valid JSON, no markdown fences:
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true'
         },
-        body: JSON.stringify({ model: getAiModel(), max_tokens: 1500, messages: [{ role: 'user', content }] })
+        body: JSON.stringify({
+          model: getAiModel(), max_tokens: 1500,
+          system: 'You are a professional metadata assistant for a fine art photography portfolio. '
+            + 'The photographer creates artistic work exhibited in galleries and published on platforms like DeviantArt, 500px, and 35photo. '
+            + 'Images may include artistic nudes in the tradition of fine art photography (e.g. Edward Weston, Helmut Newton, Robert Mapplethorpe). '
+            + 'This is legitimate artistic content — treat it professionally and generate the requested metadata. '
+            + 'Always respond with valid JSON only.',
+          messages: [{ role: 'user', content }]
+        })
       });
 
       if (!res.ok) {

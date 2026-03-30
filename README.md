@@ -116,7 +116,8 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `model_name` | Model name (required for Fashion/People/Nude/Portrait categories) | `Elena` |
 | `da_gallery` | DA galleries (comma-separated) | `Featured,Travel` |
 | `da_groups` | DA groups (`Group:Folder` format) | `TheSpiritofArt:Featured` |
-| `location_500px` | 500px location (skipped if EXIF provides it) | `Tel Aviv, Israel` |
+| `location_500px` | 500px / Facebook location (skipped if EXIF provides it) | `Tel Aviv, Israel` |
+| `fb_tag_people` | Facebook tag people (comma-separated handles) | `sienna.modeling, john.doe` |
 
 ### Status Values
 
@@ -227,6 +228,9 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 - Posts a photo with **model credit + caption** to the user's **personal timeline** (no social links)
 - **NSFW safety:** If `da_nsfw_flag` is `TRUE`, only the safe image (`stash_url_safe`) is used — if missing, the upload **fails** (NSFW photos are never uploaded to Facebook)
 - For non-NSFW photos, uses the standard `stash_url_nsfw` image
+- **Location:** Uses the `location_500px` CSV field via the "Check in" composer button
+- **Tag people:** Uses the `fb_tag_people` CSV field (comma-separated Facebook handles) to tag people on the post
+- **Feeling:** Supports adding a feeling/sentiment (e.g. happy, blessed, loved) via the smiley icon
 - Uses the browser "Create post" flow: open composer, write caption, attach photo, post
 - No API app registration needed — uses existing browser session cookies
 
@@ -275,6 +279,7 @@ Social media links from `config.json` are appended to descriptions on DA and 500
 | **`--dry-run` mode** | Shows what would happen without launching a browser |
 | **DA always last** | 500px, 35photo, VK, X, Bluesky, and Facebook run first; Sta.sh is preserved until DA is done |
 | **Error screenshots** | Saves `error_*.png` on failure for debugging |
+| **Failed platform indicator** | Dashboard shows which specific platforms failed (red "✗ Platform — Failed") |
 
 ---
 
@@ -322,10 +327,12 @@ If the Sta.sh thumbnail can't be loaded (e.g., NSFW/private items), a file picke
 ### Notes
 
 - Three model options (selectable in Settings): Opus 4.6 (best quality), Sonnet 4.5 (balanced, default), Haiku 4.5 (fastest/cheapest)
+- A system prompt establishes fine art photography context, enabling all models to process artistic nudes professionally
 - The AI prompt is fully customizable in the Settings dialog (with Reset to Default)
 - API calls go directly from your browser to the Anthropic API — no server needed
 - Keywords are generated as single words (e.g., `portrait`, `fashion`, `monochrome`)
-- Model names autocomplete from previously used names (stored in browser)
+- Model names, locations, and tag people handles autocomplete from previously used values (stored in browser)
+- If the model refuses to process an image, a clear error message suggests switching models
 
 ---
 
