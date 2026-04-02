@@ -871,18 +871,87 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                                width: best.getBoundingClientRect().width}};
             }
             return {found: false};
-        }""", build_vk_caption(desc_full, vk_tag_people))
+        }""", desc_full)
         print(f"    Caption area: {caption_ok}")
         if not caption_ok.get("found"):
             # Fallback: click placeholder text directly, then type
             placeholder = page.locator('text="Write something here..."').first
             placeholder.click(timeout=3000)
             page.wait_for_timeout(300)
-            page.keyboard.type(build_vk_caption(desc_full, vk_tag_people), delay=10)
+            page.keyboard.type(desc_full, delay=10)
     except Exception as e:
         print(f"    WARNING: Could not fill caption: {e}")
 
     page.wait_for_timeout(1000)
+
+    # @mention tagging — type each @handle and click the autocomplete suggestion
+    if vk_tag_people:
+        mentions = [h.strip() for h in vk_tag_people.split(",") if h.strip()]
+        if mentions:
+            print(f"  Tagging {len(mentions)} people via @mentions...")
+            for mention in mentions:
+                handle = mention if mention.startswith("@") else f"@{mention}"
+                print(f"    Typing: {handle}")
+                # Press Enter to start a new line, then type the @mention
+                page.keyboard.press("Enter")
+                page.keyboard.type(handle, delay=50)
+                page.wait_for_timeout(3000)
+
+                # Click the first suggestion in the autocomplete dropdown
+                picked = page.evaluate(r"""(query) => {
+                    // VK shows an autocomplete dropdown with suggestions.
+                    // Look for visible list items / divs that contain the @handle text.
+                    const q = query.replace(/^@/, '').toLowerCase();
+                    const candidates = document.querySelectorAll(
+                        '[role="option"], [role="listitem"], li, div[class*="mention"], '
+                        + 'div[class*="Mention"], div[class*="suggest"], div[class*="Suggest"]'
+                    );
+                    const matches = [];
+                    for (const el of candidates) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0 || r.height < 20) continue;
+                        const text = el.textContent.trim().toLowerCase();
+                        if (text.includes(q) || text.includes('@' + q)) {
+                            matches.push({
+                                text: el.textContent.trim().substring(0, 60),
+                                top: Math.round(r.top),
+                                x: r.left + r.width / 2,
+                                y: r.top + r.height / 2
+                            });
+                        }
+                    }
+                    if (matches.length === 0) {
+                        // Broader fallback: any visible element with the handle text
+                        const all = document.querySelectorAll('*');
+                        for (const el of all) {
+                            if (el.children.length > 2) continue;
+                            const r = el.getBoundingClientRect();
+                            if (r.width < 50 || r.height < 20 || r.height > 80) continue;
+                            if (r.width === 0 || r.height === 0) continue;
+                            const text = el.textContent.trim().toLowerCase();
+                            if ((text.includes(q) || text.includes('@' + q))
+                                && text.length < 120 && r.top > 200) {
+                                matches.push({
+                                    text: el.textContent.trim().substring(0, 60),
+                                    top: Math.round(r.top),
+                                    x: r.left + r.width / 2,
+                                    y: r.top + r.height / 2
+                                });
+                            }
+                        }
+                    }
+                    if (matches.length === 0) return {ok: false, reason: 'no suggestion found'};
+                    // Pick the first (topmost) match
+                    matches.sort((a, b) => a.top - b.top);
+                    return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
+                }""", handle)
+
+                if picked.get("ok"):
+                    page.mouse.click(picked["x"], picked["y"])
+                    print(f"    Selected: {picked.get('text')}")
+                else:
+                    print(f"    WARNING: No suggestion for {handle} — {picked.get('reason')}")
+                page.wait_for_timeout(1000)
 
     # Upload file — use expect_file_chooser to intercept native file picker
     print("  Uploading photo...")
@@ -942,15 +1011,14 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     if not group_slugs:
         return wall_result
 
-    # Build group caption (with @mentions if present)
+    # Build group caption (without @mentions — those are handled via autocomplete in the group function)
     group_caption_text = vk_group_caption.strip() if vk_group_caption else desc_full
-    group_caption_text = build_vk_caption(group_caption_text, vk_tag_people)
 
     group_results = []
     for slug in group_slugs:
         print(f"\n  ── VK Group: {slug} ──")
         try:
-            gr = suggest_post_to_vk_group(page, slug, group_caption_text, image_path, no_submit)
+            gr = suggest_post_to_vk_group(page, slug, group_caption_text, image_path, vk_tag_people, no_submit)
         except Exception as e:
             gr = {"success": False, "error": f"Unexpected: {e}"}
 
@@ -973,10 +1041,10 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     return wall_result
 
 
-def suggest_post_to_vk_group(page, group_slug, caption, image_path, no_submit=False):
+def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_people="", no_submit=False):
     """
     Suggest a post to a VK group (community).
-    Flow: group page → Suggest post → write caption → upload photo → Next → Submit.
+    Flow: group page → Suggest post → write caption → @mentions → upload photo → Next → Submit.
     Returns {"success": bool, "error": str}
     """
     group_url = f"https://vk.com/{group_slug}"
@@ -1055,6 +1123,69 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, no_submit=Fa
             page.keyboard.type(caption, delay=10)
     except Exception as e:
         print(f"      WARNING: Could not fill caption: {e}")
+
+    page.wait_for_timeout(1000)
+
+    # @mention tagging — same autocomplete click approach as wall post
+    if vk_tag_people:
+        mentions = [h.strip() for h in vk_tag_people.split(",") if h.strip()]
+        for mention in mentions:
+            handle = mention if mention.startswith("@") else f"@{mention}"
+            print(f"      Typing mention: {handle}")
+            page.keyboard.press("Enter")
+            page.keyboard.type(handle, delay=50)
+            page.wait_for_timeout(3000)
+
+            picked = page.evaluate(r"""(query) => {
+                const q = query.replace(/^@/, '').toLowerCase();
+                const candidates = document.querySelectorAll(
+                    '[role="option"], [role="listitem"], li, div[class*="mention"], '
+                    + 'div[class*="Mention"], div[class*="suggest"], div[class*="Suggest"]'
+                );
+                const matches = [];
+                for (const el of candidates) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0 || r.height < 20) continue;
+                    const text = el.textContent.trim().toLowerCase();
+                    if (text.includes(q) || text.includes('@' + q)) {
+                        matches.push({
+                            text: el.textContent.trim().substring(0, 60),
+                            top: Math.round(r.top),
+                            x: r.left + r.width / 2,
+                            y: r.top + r.height / 2
+                        });
+                    }
+                }
+                if (matches.length === 0) {
+                    const all = document.querySelectorAll('*');
+                    for (const el of all) {
+                        if (el.children.length > 2) continue;
+                        const r = el.getBoundingClientRect();
+                        if (r.width < 50 || r.height < 20 || r.height > 80) continue;
+                        if (r.width === 0 || r.height === 0) continue;
+                        const text = el.textContent.trim().toLowerCase();
+                        if ((text.includes(q) || text.includes('@' + q))
+                            && text.length < 120 && r.top > 200) {
+                            matches.push({
+                                text: el.textContent.trim().substring(0, 60),
+                                top: Math.round(r.top),
+                                x: r.left + r.width / 2,
+                                y: r.top + r.height / 2
+                            });
+                        }
+                    }
+                }
+                if (matches.length === 0) return {ok: false, reason: 'no suggestion found'};
+                matches.sort((a, b) => a.top - b.top);
+                return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
+            }""", handle)
+
+            if picked.get("ok"):
+                page.mouse.click(picked["x"], picked["y"])
+                print(f"      Selected: {picked.get('text')}")
+            else:
+                print(f"      WARNING: No suggestion for {handle} — {picked.get('reason')}")
+            page.wait_for_timeout(1000)
 
     page.wait_for_timeout(1000)
 
