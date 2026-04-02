@@ -897,12 +897,45 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                 page.keyboard.type(handle, delay=50)
                 page.wait_for_timeout(3000)
 
-                # Select first suggestion from autocomplete dropdown via keyboard.
-                # Down arrow highlights the first item, Enter confirms it.
-                page.keyboard.press("ArrowDown")
-                page.wait_for_timeout(500)
-                page.keyboard.press("Enter")
-                print(f"    Selected first suggestion for {handle}")
+                # Click first autocomplete suggestion — find visible element
+                # containing @handle that is NOT inside the contenteditable caption.
+                bare = mention.lstrip("@")
+                picked = page.evaluate(r"""(q) => {
+                    const els = document.querySelectorAll('*');
+                    const matches = [];
+                    for (const el of els) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        if (r.height < 25 || r.height > 80) continue;
+                        if (r.width < 100) continue;
+                        const text = el.textContent.trim();
+                        if (!text.toLowerCase().includes('@' + q.toLowerCase())) continue;
+                        if (text.length > 120) continue;
+                        // Skip elements inside contenteditable (that's the caption)
+                        let inEditable = false;
+                        let p = el;
+                        while (p) {
+                            if (p.contentEditable === 'true') { inEditable = true; break; }
+                            p = p.parentElement;
+                        }
+                        if (inEditable) continue;
+                        matches.push({
+                            text: text.substring(0, 80),
+                            top: Math.round(r.top),
+                            x: r.left + r.width / 2,
+                            y: r.top + r.height / 2
+                        });
+                    }
+                    if (matches.length === 0) return {ok: false, reason: 'no suggestion outside caption'};
+                    matches.sort((a, b) => a.top - b.top);
+                    return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
+                }""", bare)
+
+                if picked.get("ok"):
+                    page.mouse.click(picked["x"], picked["y"])
+                    print(f"    Selected: {picked.get('text')}")
+                else:
+                    print(f"    WARNING: No suggestion for @{bare} — {picked.get('reason')}")
                 page.wait_for_timeout(1000)
 
     # Upload file — use expect_file_chooser to intercept native file picker
@@ -1089,10 +1122,42 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
             page.keyboard.type(handle, delay=50)
             page.wait_for_timeout(3000)
 
-            page.keyboard.press("ArrowDown")
-            page.wait_for_timeout(500)
-            page.keyboard.press("Enter")
-            print(f"      Selected first suggestion for {handle}")
+            bare = mention.lstrip("@")
+            picked = page.evaluate(r"""(q) => {
+                const els = document.querySelectorAll('*');
+                const matches = [];
+                for (const el of els) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    if (r.height < 25 || r.height > 80) continue;
+                    if (r.width < 100) continue;
+                    const text = el.textContent.trim();
+                    if (!text.toLowerCase().includes('@' + q.toLowerCase())) continue;
+                    if (text.length > 120) continue;
+                    let inEditable = false;
+                    let p = el;
+                    while (p) {
+                        if (p.contentEditable === 'true') { inEditable = true; break; }
+                        p = p.parentElement;
+                    }
+                    if (inEditable) continue;
+                    matches.push({
+                        text: text.substring(0, 80),
+                        top: Math.round(r.top),
+                        x: r.left + r.width / 2,
+                        y: r.top + r.height / 2
+                    });
+                }
+                if (matches.length === 0) return {ok: false, reason: 'no suggestion outside caption'};
+                matches.sort((a, b) => a.top - b.top);
+                return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
+            }""", bare)
+
+            if picked.get("ok"):
+                page.mouse.click(picked["x"], picked["y"])
+                print(f"      Selected: {picked.get('text')}")
+            else:
+                print(f"      WARNING: No suggestion for @{bare} — {picked.get('reason')}")
             page.wait_for_timeout(1000)
 
     page.wait_for_timeout(1000)
