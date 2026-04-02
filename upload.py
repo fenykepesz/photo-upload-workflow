@@ -960,7 +960,7 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
 
     # Wait for photo to process
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(30000)
+    page.wait_for_timeout(20000)
 
     # Click "Next" button
     print("  Clicking Next...")
@@ -1070,6 +1070,56 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
             page.wait_for_timeout(2000)
     except Exception:
         pass
+
+    # Clear any leftover draft content (VK may restore wall post draft)
+    print(f"    Clearing any draft content...")
+    try:
+        # Remove any pre-attached photos by clicking their remove/close buttons
+        remove_btns = page.locator('[class*="MediaEditor"] [class*="remove"], [class*="MediaEditor"] [class*="close"], [class*="thumb"] [class*="remove"], [class*="thumb"] [class*="close"], [aria-label="Remove"], [aria-label="Delete"]')
+        for i in range(remove_btns.count()):
+            try:
+                remove_btns.nth(i).click(timeout=1000)
+                page.wait_for_timeout(500)
+                print(f"      Removed pre-attached photo")
+            except Exception:
+                pass
+        page.wait_for_timeout(500)
+
+        # Clear any existing text in the compose area (Ctrl+A + Backspace)
+        cleared = page.evaluate("""() => {
+            const vh = window.innerHeight;
+            const candidates = document.querySelectorAll(
+                '[contenteditable="true"], [role="textbox"]'
+            );
+            let best = null;
+            let bestArea = 0;
+            for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 100 && r.height > 15 && r.top > 50 && r.top < vh) {
+                    const area = r.width * r.height;
+                    if (area > bestArea) {
+                        best = el;
+                        bestArea = area;
+                    }
+                }
+            }
+            if (best) {
+                best.focus();
+                best.click();
+                const hasContent = best.textContent.trim().length > 0;
+                if (hasContent) {
+                    document.execCommand('selectAll');
+                    document.execCommand('delete');
+                }
+                return {found: true, hadContent: hasContent};
+            }
+            return {found: false, hadContent: false};
+        }""")
+        if cleared.get("hadContent"):
+            print(f"      Cleared leftover draft text")
+        page.wait_for_timeout(500)
+    except Exception as e:
+        print(f"      WARNING: Could not clear draft: {e}")
 
     # Write caption (same execCommand pattern as wall post)
     print(f"    Writing group caption...")
@@ -1182,7 +1232,7 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
 
     # Wait for processing
     print(f"    Waiting for photo processing...")
-    page.wait_for_timeout(30000)
+    page.wait_for_timeout(20000)
 
     # Click Next
     print(f"    Clicking Next...")
