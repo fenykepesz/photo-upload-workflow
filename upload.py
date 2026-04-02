@@ -41,6 +41,7 @@ COLS = [
     "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
     "fb_feeling", "fb_tag_people",
+    "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -200,6 +201,22 @@ def build_description_fb(row):
     parts.append(row.get("caption", "").strip())
 
     return "".join(parts)
+
+
+def build_vk_caption(desc_full, vk_tag_people=""):
+    """Append VK @mentions at the end of the caption text."""
+    text = desc_full
+    if vk_tag_people:
+        mentions = []
+        for handle in vk_tag_people.split(","):
+            h = handle.strip()
+            if h:
+                if not h.startswith("@"):
+                    h = f"@{h}"
+                mentions.append(h)
+        if mentions:
+            text = text + "\n\n" + " ".join(mentions)
+    return text
 
 
 def prepare_tags(keywords_str):
@@ -778,11 +795,11 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
 
 # ── VK Upload (Playwright) ────────────────────────────────────
-def upload_to_vk(page, desc_full, image_path, no_submit=False):
+def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", no_submit=False):
     """
-    Post a photo to the VK wall via browser automation.
-    Flow: feed → Create post → write caption → upload photo → Next → Publish.
-    Returns {"success": bool, "url_vk": str, "error": str}
+    Post a photo to the VK wall via browser automation, then suggest to VK groups.
+    Flow: feed → Create post → write caption → upload photo → Next → Publish → groups.
+    Returns {"success": bool, "url_vk": str, "error": str, "vk_groups_result": str}
     """
     if not image_path or not Path(image_path).exists():
         return {"success": False, "url_vk": "", "error": "No image file available"}
@@ -854,14 +871,14 @@ def upload_to_vk(page, desc_full, image_path, no_submit=False):
                                width: best.getBoundingClientRect().width}};
             }
             return {found: false};
-        }""", desc_full)
+        }""", build_vk_caption(desc_full, vk_tag_people))
         print(f"    Caption area: {caption_ok}")
         if not caption_ok.get("found"):
             # Fallback: click placeholder text directly, then type
             placeholder = page.locator('text="Write something here..."').first
             placeholder.click(timeout=3000)
             page.wait_for_timeout(300)
-            page.keyboard.type(desc_full, delay=10)
+            page.keyboard.type(build_vk_caption(desc_full, vk_tag_people), delay=10)
     except Exception as e:
         print(f"    WARNING: Could not fill caption: {e}")
 
@@ -914,7 +931,181 @@ def upload_to_vk(page, desc_full, image_path, no_submit=False):
 
     page.wait_for_timeout(5000)
     print("  Wall post created")
-    return {"success": True, "url_vk": "UPLOADED", "error": ""}
+    wall_result = {"success": True, "url_vk": "UPLOADED", "error": "", "vk_groups_result": ""}
+
+    # ── VK Group Posting ──
+    if not vk_groups or not vk_groups.strip():
+        return wall_result
+
+    group_slugs = [g.strip() for g in vk_groups.split(",") if g.strip()]
+    if not group_slugs:
+        return wall_result
+
+    # Build group caption (with @mentions if present)
+    group_caption_text = vk_group_caption.strip() if vk_group_caption else desc_full
+    group_caption_text = build_vk_caption(group_caption_text, vk_tag_people)
+
+    group_results = []
+    for slug in group_slugs:
+        print(f"\n  ── VK Group: {slug} ──")
+        try:
+            gr = suggest_post_to_vk_group(page, slug, group_caption_text, image_path, no_submit)
+        except Exception as e:
+            gr = {"success": False, "error": f"Unexpected: {e}"}
+
+        status = "OK" if gr["success"] else "FAILED"
+        group_results.append(f"{slug}:{status}")
+
+        if gr["success"]:
+            print(f"    Group {slug}: OK")
+        else:
+            print(f"    Group {slug}: FAILED — {gr.get('error', 'unknown')}")
+
+    wall_result["vk_groups_result"] = ",".join(group_results)
+
+    failed_groups = [r for r in group_results if "FAILED" in r]
+    if failed_groups:
+        wall_result["error"] = f"Wall OK but {len(failed_groups)} group(s) failed"
+
+    ok_count = len(group_results) - len(failed_groups)
+    print(f"\n  VK Groups: {ok_count}/{len(group_results)} succeeded")
+    return wall_result
+
+
+def suggest_post_to_vk_group(page, group_slug, caption, image_path, no_submit=False):
+    """
+    Suggest a post to a VK group (community).
+    Flow: group page → Suggest post → write caption → upload photo → Next → Submit.
+    Returns {"success": bool, "error": str}
+    """
+    group_url = f"https://vk.com/{group_slug}"
+    print(f"    Opening group: {group_url}")
+    try:
+        page.goto(group_url, wait_until="domcontentloaded", timeout=30000)
+    except PlaywrightTimeout:
+        return {"success": False, "error": f"Timeout loading {group_url}"}
+    page.wait_for_timeout(3000)
+
+    # Check the page loaded (not a 404 or redirect)
+    if "/blank" in page.url or "/404" in page.url:
+        return {"success": False, "error": f"Group not found: {group_slug}"}
+
+    # Click "Suggest post" or "+ Suggest post" button
+    print(f"    Clicking 'Suggest post'...")
+    try:
+        suggest_btn = page.locator(
+            'text="Suggest post", text="Suggest a Post", '
+            'text="+ Suggest post", text="Suggest a post"'
+        ).first
+        suggest_btn.click(timeout=5000)
+    except Exception:
+        try:
+            suggest_btn = page.locator('[class*="suggest"], [class*="Suggest"]').first
+            suggest_btn.click(timeout=5000)
+        except Exception:
+            return {"success": False, "error": f"Could not find 'Suggest post' button in {group_slug}"}
+    page.wait_for_timeout(2000)
+
+    # Handle draft dialog (same as wall post)
+    try:
+        start_over = page.locator('text="Start over"')
+        if start_over.count() > 0 and start_over.first.is_visible():
+            print("      Draft dialog — clicking 'Start over'")
+            start_over.first.click()
+            page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
+    # Write caption (same execCommand pattern as wall post)
+    print(f"    Writing group caption...")
+    try:
+        caption_ok = page.evaluate("""(text) => {
+            const vh = window.innerHeight;
+            const candidates = document.querySelectorAll(
+                '[contenteditable="true"], [role="textbox"]'
+            );
+            let best = null;
+            let bestArea = 0;
+            for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 100 && r.height > 15 && r.top > 50 && r.top < vh) {
+                    const area = r.width * r.height;
+                    if (area > bestArea) {
+                        best = el;
+                        bestArea = area;
+                    }
+                }
+            }
+            if (best) {
+                best.focus();
+                best.click();
+                document.execCommand('insertText', false, text);
+                return {found: true, tag: best.tagName, class: best.className?.substring(0, 80),
+                        rect: {top: best.getBoundingClientRect().top,
+                               width: best.getBoundingClientRect().width}};
+            }
+            return {found: false};
+        }""", caption)
+        print(f"      Caption area: {caption_ok}")
+        if not caption_ok.get("found"):
+            placeholder = page.locator('text="Write something here..."').first
+            placeholder.click(timeout=3000)
+            page.wait_for_timeout(300)
+            page.keyboard.type(caption, delay=10)
+    except Exception as e:
+        print(f"      WARNING: Could not fill caption: {e}")
+
+    page.wait_for_timeout(1000)
+
+    # Upload photo (same file chooser pattern)
+    print(f"    Uploading photo to group...")
+    try:
+        with page.expect_file_chooser(timeout=5000) as fc_info:
+            upload_btn = page.locator('text="Upload from device"').first
+            upload_btn.click(timeout=3000)
+        file_chooser = fc_info.value
+        file_chooser.set_files(image_path)
+        print(f"      Photo file set via file chooser")
+    except Exception as e:
+        print(f"      File chooser approach failed: {e}")
+        file_input = page.locator('input[type="file"]')
+        if file_input.count() > 0:
+            file_input.last.set_input_files(image_path)
+            print(f"      Fallback: file set on input directly")
+        else:
+            return {"success": False, "error": f"Could not upload file to {group_slug}"}
+
+    # Wait for processing
+    print(f"    Waiting for photo processing...")
+    page.wait_for_timeout(30000)
+
+    # Click Next
+    print(f"    Clicking Next...")
+    try:
+        next_btn = page.locator('button:has-text("Next"), [class*="next"]').first
+        next_btn.click(timeout=5000)
+    except Exception:
+        return {"success": False, "error": f"Could not find Next button in {group_slug}"}
+    page.wait_for_timeout(2000)
+
+    if no_submit:
+        print(f"    --no-submit: skipping suggest")
+        return {"success": True, "error": ""}
+
+    # Click Submit/Suggest/Publish
+    print(f"    Submitting suggestion...")
+    try:
+        submit_btn = page.locator(
+            'button:has-text("Submit"), button:has-text("Suggest"), '
+            'button:has-text("Publish"), [class*="submit"], [class*="publish"]'
+        ).first
+        submit_btn.click(timeout=5000)
+    except Exception:
+        return {"success": False, "error": f"Could not find Submit button in {group_slug}"}
+
+    page.wait_for_timeout(5000)
+    print(f"    Suggested to {group_slug}")
+    return {"success": True, "error": ""}
 
 
 # ── X.com Upload (Playwright) ─────────────────────────────────
@@ -2687,8 +2878,18 @@ def main():
                             else:
                                 print("  WARNING: No stash_url_nsfw — cannot download image")
 
+                        vk_tag_people = row.get("vk_tag_people", "").strip()
+                        vk_groups = row.get("vk_groups", "").strip()
+                        vk_group_caption = row.get("vk_group_caption", "").strip()
+
                         try:
-                            result_vk = upload_to_vk(page, desc_full, image_path, args.no_submit)
+                            result_vk = upload_to_vk(
+                                page, desc_full, image_path,
+                                vk_tag_people=vk_tag_people,
+                                vk_groups=vk_groups,
+                                vk_group_caption=vk_group_caption,
+                                no_submit=args.no_submit,
+                            )
                         except Exception as e:
                             result_vk = {"success": False, "url_vk": "", "error": f"Unexpected: {e}"}
 
@@ -2702,8 +2903,14 @@ def main():
 
                         # Update CSV with VK result
                         url_vk = result_vk.get("url_vk", "")
+                        vk_updates = {}
                         if url_vk and url_vk not in ("NO_SUBMIT",):
-                            save_row_update(args.csv, row["upload_id"], {"url_vk": url_vk})
+                            vk_updates["url_vk"] = url_vk
+                        vk_gr = result_vk.get("vk_groups_result", "")
+                        if vk_gr:
+                            vk_updates["vk_groups_result"] = vk_gr
+                        if vk_updates:
+                            save_row_update(args.csv, row["upload_id"], vk_updates)
 
                 # ── X (between VK and DA) ────────────────────────
                 if "X" in platforms:

@@ -960,7 +960,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.8.0</span>
+      Photo Upload Queue <span>· v1.9.0</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1142,6 +1142,18 @@
           <div class="dp-field" id="dp-ftagpeoplewrap" style="display:none">
             <div class="dp-label">FB Tagged</div>
             <div class="dp-value" id="dp-ftagpeople">—</div>
+          </div>
+          <div class="dp-field" id="dp-vktagpeoplewrap" style="display:none">
+            <div class="dp-label">VK Tagged</div>
+            <div class="dp-value" id="dp-vktagpeople">—</div>
+          </div>
+          <div class="dp-field" id="dp-vkgroupswrap" style="display:none">
+            <div class="dp-label">VK Groups</div>
+            <div class="dp-value" id="dp-vkgroups">—</div>
+          </div>
+          <div class="dp-field" id="dp-vkgroupsresultwrap" style="display:none">
+            <div class="dp-label">VK Groups Result</div>
+            <div class="dp-value" id="dp-vkgroupsresult">—</div>
           </div>
         </div>
 
@@ -1414,6 +1426,20 @@
             <input type="text" id="m-fb-tag-people" placeholder="e.g. tammy.miller.1447, john.doe" list="tag-people-list" autocomplete="off">
             <datalist id="tag-people-list"></datalist>
           </div>
+          <div class="fg form-full">
+            <label>VK Tag People <span style="font-weight:400;opacity:.6">(comma-separated VK usernames, e.g. @id123)</span></label>
+            <input type="text" id="m-vk-tag-people" placeholder="e.g. id123456789, some_user" list="vk-tag-people-list" autocomplete="off">
+            <datalist id="vk-tag-people-list"></datalist>
+          </div>
+          <div class="fg form-full">
+            <label>VK Groups <span style="font-weight:400;opacity:.6">(comma-separated group slugs)</span></label>
+            <input type="text" id="m-vk-groups" placeholder="e.g. nuart.photo, another_group" list="vk-groups-list" autocomplete="off">
+            <datalist id="vk-groups-list"></datalist>
+          </div>
+          <div class="fg form-full">
+            <label>VK Group Caption <span style="font-weight:400;opacity:.6">(separate caption for group posts — leave empty to use wall caption)</span></label>
+            <textarea id="m-vk-group-caption" rows="3" placeholder="Caption for VK group Suggest post..."></textarea>
+          </div>
           <div class="form-section">DeviantArt Advanced</div>
           <div class="form-full">
             <div class="auto-row">
@@ -1494,7 +1520,8 @@
       'da_nsfw_flag', 'category_500px', 'category_35p',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
-      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people'];
+      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
+      'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
     function parseCSV(txt) {
@@ -1653,7 +1680,7 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedVkGroups(); }
 
     function applyFilters() {
       const s = document.getElementById('f-search').value.toLowerCase();
@@ -1793,6 +1820,12 @@
       document.getElementById('dp-ffeelingwrap').style.display = r.fb_feeling ? '' : 'none';
       document.getElementById('dp-ftagpeople').textContent = r.fb_tag_people || '—';
       document.getElementById('dp-ftagpeoplewrap').style.display = r.fb_tag_people ? '' : 'none';
+      document.getElementById('dp-vktagpeople').textContent = r.vk_tag_people || '—';
+      document.getElementById('dp-vktagpeoplewrap').style.display = r.vk_tag_people ? '' : 'none';
+      document.getElementById('dp-vkgroups').textContent = r.vk_groups || '—';
+      document.getElementById('dp-vkgroupswrap').style.display = r.vk_groups ? '' : 'none';
+      document.getElementById('dp-vkgroupsresult').textContent = r.vk_groups_result || '—';
+      document.getElementById('dp-vkgroupsresultwrap').style.display = r.vk_groups_result ? '' : 'none';
       document.getElementById('dp-fdagallery').textContent = r.da_gallery || 'Featured';
       document.getElementById('dp-fdagroups').textContent = r.da_groups || '—';
 
@@ -1951,6 +1984,9 @@
       document.getElementById('m-cat-35p').value = '';
       document.getElementById('m-fb-feeling').value = 'happy';
       document.getElementById('m-fb-tag-people').value = '';
+      document.getElementById('m-vk-tag-people').value = '';
+      document.getElementById('m-vk-groups').value = '';
+      document.getElementById('m-vk-group-caption').value = '';
       ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'].forEach(id => document.getElementById(id).checked = true);
     }
     function openAddModal() {
@@ -1985,6 +2021,9 @@
       document.getElementById('m-loc-500px').value = r.location_500px || '';
       document.getElementById('m-fb-feeling').value = r.fb_feeling || 'happy';
       document.getElementById('m-fb-tag-people').value = r.fb_tag_people || '';
+      document.getElementById('m-vk-tag-people').value = r.vk_tag_people || '';
+      document.getElementById('m-vk-groups').value = r.vk_groups || '';
+      document.getElementById('m-vk-group-caption').value = r.vk_group_caption || '';
 
       // Set Galleries
       const gList = (r.da_gallery || 'Featured').split(',').map(g => g.trim());
@@ -2051,6 +2090,10 @@
         location_500px: document.getElementById('m-loc-500px').value.trim(),
         fb_feeling: document.getElementById('m-fb-feeling').value,
         fb_tag_people: document.getElementById('m-fb-tag-people').value.trim(),
+        vk_tag_people: document.getElementById('m-vk-tag-people').value.trim(),
+        vk_groups: document.getElementById('m-vk-groups').value.trim(),
+        vk_group_caption: document.getElementById('m-vk-group-caption').value.trim(),
+        vk_groups_result: existing?.vk_groups_result || '',
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
           const folder = c.closest('.da-group-row').querySelector('.da-group-folder').value;
@@ -2080,6 +2123,8 @@
       saveModelName(entry.model_name);
       saveLocation(entry.location_500px);
       saveTagPeople(entry.fb_tag_people);
+      saveVkTagPeople(entry.vk_tag_people);
+      saveVkGroups(entry.vk_groups);
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
@@ -2454,6 +2499,100 @@ Return ONLY valid JSON, no markdown fences:
       }
     }
     refreshTagPeopleList();
+
+    // ── VK TAG PEOPLE AUTOCOMPLETE ────────────────────────────────────────
+    function getVkTagPeopleHandles() {
+      try { return JSON.parse(localStorage.getItem('vk_tag_people_handles') || '[]'); }
+      catch { return []; }
+    }
+    function saveVkTagPeople(val) {
+      if (!val) return;
+      const handles = getVkTagPeopleHandles();
+      let added = false;
+      val.split(',').forEach(h => {
+        const t = h.trim();
+        if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+          handles.push(t);
+          added = true;
+        }
+      });
+      if (added) {
+        handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('vk_tag_people_handles', JSON.stringify(handles));
+        refreshVkTagPeopleList();
+      }
+    }
+    function refreshVkTagPeopleList() {
+      const dl = document.getElementById('vk-tag-people-list');
+      if (!dl) return;
+      dl.innerHTML = getVkTagPeopleHandles().map(t => `<option value="${h(t)}">`).join('');
+    }
+    function seedVkTagPeople() {
+      const handles = getVkTagPeopleHandles();
+      let added = false;
+      rows.forEach(r => {
+        (r.vk_tag_people || '').split(',').forEach(p => {
+          const t = p.trim();
+          if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+            handles.push(t);
+            added = true;
+          }
+        });
+      });
+      if (added) {
+        handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('vk_tag_people_handles', JSON.stringify(handles));
+        refreshVkTagPeopleList();
+      }
+    }
+    refreshVkTagPeopleList();
+
+    // ── VK GROUPS AUTOCOMPLETE ────────────────────────────────────────────
+    function getVkGroups() {
+      try { return JSON.parse(localStorage.getItem('vk_groups_cache') || '[]'); }
+      catch { return []; }
+    }
+    function saveVkGroups(val) {
+      if (!val) return;
+      const groups = getVkGroups();
+      let added = false;
+      val.split(',').forEach(g => {
+        const t = g.trim();
+        if (t && !groups.some(x => x.toLowerCase() === t.toLowerCase())) {
+          groups.push(t);
+          added = true;
+        }
+      });
+      if (added) {
+        groups.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('vk_groups_cache', JSON.stringify(groups));
+        refreshVkGroupsList();
+      }
+    }
+    function refreshVkGroupsList() {
+      const dl = document.getElementById('vk-groups-list');
+      if (!dl) return;
+      dl.innerHTML = getVkGroups().map(g => `<option value="${h(g)}">`).join('');
+    }
+    function seedVkGroups() {
+      const groups = getVkGroups();
+      let added = false;
+      rows.forEach(r => {
+        (r.vk_groups || '').split(',').forEach(g => {
+          const t = g.trim();
+          if (t && !groups.some(x => x.toLowerCase() === t.toLowerCase())) {
+            groups.push(t);
+            added = true;
+          }
+        });
+      });
+      if (added) {
+        groups.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('vk_groups_cache', JSON.stringify(groups));
+        refreshVkGroupsList();
+      }
+    }
+    refreshVkGroupsList();
 
     function getOembedThumbnail(stashUrl) {
       return new Promise((resolve, reject) => {
