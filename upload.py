@@ -897,60 +897,16 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                 page.keyboard.type(handle, delay=50)
                 page.wait_for_timeout(3000)
 
-                # Click the first suggestion in the autocomplete dropdown
-                picked = page.evaluate(r"""(query) => {
-                    // VK shows an autocomplete dropdown with suggestions.
-                    // Look for visible list items / divs that contain the @handle text.
-                    const q = query.replace(/^@/, '').toLowerCase();
-                    const candidates = document.querySelectorAll(
-                        '[role="option"], [role="listitem"], li, div[class*="mention"], '
-                        + 'div[class*="Mention"], div[class*="suggest"], div[class*="Suggest"]'
-                    );
-                    const matches = [];
-                    for (const el of candidates) {
-                        const r = el.getBoundingClientRect();
-                        if (r.width === 0 || r.height === 0 || r.height < 20) continue;
-                        const text = el.textContent.trim().toLowerCase();
-                        if (text.includes(q) || text.includes('@' + q)) {
-                            matches.push({
-                                text: el.textContent.trim().substring(0, 60),
-                                top: Math.round(r.top),
-                                x: r.left + r.width / 2,
-                                y: r.top + r.height / 2
-                            });
-                        }
-                    }
-                    if (matches.length === 0) {
-                        // Broader fallback: any visible element with the handle text
-                        const all = document.querySelectorAll('*');
-                        for (const el of all) {
-                            if (el.children.length > 2) continue;
-                            const r = el.getBoundingClientRect();
-                            if (r.width < 50 || r.height < 20 || r.height > 80) continue;
-                            if (r.width === 0 || r.height === 0) continue;
-                            const text = el.textContent.trim().toLowerCase();
-                            if ((text.includes(q) || text.includes('@' + q))
-                                && text.length < 120 && r.top > 200) {
-                                matches.push({
-                                    text: el.textContent.trim().substring(0, 60),
-                                    top: Math.round(r.top),
-                                    x: r.left + r.width / 2,
-                                    y: r.top + r.height / 2
-                                });
-                            }
-                        }
-                    }
-                    if (matches.length === 0) return {ok: false, reason: 'no suggestion found'};
-                    // Pick the first (topmost) match
-                    matches.sort((a, b) => a.top - b.top);
-                    return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
-                }""", handle)
-
-                if picked.get("ok"):
-                    page.mouse.click(picked["x"], picked["y"])
-                    print(f"    Selected: {picked.get('text')}")
-                else:
-                    print(f"    WARNING: No suggestion for {handle} — {picked.get('reason')}")
+                # Click the first suggestion in the autocomplete dropdown.
+                # VK shows a dropdown with rows like "Naya Mamedova @nayamodel".
+                # Use the same simple locator pattern as "Create post" — text= matching.
+                bare = mention.lstrip("@")
+                try:
+                    suggestion = page.locator(f'text="@{bare}"').first
+                    suggestion.click(timeout=5000)
+                    print(f"    Selected suggestion for @{bare}")
+                except Exception:
+                    print(f"    WARNING: No autocomplete suggestion found for @{bare}")
                 page.wait_for_timeout(1000)
 
     # Upload file — use expect_file_chooser to intercept native file picker
@@ -1059,20 +1015,21 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     if "/blank" in page.url or "/404" in page.url:
         return {"success": False, "error": f"Group not found: {group_slug}"}
 
-    # Click "Suggest post" or "+ Suggest post" button
+    # Click "Suggest post" button — same pattern as "Create post" on the feed page
     print(f"    Clicking 'Suggest post'...")
     try:
-        suggest_btn = page.locator(
-            'text="Suggest post", text="Suggest a Post", '
-            'text="+ Suggest post", text="Suggest a post"'
-        ).first
+        suggest_btn = page.locator('text="Suggest post"').first
         suggest_btn.click(timeout=5000)
     except Exception:
         try:
-            suggest_btn = page.locator('[class*="suggest"], [class*="Suggest"]').first
+            suggest_btn = page.locator('text="Suggest a Post"').first
             suggest_btn.click(timeout=5000)
         except Exception:
-            return {"success": False, "error": f"Could not find 'Suggest post' button in {group_slug}"}
+            try:
+                suggest_btn = page.locator('text="Suggest a post"').first
+                suggest_btn.click(timeout=5000)
+            except Exception:
+                return {"success": False, "error": f"Could not find 'Suggest post' button in {group_slug}"}
     page.wait_for_timeout(2000)
 
     # Handle draft dialog (same as wall post)
@@ -1136,55 +1093,13 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
             page.keyboard.type(handle, delay=50)
             page.wait_for_timeout(3000)
 
-            picked = page.evaluate(r"""(query) => {
-                const q = query.replace(/^@/, '').toLowerCase();
-                const candidates = document.querySelectorAll(
-                    '[role="option"], [role="listitem"], li, div[class*="mention"], '
-                    + 'div[class*="Mention"], div[class*="suggest"], div[class*="Suggest"]'
-                );
-                const matches = [];
-                for (const el of candidates) {
-                    const r = el.getBoundingClientRect();
-                    if (r.width === 0 || r.height === 0 || r.height < 20) continue;
-                    const text = el.textContent.trim().toLowerCase();
-                    if (text.includes(q) || text.includes('@' + q)) {
-                        matches.push({
-                            text: el.textContent.trim().substring(0, 60),
-                            top: Math.round(r.top),
-                            x: r.left + r.width / 2,
-                            y: r.top + r.height / 2
-                        });
-                    }
-                }
-                if (matches.length === 0) {
-                    const all = document.querySelectorAll('*');
-                    for (const el of all) {
-                        if (el.children.length > 2) continue;
-                        const r = el.getBoundingClientRect();
-                        if (r.width < 50 || r.height < 20 || r.height > 80) continue;
-                        if (r.width === 0 || r.height === 0) continue;
-                        const text = el.textContent.trim().toLowerCase();
-                        if ((text.includes(q) || text.includes('@' + q))
-                            && text.length < 120 && r.top > 200) {
-                            matches.push({
-                                text: el.textContent.trim().substring(0, 60),
-                                top: Math.round(r.top),
-                                x: r.left + r.width / 2,
-                                y: r.top + r.height / 2
-                            });
-                        }
-                    }
-                }
-                if (matches.length === 0) return {ok: false, reason: 'no suggestion found'};
-                matches.sort((a, b) => a.top - b.top);
-                return {ok: true, x: matches[0].x, y: matches[0].y, text: matches[0].text};
-            }""", handle)
-
-            if picked.get("ok"):
-                page.mouse.click(picked["x"], picked["y"])
-                print(f"      Selected: {picked.get('text')}")
-            else:
-                print(f"      WARNING: No suggestion for {handle} — {picked.get('reason')}")
+            bare = mention.lstrip("@")
+            try:
+                suggestion = page.locator(f'text="@{bare}"').first
+                suggestion.click(timeout=5000)
+                print(f"      Selected suggestion for @{bare}")
+            except Exception:
+                print(f"      WARNING: No autocomplete suggestion found for @{bare}")
             page.wait_for_timeout(1000)
 
     page.wait_for_timeout(1000)
