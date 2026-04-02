@@ -919,19 +919,20 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
 
     if no_submit:
         print("  --no-submit: skipping publish")
-        return {"success": True, "url_vk": "NO_SUBMIT", "error": ""}
+        wall_url = "NO_SUBMIT"
+    else:
+        # Click "Publish" button
+        print("  Publishing...")
+        try:
+            pub_btn = page.locator('button:has-text("Publish"), [class*="publish"]').first
+            pub_btn.click(timeout=5000)
+        except Exception:
+            return {"success": False, "url_vk": "", "error": "Could not find Publish button"}
+        page.wait_for_timeout(5000)
+        print("  Wall post created")
+        wall_url = "UPLOADED"
 
-    # Click "Publish" button
-    print("  Publishing...")
-    try:
-        pub_btn = page.locator('button:has-text("Publish"), [class*="publish"]').first
-        pub_btn.click(timeout=5000)
-    except Exception:
-        return {"success": False, "url_vk": "", "error": "Could not find Publish button"}
-
-    page.wait_for_timeout(5000)
-    print("  Wall post created")
-    wall_result = {"success": True, "url_vk": "UPLOADED", "error": "", "vk_groups_result": ""}
+    wall_result = {"success": True, "url_vk": wall_url, "error": "", "vk_groups_result": ""}
 
     # ── VK Group Posting ──
     if not vk_groups or not vk_groups.strip():
