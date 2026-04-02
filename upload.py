@@ -897,16 +897,12 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                 page.keyboard.type(handle, delay=50)
                 page.wait_for_timeout(3000)
 
-                # Click the first suggestion in the autocomplete dropdown.
-                # VK shows a dropdown with rows like "Naya Mamedova @nayamodel".
-                # Use the same simple locator pattern as "Create post" — text= matching.
-                bare = mention.lstrip("@")
-                try:
-                    suggestion = page.locator(f'text="@{bare}"').first
-                    suggestion.click(timeout=5000)
-                    print(f"    Selected suggestion for @{bare}")
-                except Exception:
-                    print(f"    WARNING: No autocomplete suggestion found for @{bare}")
+                # Select first suggestion from autocomplete dropdown via keyboard.
+                # Down arrow highlights the first item, Enter confirms it.
+                page.keyboard.press("ArrowDown")
+                page.wait_for_timeout(500)
+                page.keyboard.press("Enter")
+                print(f"    Selected first suggestion for {handle}")
                 page.wait_for_timeout(1000)
 
     # Upload file — use expect_file_chooser to intercept native file picker
@@ -1093,13 +1089,10 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
             page.keyboard.type(handle, delay=50)
             page.wait_for_timeout(3000)
 
-            bare = mention.lstrip("@")
-            try:
-                suggestion = page.locator(f'text="@{bare}"').first
-                suggestion.click(timeout=5000)
-                print(f"      Selected suggestion for @{bare}")
-            except Exception:
-                print(f"      WARNING: No autocomplete suggestion found for @{bare}")
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(500)
+            page.keyboard.press("Enter")
+            print(f"      Selected first suggestion for {handle}")
             page.wait_for_timeout(1000)
 
     page.wait_for_timeout(1000)
