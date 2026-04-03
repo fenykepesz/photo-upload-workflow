@@ -42,6 +42,7 @@ COLS = [
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
     "fb_feeling", "fb_tag_people",
     "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
+    "film_used", "film_camera", "film_stock", "film_developed_by",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -152,13 +153,6 @@ def filter_rows(rows, target_id=None):
                 print(f"WARNING: {row['upload_id']} has no supported platforms — skipping")
             continue
 
-        # Skip AUTO fields
-        auto_fields = [f for f in ("title", "caption", "keywords") if row.get(f, "").strip() == "AUTO"]
-        if auto_fields:
-            print(f"WARNING: Skipping {row['upload_id']} — {', '.join(auto_fields)} set to AUTO")
-            print("  Fill metadata in queue_manager.html first, then re-run.")
-            continue
-
         targets.append(row)
 
     return targets
@@ -176,6 +170,21 @@ def build_description(row, config):
 
     parts.append(row.get("caption", "").strip())
 
+    # Film info
+    if row.get("film_used", "").strip().upper() == "TRUE":
+        camera = row.get("film_camera", "").strip()
+        film = row.get("film_stock", "").strip()
+        developed_by = row.get("film_developed_by", "").strip()
+        film_parts = []
+        if camera:
+            film_parts.append(f"Camera: {camera}")
+        if film:
+            film_parts.append(f"Film: {film}")
+        if developed_by:
+            film_parts.append(f"Developed by: {developed_by}")
+        if film_parts:
+            parts.append("\n\n" + "\n".join(film_parts))
+
     # Social links (DA, 500px, 35photo — not Facebook)
     social = config.get("social_links", {})
     if social:
@@ -191,7 +200,7 @@ def build_description(row, config):
 
 
 def build_description_fb(row):
-    """Assemble FB caption: model credit + caption (no social links)."""
+    """Assemble FB caption: model credit + caption + film info (no social links)."""
     parts = []
 
     model = row.get("model_name", "").strip()
@@ -199,6 +208,21 @@ def build_description_fb(row):
         parts.append(f"Model: {model}\n\nPlease respect the model.\n\n")
 
     parts.append(row.get("caption", "").strip())
+
+    # Film info
+    if row.get("film_used", "").strip().upper() == "TRUE":
+        camera = row.get("film_camera", "").strip()
+        film = row.get("film_stock", "").strip()
+        developed_by = row.get("film_developed_by", "").strip()
+        film_parts = []
+        if camera:
+            film_parts.append(f"Camera: {camera}")
+        if film:
+            film_parts.append(f"Film: {film}")
+        if developed_by:
+            film_parts.append(f"Developed by: {developed_by}")
+        if film_parts:
+            parts.append("\n\n" + "\n".join(film_parts))
 
     return "".join(parts)
 
@@ -795,7 +819,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
 
 # ── VK Upload (Playwright) ────────────────────────────────────
-def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", no_submit=False):
+def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", no_submit=False):
     """
     Post a photo to the VK wall via browser automation, then suggest to VK groups.
     Flow: feed → Create post → write caption → upload photo → Next → Publish → groups.
@@ -1005,7 +1029,13 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
         return wall_result
 
     # Build group caption (without @mentions — those are handled via autocomplete in the group function)
-    group_caption_text = vk_group_caption.strip() if vk_group_caption else desc_full
+    # desc_full already contains film info; if a separate vk_group_caption is provided, append film_info
+    if vk_group_caption.strip():
+        group_caption_text = vk_group_caption.strip()
+        if film_info:
+            group_caption_text += "\n\n" + film_info
+    else:
+        group_caption_text = desc_full
 
     group_results = []
     for slug in group_slugs:
@@ -1189,33 +1219,48 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         else:
             return {"success": False, "error": f"Could not upload file to {group_slug}"}
 
-    # Wait for processing
+    # Wait for processing — same as wall post (20s)
     print(f"    Waiting for photo processing...")
-    page.wait_for_timeout(10000)
+    page.wait_for_timeout(20000)
 
-    # Click Next
+    # Click Next — same pattern as wall post
     print(f"    Clicking Next...")
     try:
         next_btn = page.locator('button:has-text("Next"), [class*="next"]').first
         next_btn.click(timeout=5000)
     except Exception:
         return {"success": False, "error": f"Could not find Next button in {group_slug}"}
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
 
     if no_submit:
         print(f"    --no-submit: skipping suggest")
         return {"success": True, "error": "", "no_submit": True}
 
-    # Click Submit/Suggest/Publish
+    # Click "Suggest post" — multiple matches exist on page (group wall + dialog button).
+    # Pick the one with the HIGHEST Y value — that's the one inside the Settings dialog at bottom.
     print(f"    Submitting suggestion...")
-    try:
-        submit_btn = page.locator(
-            'button:has-text("Submit"), button:has-text("Suggest"), '
-            'button:has-text("Publish"), [class*="submit"], [class*="publish"]'
-        ).first
-        submit_btn.click(timeout=5000)
-    except Exception:
-        return {"success": False, "error": f"Could not find Submit button in {group_slug}"}
+    coords = page.evaluate("""() => {
+        const all = Array.from(document.querySelectorAll('*'));
+        const matches = [];
+        for (const el of all) {
+            const t = el.textContent.trim();
+            if ((t === 'Suggest post' || t === 'Suggest a post' || t === 'Suggest a Post')
+                && el.children.length === 0) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    matches.push({x: r.left + r.width / 2, y: r.top + r.height / 2, text: t});
+                }
+            }
+        }
+        if (matches.length === 0) return null;
+        // The dialog button is at the bottom of the screen — pick highest Y
+        matches.sort((a, b) => b.y - a.y);
+        return matches[0];
+    }""")
+    if not coords:
+        return {"success": False, "error": f"Could not find Suggest post button in {group_slug}"}
+    print(f"      Found '{coords['text']}' at ({coords['x']:.0f}, {coords['y']:.0f}) — clicking via mouse")
+    page.mouse.click(coords["x"], coords["y"])
 
     page.wait_for_timeout(5000)
     print(f"    Suggested to {group_slug}")
@@ -1227,11 +1272,16 @@ X_CHAR_LIMIT = 280
 BSKY_CHAR_LIMIT = 300
 
 
-def build_x_post_text(title, keywords_str, max_tags=5):
+def build_x_post_text(title, keywords_str, model_name="", film_info="", max_tags=5):
     """Build a tweet from title + hashtags, fitting within 280 characters.
     Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
     Limited to max_tags hashtags."""
-    text = title.strip()
+    if model_name and model_name.strip():
+        text = f"Model: {model_name.strip()}\n\n" + title.strip()
+    else:
+        text = title.strip()
+    if film_info:
+        text = text + "\n\n" + film_info
     if not keywords_str:
         return text[:X_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
@@ -1254,11 +1304,16 @@ def build_x_post_text(title, keywords_str, max_tags=5):
     return text
 
 
-def build_bsky_post_text(title, keywords_str, max_tags=5):
+def build_bsky_post_text(title, keywords_str, model_name="", film_info="", max_tags=5):
     """Build a Bluesky post from title + hashtags, fitting within 300 characters.
     Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
     Limited to max_tags hashtags."""
-    text = title.strip()
+    if model_name and model_name.strip():
+        text = f"Model: {model_name.strip()}\n\n" + title.strip()
+    else:
+        text = title.strip()
+    if film_info:
+        text = text + "\n\n" + film_info
     if not keywords_str:
         return text[:BSKY_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
@@ -2830,7 +2885,7 @@ def main():
 
     if not target_rows:
         print("No rows to upload.")
-        print("Check that: status=Approved, platforms contains a supported platform, and no AUTO fields remain.")
+        print("Check that: status=Approved and platforms contains a supported platform.")
         sys.exit(0)
 
     print(f"Found {len(target_rows)} row(s) to upload.")
@@ -2995,6 +3050,11 @@ def main():
                         vk_tag_people = row.get("vk_tag_people", "").strip()
                         vk_groups = row.get("vk_groups", "").strip()
                         vk_group_caption = row.get("vk_group_caption", "").strip()
+                        _vk_film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _vk_film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_stock", "").strip(): _vk_film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _vk_film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
 
                         try:
                             result_vk = upload_to_vk(
@@ -3002,6 +3062,7 @@ def main():
                                 vk_tag_people=vk_tag_people,
                                 vk_groups=vk_groups,
                                 vk_group_caption=vk_group_caption,
+                                film_info="\n".join(_vk_film_parts),
                                 no_submit=args.no_submit,
                             )
                         except Exception as e:
@@ -3041,7 +3102,12 @@ def main():
                             else:
                                 print("  WARNING: No stash_url_nsfw — cannot download image")
 
-                        post_text = build_x_post_text(row.get("title", ""), row.get("keywords", ""))
+                        _film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        post_text = build_x_post_text(row.get("title", ""), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -3078,7 +3144,12 @@ def main():
                                 print("  WARNING: No stash_url_nsfw — cannot download image")
 
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
-                        post_text = build_bsky_post_text(row.get("title", ""), row.get("keywords", ""))
+                        _film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        post_text = build_bsky_post_text(row.get("title", ""), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
