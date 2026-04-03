@@ -1046,16 +1046,6 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     Flow: group page → Suggest post → write caption → @mentions → upload photo → Next → Submit.
     Returns {"success": bool, "error": str}
     """
-    # Navigate to a neutral page first to break the VK draft chain.
-    # Going directly from the wall post compose to the group causes VK to
-    # restore the wall post draft in the group's Suggest post modal.
-    print(f"    Breaking draft chain via neutral page...")
-    try:
-        page.goto("about:blank", wait_until="domcontentloaded", timeout=10000)
-    except Exception:
-        pass
-    page.wait_for_timeout(2000)
-
     group_url = f"https://vk.com/{group_slug}"
     print(f"    Opening group: {group_url}")
     try:
@@ -1065,7 +1055,7 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     page.wait_for_timeout(3000)
 
     # Check the page loaded (not a 404 or redirect)
-    if "about:blank" in page.url or "/404" in page.url:
+    if "/404" in page.url:
         return {"success": False, "error": f"Group not found: {group_slug}"}
 
     # Click "Suggest post" button — same pattern as "Create post" on the feed page
