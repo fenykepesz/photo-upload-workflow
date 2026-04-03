@@ -839,7 +839,16 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     except Exception:
         pass
 
-    # Fill caption FIRST (before photo upload — the caption area is simpler before photo is attached)
+    # Split desc_full at the signature separator so @mentions land between
+    # the caption body and the social links block.
+    _SIG_SEP = "\n\n---\n"
+    if _SIG_SEP in desc_full:
+        _cap_body, _signature = desc_full.split(_SIG_SEP, 1)
+        _signature = _SIG_SEP + _signature
+    else:
+        _cap_body, _signature = desc_full, ""
+
+    # Fill caption body FIRST (before photo upload)
     print("  Writing caption...")
     try:
         caption_ok = page.evaluate("""(text) => {
@@ -871,34 +880,36 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                                width: best.getBoundingClientRect().width}};
             }
             return {found: false};
-        }""", desc_full)
+        }""", _cap_body)
         print(f"    Caption area: {caption_ok}")
         if not caption_ok.get("found"):
             # Fallback: click placeholder text directly, then type
             placeholder = page.locator('text="Write something here..."').first
             placeholder.click(timeout=3000)
             page.wait_for_timeout(300)
-            page.keyboard.type(desc_full, delay=10)
+            page.keyboard.type(_cap_body, delay=10)
     except Exception as e:
         print(f"    WARNING: Could not fill caption: {e}")
 
     page.wait_for_timeout(1000)
 
-    # @mention tagging — type each @handle and click the autocomplete suggestion
+    # @mention tagging — typed here so they appear between caption and signature
     if vk_tag_people:
         mentions = [h.strip() for h in vk_tag_people.split(",") if h.strip()]
         if mentions:
             print(f"  Tagging {len(mentions)} people via @mentions...")
-            for mention in mentions:
+            for i, mention in enumerate(mentions):
                 handle = mention if mention.startswith("@") else f"@{mention}"
                 print(f"    Typing: {handle}")
-                # Press Enter to start a new line, then type the @mention
-                page.keyboard.press("Enter")
+                if i == 0:
+                    page.keyboard.press("Enter")
+                    page.keyboard.press("Enter")
+                    page.keyboard.type("With: ", delay=50)
+                else:
+                    page.keyboard.type(" ", delay=50)
                 page.keyboard.type(handle, delay=50)
                 page.wait_for_timeout(3000)
 
-                # Click first autocomplete suggestion — find visible element
-                # containing @handle that is NOT inside the contenteditable caption.
                 bare = mention.lstrip("@")
                 picked = page.evaluate(r"""(q) => {
                     const els = document.querySelectorAll('*');
@@ -911,7 +922,6 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                         const text = el.textContent.trim();
                         if (!text.toLowerCase().includes('@' + q.toLowerCase())) continue;
                         if (text.length > 120) continue;
-                        // isContentEditable is true for any element inside a contenteditable subtree
                         if (el.isContentEditable) continue;
                         matches.push({
                             text: text.substring(0, 80),
@@ -931,6 +941,10 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                 else:
                     print(f"    WARNING: No suggestion for @{bare} — {picked.get('reason')}")
                 page.wait_for_timeout(1000)
+
+    # Type the signature block (---\nsocial links) after the mentions
+    if _signature:
+        page.keyboard.type(_signature, delay=5)
 
     # Upload file — use expect_file_chooser to intercept native file picker
     print("  Uploading photo...")
@@ -968,26 +982,6 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     if no_submit:
         print("  --no-submit: skipping publish")
         wall_url = "NO_SUBMIT"
-        # Clear the compose area before navigating to groups so VK doesn't
-        # save it as a draft that gets restored in the group's Suggest post modal
-        if vk_groups and vk_groups.strip():
-            print("  Clearing wall compose area to prevent draft restoration in groups...")
-            try:
-                page.evaluate("""() => {
-                    const candidates = document.querySelectorAll(
-                        '[contenteditable="true"], [role="textbox"]'
-                    );
-                    for (const el of candidates) {
-                        const r = el.getBoundingClientRect();
-                        if (r.width > 100 && r.height > 15) {
-                            el.focus();
-                            document.execCommand('selectAll');
-                            document.execCommand('delete');
-                        }
-                    }
-                }""")
-            except Exception:
-                pass
     else:
         # Click "Publish" button
         print("  Publishing...")
@@ -1021,7 +1015,7 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
         except Exception as e:
             gr = {"success": False, "error": f"Unexpected: {e}"}
 
-        status = "OK" if gr["success"] else "FAILED"
+        status = "NO_SUBMIT" if gr.get("no_submit") else ("OK" if gr["success"] else "FAILED")
         group_results.append(f"{slug}:{status}")
 
         if gr["success"]:
@@ -1075,78 +1069,15 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                 return {"success": False, "error": f"Could not find 'Suggest post' button in {group_slug}"}
     page.wait_for_timeout(2000)
 
-    # Handle draft dialog (same as wall post)
-    try:
-        start_over = page.locator('text="Start over"')
-        if start_over.count() > 0 and start_over.first.is_visible():
-            print("      Draft dialog — clicking 'Start over'")
-            start_over.first.click()
-            page.wait_for_timeout(2000)
-    except Exception:
-        pass
+    # Split at signature separator so @mentions land between caption and signature
+    _SIG_SEP = "\n\n---\n"
+    if _SIG_SEP in caption:
+        _cap_body, _signature = caption.split(_SIG_SEP, 1)
+        _signature = _SIG_SEP + _signature
+    else:
+        _cap_body, _signature = caption, ""
 
-    # Clear any leftover draft content (VK may restore wall post draft)
-    print(f"    Clearing any draft content...")
-    try:
-        # Remove any pre-attached photos by clicking their × / remove buttons.
-        # Uses evaluate to find small buttons by text/position since VK class names vary.
-        removed = page.evaluate("""() => {
-            const removed = [];
-            for (const el of document.querySelectorAll('*')) {
-                const r = el.getBoundingClientRect();
-                if (r.width === 0 || r.height === 0 || r.width > 60 || r.height > 60) continue;
-                const text = el.textContent.trim();
-                const label = (el.getAttribute('aria-label') || '').toLowerCase();
-                const isClose = text === '×' || text === '✕' || text === '✗' || text === 'x' ||
-                                label.includes('remove') || label.includes('delete') || label.includes('close');
-                if (!isClose) continue;
-                if (r.top < 50 || r.top > 700) continue;
-                el.click();
-                removed.push({text, top: Math.round(r.top)});
-            }
-            return removed;
-        }""")
-        for rb in removed:
-            print(f"      Removed pre-attached item: {rb}")
-            page.wait_for_timeout(500)
-        page.wait_for_timeout(500)
-
-        # Clear any existing text in the compose area.
-        # Use innerHTML='' to also wipe VK mention nodes, not just plain text.
-        cleared = page.evaluate("""() => {
-            const vh = window.innerHeight;
-            const candidates = document.querySelectorAll(
-                '[contenteditable="true"], [role="textbox"]'
-            );
-            let best = null;
-            let bestArea = 0;
-            for (const el of candidates) {
-                const r = el.getBoundingClientRect();
-                if (r.width > 100 && r.height > 15 && r.top > 50 && r.top < vh) {
-                    const area = r.width * r.height;
-                    if (area > bestArea) {
-                        best = el;
-                        bestArea = area;
-                    }
-                }
-            }
-            if (best) {
-                const hadContent = best.textContent.trim().length > 0 || best.innerHTML.trim().length > 0;
-                if (hadContent) {
-                    best.focus();
-                    best.innerHTML = '';
-                }
-                return {found: true, hadContent: hadContent};
-            }
-            return {found: false, hadContent: false};
-        }""")
-        if cleared.get("hadContent"):
-            print(f"      Cleared leftover draft text/mentions")
-        page.wait_for_timeout(500)
-    except Exception as e:
-        print(f"      WARNING: Could not clear draft: {e}")
-
-    # Write caption (same execCommand pattern as wall post)
+    # Write caption body
     print(f"    Writing group caption...")
     try:
         caption_ok = page.evaluate("""(text) => {
@@ -1175,25 +1106,30 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                                width: best.getBoundingClientRect().width}};
             }
             return {found: false};
-        }""", caption)
+        }""", _cap_body)
         print(f"      Caption area: {caption_ok}")
         if not caption_ok.get("found"):
             placeholder = page.locator('text="Write something here..."').first
             placeholder.click(timeout=3000)
             page.wait_for_timeout(300)
-            page.keyboard.type(caption, delay=10)
+            page.keyboard.type(_cap_body, delay=10)
     except Exception as e:
         print(f"      WARNING: Could not fill caption: {e}")
 
     page.wait_for_timeout(1000)
 
-    # @mention tagging — same autocomplete click approach as wall post
+    # @mention tagging — inserted between caption body and signature
     if vk_tag_people:
         mentions = [h.strip() for h in vk_tag_people.split(",") if h.strip()]
-        for mention in mentions:
+        for i, mention in enumerate(mentions):
             handle = mention if mention.startswith("@") else f"@{mention}"
             print(f"      Typing mention: {handle}")
-            page.keyboard.press("Enter")
+            if i == 0:
+                page.keyboard.press("Enter")
+                page.keyboard.press("Enter")
+                page.keyboard.type("With: ", delay=50)
+            else:
+                page.keyboard.type(" ", delay=50)
             page.keyboard.type(handle, delay=50)
             page.wait_for_timeout(3000)
 
@@ -1209,7 +1145,6 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                     const text = el.textContent.trim();
                     if (!text.toLowerCase().includes('@' + q.toLowerCase())) continue;
                     if (text.length > 120) continue;
-                    // isContentEditable covers element itself AND any element inside a contenteditable subtree
                     if (el.isContentEditable) continue;
                     matches.push({
                         text: text.substring(0, 80),
@@ -1229,6 +1164,10 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
             else:
                 print(f"      WARNING: No suggestion for @{bare} — {picked.get('reason')}")
             page.wait_for_timeout(1000)
+
+    # Type the signature block after the mentions
+    if _signature:
+        page.keyboard.type(_signature, delay=5)
 
     page.wait_for_timeout(1000)
 
@@ -1265,7 +1204,7 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
 
     if no_submit:
         print(f"    --no-submit: skipping suggest")
-        return {"success": True, "error": ""}
+        return {"success": True, "error": "", "no_submit": True}
 
     # Click Submit/Suggest/Publish
     print(f"    Submitting suggestion...")
