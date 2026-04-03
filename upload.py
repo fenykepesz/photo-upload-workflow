@@ -974,6 +974,26 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     if no_submit:
         print("  --no-submit: skipping publish")
         wall_url = "NO_SUBMIT"
+        # Clear the compose area before navigating to groups so VK doesn't
+        # save it as a draft that gets restored in the group's Suggest post modal
+        if vk_groups and vk_groups.strip():
+            print("  Clearing wall compose area to prevent draft restoration in groups...")
+            try:
+                page.evaluate("""() => {
+                    const candidates = document.querySelectorAll(
+                        '[contenteditable="true"], [role="textbox"]'
+                    );
+                    for (const el of candidates) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width > 100 && r.height > 15) {
+                            el.focus();
+                            document.execCommand('selectAll');
+                            document.execCommand('delete');
+                        }
+                    }
+                }""")
+            except Exception:
+                pass
     else:
         # Click "Publish" button
         print("  Publishing...")
