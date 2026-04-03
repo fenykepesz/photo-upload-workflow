@@ -911,14 +911,8 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
                         const text = el.textContent.trim();
                         if (!text.toLowerCase().includes('@' + q.toLowerCase())) continue;
                         if (text.length > 120) continue;
-                        // Skip elements inside contenteditable (that's the caption)
-                        let inEditable = false;
-                        let p = el;
-                        while (p) {
-                            if (p.contentEditable === 'true') { inEditable = true; break; }
-                            p = p.parentElement;
-                        }
-                        if (inEditable) continue;
+                        // isContentEditable is true for any element inside a contenteditable subtree
+                        if (el.isContentEditable) continue;
                         matches.push({
                             text: text.substring(0, 80),
                             top: Math.round(r.top),
@@ -1094,18 +1088,31 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     # Clear any leftover draft content (VK may restore wall post draft)
     print(f"    Clearing any draft content...")
     try:
-        # Remove any pre-attached photos by clicking their remove/close buttons
-        remove_btns = page.locator('[class*="MediaEditor"] [class*="remove"], [class*="MediaEditor"] [class*="close"], [class*="thumb"] [class*="remove"], [class*="thumb"] [class*="close"], [aria-label="Remove"], [aria-label="Delete"]')
-        for i in range(remove_btns.count()):
-            try:
-                remove_btns.nth(i).click(timeout=1000)
-                page.wait_for_timeout(500)
-                print(f"      Removed pre-attached photo")
-            except Exception:
-                pass
+        # Remove any pre-attached photos by clicking their × / remove buttons.
+        # Uses evaluate to find small buttons by text/position since VK class names vary.
+        removed = page.evaluate("""() => {
+            const removed = [];
+            for (const el of document.querySelectorAll('*')) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0 || r.width > 60 || r.height > 60) continue;
+                const text = el.textContent.trim();
+                const label = (el.getAttribute('aria-label') || '').toLowerCase();
+                const isClose = text === '×' || text === '✕' || text === '✗' || text === 'x' ||
+                                label.includes('remove') || label.includes('delete') || label.includes('close');
+                if (!isClose) continue;
+                if (r.top < 50 || r.top > 700) continue;
+                el.click();
+                removed.push({text, top: Math.round(r.top)});
+            }
+            return removed;
+        }""")
+        for rb in removed:
+            print(f"      Removed pre-attached item: {rb}")
+            page.wait_for_timeout(500)
         page.wait_for_timeout(500)
 
-        # Clear any existing text in the compose area (Ctrl+A + Backspace)
+        # Clear any existing text in the compose area.
+        # Use innerHTML='' to also wipe VK mention nodes, not just plain text.
         cleared = page.evaluate("""() => {
             const vh = window.innerHeight;
             const candidates = document.querySelectorAll(
@@ -1124,19 +1131,17 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                 }
             }
             if (best) {
-                best.focus();
-                best.click();
-                const hasContent = best.textContent.trim().length > 0;
-                if (hasContent) {
-                    document.execCommand('selectAll');
-                    document.execCommand('delete');
+                const hadContent = best.textContent.trim().length > 0 || best.innerHTML.trim().length > 0;
+                if (hadContent) {
+                    best.focus();
+                    best.innerHTML = '';
                 }
-                return {found: true, hadContent: hasContent};
+                return {found: true, hadContent: hadContent};
             }
             return {found: false, hadContent: false};
         }""")
         if cleared.get("hadContent"):
-            print(f"      Cleared leftover draft text")
+            print(f"      Cleared leftover draft text/mentions")
         page.wait_for_timeout(500)
     except Exception as e:
         print(f"      WARNING: Could not clear draft: {e}")
@@ -1204,13 +1209,8 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                     const text = el.textContent.trim();
                     if (!text.toLowerCase().includes('@' + q.toLowerCase())) continue;
                     if (text.length > 120) continue;
-                    let inEditable = false;
-                    let p = el;
-                    while (p) {
-                        if (p.contentEditable === 'true') { inEditable = true; break; }
-                        p = p.parentElement;
-                    }
-                    if (inEditable) continue;
+                    // isContentEditable covers element itself AND any element inside a contenteditable subtree
+                    if (el.isContentEditable) continue;
                     matches.push({
                         text: text.substring(0, 80),
                         top: Math.round(r.top),
