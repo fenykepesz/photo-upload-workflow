@@ -118,6 +118,14 @@ Each row represents one scheduled upload. Open `queue_manager.html` in your brow
 | `da_groups` | DA groups (`Group:Folder` format) | `TheSpiritofArt:Featured` |
 | `location_500px` | 500px / Facebook location (skipped if EXIF provides it) | `Tel Aviv, Israel` |
 | `fb_tag_people` | Facebook tag people (comma-separated handles) | `sienna.modeling, john.doe` |
+| `vk_tag_people` | VK @mention handles (comma-separated) — inserted between caption and signature | `id123456789, some_user` |
+| `vk_groups` | VK group slugs to suggest post to (comma-separated) | `nuart.photo, another_group` |
+| `vk_group_caption` | Caption for VK group suggestions (falls back to main caption if empty) | `Check out this photo!` |
+| `vk_groups_result` | Per-group outcome (filled automatically) | `nuart.photo:OK, other:FAILED` |
+| `film_used` | Mark as film photography | `TRUE` / `FALSE` |
+| `film_camera` | Camera used (required if `film_used=TRUE`) | `Yashica MAT-124g` |
+| `film_stock` | Film stock used (required if `film_used=TRUE`) | `Kodak Portra 400` |
+| `film_developed_by` | Development lab or self (optional) | `Carmit Lab` |
 
 ### Status Values
 
@@ -205,7 +213,9 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 ### VK
 
 - Posts a photo to the user's **VK wall** as a new post with a caption
-- Uses the browser "Create post" flow: upload photo, write caption, publish
+- **@mentions**: Set `vk_tag_people` to a comma-separated list of VK handles. Mentions are typed inline after the caption body (before the social links signature), prefixed with "With: "
+- **Group suggestions**: Set `vk_groups` to a comma-separated list of group slugs. After the wall post, the script navigates to each group and submits a "Suggest post" with the photo. Use `vk_group_caption` for a separate caption for groups (falls back to main caption if empty). Film info is appended automatically. Results are tracked per-group in `vk_groups_result`
+- **Note:** The Settings dialog at the end of group posting has two "Suggest post" elements on the page — the script picks the one at the bottom of the screen (inside the dialog) using position-based selection
 - No API app registration needed — uses existing browser session cookies
 
 ### X.com (Twitter)
@@ -225,7 +235,7 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 
 ### Facebook
 
-- Posts a photo with **model credit + caption** to the user's **personal timeline** (no social links)
+- Posts a photo with **model credit + caption + film info** to the user's **personal timeline** (no social links)
 - **NSFW safety:** If `da_nsfw_flag` is `TRUE`, only the safe image (`stash_url_safe`) is used — if missing, the upload **fails** (NSFW photos are never uploaded to Facebook)
 - For non-NSFW photos, uses the standard `stash_url_nsfw` image
 - **Location:** Uses the `location_500px` CSV field via the "Check in" composer button
@@ -266,6 +276,22 @@ If `model_name` is set (e.g. `Elena`), this is prepended to descriptions (before
 ### Social Links
 
 Social media links from `config.json` are appended to descriptions on DA and 500px.
+
+---
+
+## Film Photography
+
+If a photo was shot on film, check **Film Used** in the queue manager and fill in the Camera and Film Stock fields (required). Developed By is optional.
+
+When `film_used=TRUE`, the following is appended after the caption in all platform descriptions:
+
+```
+Camera: Yashica MAT-124g
+Film: Kodak Portra 400
+Developed by: Carmit Lab
+```
+
+Film info is also included in X.com and Bluesky posts (inserted between the title and hashtags). All three fields support autocomplete from previously used values (stored in your browser).
 
 ---
 

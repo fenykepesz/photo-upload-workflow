@@ -710,7 +710,7 @@
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0 16px;
+      gap: 12px 16px;
     }
 
     .form-full {
@@ -960,7 +960,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v1.10.0</span>
+      Photo Upload Queue <span>· v2.0.0</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -1277,6 +1277,14 @@
             <label>Scheduled Time</label>
             <input type="time" id="m-time" value="10:00">
           </div>
+          <div class="fg">
+            <label>Status</label>
+            <select id="m-status">
+              <option>Pending</option>
+              <option selected>Approved</option>
+              <option>Skipped</option>
+            </select>
+          </div>
 
           <div class="form-section">Sta.sh Files</div>
           <div class="fg form-full">
@@ -1289,11 +1297,6 @@
                 etc.)</span></label>
             <input type="url" id="m-safe" placeholder="https://sta.sh/0xxxxxxxxxx">
           </div>
-          <div class="fg">
-            <label>Mature Content</label>
-            <div class="chk-row"><input type="checkbox" id="m-nsfw-flag"><span>Mark as Mature / NSFW</span></div>
-          </div>
-
           <div class="form-section" style="display:flex;align-items:center;justify-content:space-between">
             <span>Metadata</span>
             <button class="ai-generate-btn" id="ai-generate-btn" onclick="generateMetadata()">
@@ -1304,26 +1307,26 @@
           <div class="form-full" id="ai-panel-container" style="display:none"></div>
           <div class="form-full">
             <div class="auto-row">
-              <div class="fg"><label>Title</label><input type="text" id="m-title" placeholder="AUTO"></div>
+              <div class="fg"><label>Title</label><input type="text" id="m-title" placeholder="e.g. Morning Light Study"></div>
               <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap"
-                onclick="setAuto('m-title')">Set AUTO</button>
+                onclick="document.getElementById('m-title').value=''">Clear</button>
             </div>
           </div>
           <div class="form-full">
             <div class="auto-row">
-              <div class="fg"><label>Caption</label><textarea id="m-caption" rows="3" placeholder="AUTO"></textarea>
+              <div class="fg"><label>Caption</label><textarea id="m-caption" rows="3" placeholder="e.g. Shot in natural morning light on Kodak Tri-X..."></textarea>
               </div>
               <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap"
-                onclick="setAuto('m-caption')">Set AUTO</button>
+                onclick="document.getElementById('m-caption').value=''">Clear</button>
             </div>
           </div>
           <div class="form-full">
             <div class="auto-row">
               <div class="fg"><label>Keywords <span
                     style="font-weight:400;opacity:.6">(comma-separated)</span></label><input type="text"
-                  id="m-keywords" placeholder="AUTO"></div>
+                  id="m-keywords" placeholder="e.g. portrait, studio, blackandwhite, fineart"></div>
               <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap"
-                onclick="setAuto('m-keywords')">Set AUTO</button>
+                onclick="document.getElementById('m-keywords').value=''">Clear</button>
             </div>
           </div>
           <div class="fg form-full">
@@ -1336,6 +1339,29 @@
             <label>Location <span style="font-weight:400;opacity:.6">(used by 500px &amp; Facebook)</span></label>
             <input type="text" id="m-loc-500px" placeholder="e.g. Tel Aviv, Israel" list="location-list" autocomplete="off">
             <datalist id="location-list"></datalist>
+          </div>
+          <div class="fg form-full">
+            <label>Film Photography</label>
+            <div class="chk-row"><input type="checkbox" id="m-film-used" style="width:auto" onchange="toggleFilmFields()"><span>Film Used</span></div>
+          </div>
+          <div class="fg" id="film-camera-row" style="display:none">
+            <label>Camera <span style="color:var(--accent)">*</span></label>
+            <input type="text" id="m-film-camera" placeholder="e.g. Yashica MAT-124g" list="film-camera-list" autocomplete="off">
+            <datalist id="film-camera-list"></datalist>
+          </div>
+          <div class="fg" id="film-stock-row" style="display:none">
+            <label>Film Stock <span style="color:var(--accent)">*</span></label>
+            <input type="text" id="m-film-stock" placeholder="e.g. Kodak Portra 400" list="film-stock-list" autocomplete="off">
+            <datalist id="film-stock-list"></datalist>
+          </div>
+          <div class="fg" id="film-developed-by-row" style="display:none">
+            <label>Developed by</label>
+            <input type="text" id="m-film-developed-by" placeholder="e.g. Lab name or Self" list="film-developed-by-list" autocomplete="off">
+            <datalist id="film-developed-by-list"></datalist>
+          </div>
+          <div class="fg form-full">
+            <label>Mature Content</label>
+            <div class="chk-row"><input type="checkbox" id="m-nsfw-flag"><span>Mark as Mature / NSFW</span></div>
           </div>
 
           <div class="form-section">Platform Settings</div>
@@ -1354,16 +1380,8 @@
               <label><input type="checkbox" id="p-bsky"> Bluesky</label>
             </div>
           </div>
-          <div class="fg">
-            <label>Status</label>
-            <select id="m-status">
-              <option>Pending</option>
-              <option selected>Approved</option>
-              <option>Skipped</option>
-            </select>
-          </div>
-
           <div class="form-section">Per-Platform Metadata</div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">500px</div>
           <div class="fg">
             <label>500px Category</label>
             <select id="m-cat-500px">
@@ -1399,6 +1417,7 @@
               <option>Wedding</option>
             </select>
           </div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">35photo</div>
           <div class="fg">
             <label>35photo Category</label>
             <select id="m-cat-35p">
@@ -1409,6 +1428,7 @@
               <option>Portrait</option>
             </select>
           </div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">Facebook</div>
           <div class="fg">
             <label>FB Feeling <span style="font-weight:400;opacity:.6">(Facebook only)</span></label>
             <select id="m-fb-feeling">
@@ -1426,15 +1446,18 @@
             <input type="text" id="m-fb-tag-people" placeholder="e.g. tammy.miller.1447, john.doe" list="tag-people-list" autocomplete="off">
             <datalist id="tag-people-list"></datalist>
           </div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">VK</div>
           <div class="fg form-full">
             <label>VK Tag People <span style="font-weight:400;opacity:.6">(comma-separated VK usernames, e.g. @id123)</span></label>
             <input type="text" id="m-vk-tag-people" placeholder="e.g. id123456789, some_user" list="vk-tag-people-list" autocomplete="off">
             <datalist id="vk-tag-people-list"></datalist>
           </div>
           <div class="fg form-full">
-            <label>VK Groups <span style="font-weight:400;opacity:.6">(comma-separated group slugs)</span></label>
-            <input type="text" id="m-vk-groups" placeholder="e.g. nuart.photo, another_group" list="vk-groups-list" autocomplete="off">
-            <datalist id="vk-groups-list"></datalist>
+            <label>VK Groups <span style="font-weight:400;opacity:.6">(select groups to suggest post to)</span></label>
+            <div id="m-vk-groups-container" style="background:var(--surface3);padding:10px;border-radius:var(--radius);border:1px solid var(--border);max-height:180px;overflow-y:auto">
+              <div id="m-vk-groups-list" style="color:var(--text2);font-size:13px">No VK data loaded — click Sync</div>
+            </div>
+            <button type="button" class="btn btn-sm" style="margin-top:6px;background:var(--accent);color:#fff;border-color:var(--accent)" onclick="syncVkGroups()">↺ Sync VK Groups</button>
           </div>
           <div class="fg form-full">
             <label>VK Group Caption <span style="font-weight:400;opacity:.6">(separate caption for group posts — leave empty to use wall caption)</span></label>
@@ -1515,13 +1538,17 @@
     let daData = { galleries: ['Featured'], groups: {} };
     let daDataHandle = null;
 
+    let vkData = { groups: [] };
+    let vkDataFileHandle = null;
+
     const COLS = ['upload_id', 'scheduled_date', 'scheduled_time',
       'stash_url_nsfw', 'stash_url_safe', 'title', 'caption', 'keywords',
       'da_nsfw_flag', 'category_500px', 'category_35p',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
-      'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result'];
+      'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result',
+      'film_used', 'film_camera', 'film_stock', 'film_developed_by'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
     function parseCSV(txt) {
@@ -1680,7 +1707,13 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedVkGroups(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmStocks(); seedFilmDevelopers(); }
+    function toggleFilmFields() {
+      const on = document.getElementById('m-film-used').checked;
+      document.getElementById('film-camera-row').style.display = on ? '' : 'none';
+      document.getElementById('film-stock-row').style.display = on ? '' : 'none';
+      document.getElementById('film-developed-by-row').style.display = on ? '' : 'none';
+    }
 
     function applyFilters() {
       const s = document.getElementById('f-search').value.toLowerCase();
@@ -1722,7 +1755,7 @@
         return `<tr class="${r.upload_id === selId ? 'selected' : ''}" onclick="selectRow('${h(r.upload_id)}')">
       <td style="color:var(--muted);font-size:11px">${h(r.upload_id)}</td>
       <td>${h(r.scheduled_date)} <span style="color:var(--muted);font-size:11px">${h(r.scheduled_time)}</span></td>
-      <td><span class="truncate" style="max-width:170px;display:block">${r.title === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.title) || '<span style="color:var(--muted)">—</span>'}</span></td>
+      <td><span class="truncate" style="max-width:170px;display:block">${h(r.title) || '<span style="color:var(--muted)">—</span>'}</span></td>
       <td>${plats(r.platforms)}</td>
       <td>${statusBadge(r.status)}</td>
       <td style="text-align:center">${r.da_nsfw_flag === 'TRUE' ? '<span style="color:var(--warning)">●</span>' : '<span style="color:var(--border)">○</span>'}</td>
@@ -1762,10 +1795,10 @@
       const r = rows.find(x => x.upload_id === id);
       if (!r) return;
       renderTable();
-      document.getElementById('dp-title').textContent = r.title && r.title !== 'AUTO' ? r.title : r.upload_id;
-      dpf('dp-ftitle', r.title === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.title), true);
-      dpf('dp-fcaption', r.caption === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.caption), true);
-      dpf('dp-fkeywords', r.keywords === 'AUTO' ? '<span class="badge b-auto">AUTO</span>' : h(r.keywords), true);
+      document.getElementById('dp-title').textContent = r.title || r.upload_id;
+      dpf('dp-ftitle', h(r.title), true);
+      dpf('dp-fcaption', h(r.caption), true);
+      dpf('dp-fkeywords', h(r.keywords), true);
       document.getElementById('dp-fnsfw').textContent = r.stash_url_nsfw || '—';
       document.getElementById('dp-fsafe').textContent = r.stash_url_safe || '—';
       document.getElementById('dp-fsched').textContent = (r.scheduled_date || '—') + ' at ' + (r.scheduled_time || '—');
@@ -1979,13 +2012,18 @@
 
       document.getElementById('m-time').value = '10:00';
       document.getElementById('m-nsfw-flag').checked = false;
+      document.getElementById('m-film-used').checked = false;
+      document.getElementById('m-film-camera').value = '';
+      document.getElementById('m-film-stock').value = '';
+      document.getElementById('m-film-developed-by').value = '';
+      toggleFilmFields();
       document.getElementById('m-status').value = 'Approved';
       document.getElementById('m-cat-500px').value = '';
       document.getElementById('m-cat-35p').value = '';
       document.getElementById('m-fb-feeling').value = 'happy';
       document.getElementById('m-fb-tag-people').value = '';
       document.getElementById('m-vk-tag-people').value = '';
-      document.getElementById('m-vk-groups').value = '';
+      document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(c => c.checked = false);
       document.getElementById('m-vk-group-caption').value = '';
       ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'].forEach(id => document.getElementById(id).checked = true);
     }
@@ -2013,6 +2051,11 @@
       document.getElementById('m-caption').value = r.caption || '';
       document.getElementById('m-keywords').value = r.keywords || '';
       document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
+      document.getElementById('m-film-used').checked = r.film_used === 'TRUE';
+      document.getElementById('m-film-camera').value = r.film_camera || '';
+      document.getElementById('m-film-stock').value = r.film_stock || '';
+      document.getElementById('m-film-developed-by').value = r.film_developed_by || '';
+      toggleFilmFields();
       document.getElementById('m-cat-500px').value = r.category_500px || '';
       document.getElementById('m-cat-35p').value = r.category_35p || '';
       document.getElementById('m-status').value = r.status || 'Pending';
@@ -2022,7 +2065,11 @@
       document.getElementById('m-fb-feeling').value = r.fb_feeling || 'happy';
       document.getElementById('m-fb-tag-people').value = r.fb_tag_people || '';
       document.getElementById('m-vk-tag-people').value = r.vk_tag_people || '';
-      document.getElementById('m-vk-groups').value = r.vk_groups || '';
+      // Restore VK group checkboxes
+      const vkGroupSlugs = (r.vk_groups || '').split(',').map(s => s.trim()).filter(Boolean);
+      document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = vkGroupSlugs.includes(cb.value);
+      });
       document.getElementById('m-vk-group-caption').value = r.vk_group_caption || '';
 
       // Set Galleries
@@ -2057,8 +2104,6 @@
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
-    function setAuto(id) { document.getElementById(id).value = 'AUTO'; }
-
     function saveEntry() {
       const date = document.getElementById('m-date').value;
       const nsfw = document.getElementById('m-nsfw').value.trim();
@@ -2070,6 +2115,11 @@
       if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
       if (platforms.includes('35P') && !document.getElementById('m-cat-35p').value) { toast('35photo category is required', 'error'); return; }
       if (needsModelName() && !document.getElementById('m-model-name').value.trim()) { toast('Model name is required for this category', 'error'); return; }
+      if (document.getElementById('m-film-used').checked) {
+        if (!document.getElementById('m-film-camera').value.trim()) { toast('Camera is required when Film Used is checked', 'error'); return; }
+        if (!document.getElementById('m-film-stock').value.trim()) { toast('Film Stock is required when Film Used is checked', 'error'); return; }
+      }
+      // film_developed_by is optional, no validation needed
 
       const existing = editId ? rows.find(r => r.upload_id === editId) : null;
       const entry = {
@@ -2078,9 +2128,9 @@
         scheduled_time: document.getElementById('m-time').value || '10:00',
         stash_url_nsfw: nsfw,
         stash_url_safe: document.getElementById('m-safe').value.trim(),
-        title: document.getElementById('m-title').value || 'AUTO',
-        caption: document.getElementById('m-caption').value || 'AUTO',
-        keywords: document.getElementById('m-keywords').value || 'AUTO',
+        title: document.getElementById('m-title').value.trim(),
+        caption: document.getElementById('m-caption').value.trim(),
+        keywords: document.getElementById('m-keywords').value.trim(),
         da_nsfw_flag: document.getElementById('m-nsfw-flag').checked ? 'TRUE' : 'FALSE',
         category_500px: document.getElementById('m-cat-500px').value,
         category_35p: document.getElementById('m-cat-35p').value,
@@ -2091,9 +2141,13 @@
         fb_feeling: document.getElementById('m-fb-feeling').value,
         fb_tag_people: document.getElementById('m-fb-tag-people').value.trim(),
         vk_tag_people: document.getElementById('m-vk-tag-people').value.trim(),
-        vk_groups: document.getElementById('m-vk-groups').value.trim(),
+        vk_groups: getVkGroupsSelected(),
         vk_group_caption: document.getElementById('m-vk-group-caption').value.trim(),
         vk_groups_result: existing?.vk_groups_result || '',
+        film_used: document.getElementById('m-film-used').checked ? 'TRUE' : 'FALSE',
+        film_camera: document.getElementById('m-film-camera').value.trim(),
+        film_stock: document.getElementById('m-film-stock').value.trim(),
+        film_developed_by: document.getElementById('m-film-developed-by').value.trim(),
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
           const folder = c.closest('.da-group-row').querySelector('.da-group-folder').value;
@@ -2122,9 +2176,11 @@
 
       saveModelName(entry.model_name);
       saveLocation(entry.location_500px);
+      saveFilmCamera(entry.film_camera);
+      saveFilmStock(entry.film_stock);
+      saveFilmDeveloper(entry.film_developed_by);
       saveTagPeople(entry.fb_tag_people);
       saveVkTagPeople(entry.vk_tag_people);
-      saveVkGroups(entry.vk_groups);
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
@@ -2274,7 +2330,7 @@
       const gList = document.getElementById('m-da-gallery-list');
       if (gList) {
         gList.innerHTML = (daData.galleries || ['Featured']).map(g => `
-          <label><input type="checkbox" value="${h(g)}" ${g === 'Featured' ? 'checked' : ''}> ${h(g)}</label>
+          <label><input type="checkbox" value="${h(g)}" style="width:auto" ${g === 'Featured' ? 'checked' : ''}> ${h(g)}</label>
         `).join('');
       }
 
@@ -2283,7 +2339,7 @@
         grpList.innerHTML = Object.keys(daData.groups || {}).map(g => {
           const folders = (daData.groups[g] || []).map(f => `<option value="${h(f)}">${h(f)}</option>`).join('');
           return `<div class="da-group-row" style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
-            <label style="white-space:nowrap"><input type="checkbox" value="${h(g)}" onchange="groupToggled(this)"> ${h(g)}</label>
+            <label style="white-space:nowrap"><input type="checkbox" value="${h(g)}" style="width:auto" onchange="groupToggled(this)"> ${h(g)}</label>
             <select class="da-group-folder" data-group="${h(g)}" style="display:none;font-size:12px;flex:1">${folders}</select>
           </div>`;
         }).join('');
@@ -2293,6 +2349,103 @@
     function groupToggled(cb) {
       const sel = cb.closest('.da-group-row').querySelector('.da-group-folder');
       sel.style.display = cb.checked ? 'inline-block' : 'none';
+    }
+
+    // ── VK DATA ────────────────────────────────────────────────────────────────
+    function cacheVKData() {
+      try { localStorage.setItem('vk_data_cache', JSON.stringify(vkData)); } catch (e) { }
+    }
+    async function loadVKData(interactive = false) {
+      // 1. Try fetch (works when served via HTTP)
+      try {
+        const res = await fetch('VK_data.json');
+        if (!res.ok) throw new Error('fetch failed');
+        vkData = await res.json();
+        cacheVKData();
+        populateVKGroupsList();
+        if (interactive) toast('VK Groups synced', 'success');
+        return;
+      } catch (e) { /* fetch fails on file:// — try file handle or picker */ }
+
+      // 1.5 Try localStorage cache (only for auto-load, not when user clicks Sync)
+      if (!interactive) {
+        const cachedVK = localStorage.getItem('vk_data_cache');
+        if (cachedVK) {
+          try {
+            vkData = JSON.parse(cachedVK);
+            populateVKGroupsList();
+            return;
+          } catch (e) { localStorage.removeItem('vk_data_cache'); }
+        }
+      }
+
+      // 2. Re-read cached file handle (no prompt needed)
+      if (vkDataFileHandle) {
+        try {
+          const file = await vkDataFileHandle.getFile();
+          vkData = JSON.parse(await file.text());
+          cacheVKData();
+          populateVKGroupsList();
+          if (interactive) toast('VK Groups synced', 'success');
+          return;
+        } catch (e) { vkDataFileHandle = null; }
+      }
+
+      // 3. Interactive fallback: file picker
+      if (interactive) {
+        try {
+          if ('showOpenFilePicker' in window) {
+            const [fh] = await showOpenFilePicker({
+              types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+            });
+            vkDataFileHandle = fh;
+            const file = await fh.getFile();
+            vkData = JSON.parse(await file.text());
+            cacheVKData();
+            populateVKGroupsList();
+            toast('VK Groups loaded from ' + fh.name, 'success');
+          } else {
+            const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' });
+            inp.onchange = async ev => {
+              const f = ev.target.files[0]; if (!f) return;
+              vkData = JSON.parse(await f.text());
+              cacheVKData();
+              populateVKGroupsList();
+              toast('VK Groups loaded from ' + f.name, 'success');
+            };
+            inp.click();
+          }
+        } catch (e2) {
+          if (e2.name !== 'AbortError') toast('Could not load VK_data.json: ' + e2.message, 'error');
+        }
+      }
+    }
+
+    function populateVKGroupsList() {
+      const list = document.getElementById('m-vk-groups-list');
+      if (!list) return;
+      const groups = vkData.groups || [];
+      if (!groups.length) {
+        list.innerHTML = '<span style="color:var(--muted);font-size:13px">No groups in VK_data.json</span>';
+        return;
+      }
+      list.innerHTML = groups.map(g => `
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;cursor:pointer">
+          <input type="checkbox" value="${h(g.slug)}" style="width:auto;flex-shrink:0">
+          <span>${h(g.name)}</span>
+          <span style="color:var(--muted);font-size:11px">(${h(g.slug)})</span>
+        </label>
+      `).join('');
+    }
+
+    function syncVkGroups() {
+      toast('Searching for VK_data.json...', 'info');
+      loadVKData(true);
+    }
+
+    function getVkGroupsSelected() {
+      return Array.from(document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]:checked'))
+        .map(cb => cb.value).join(',');
     }
 
     // ── THEME ──────────────────────────────────────────────────────────────────
@@ -2453,6 +2606,93 @@ Return ONLY valid JSON, no markdown fences:
     }
     refreshLocationList();
 
+    // ── FILM CAMERA AUTOCOMPLETE ──────────────────────────────────────────────────
+    function getFilmCameras() {
+      try { return JSON.parse(localStorage.getItem('film_cameras') || '[]'); } catch { return []; }
+    }
+    function saveFilmCamera(val) {
+      if (!val) return;
+      const items = getFilmCameras();
+      if (!items.some(x => x.toLowerCase() === val.toLowerCase())) {
+        items.push(val);
+        items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('film_cameras', JSON.stringify(items));
+      }
+      refreshFilmCameraList();
+    }
+    function refreshFilmCameraList() {
+      const dl = document.getElementById('film-camera-list');
+      if (!dl) return;
+      dl.innerHTML = getFilmCameras().map(x => `<option value="${h(x)}">`).join('');
+    }
+    function seedFilmCameras() {
+      const items = getFilmCameras(); let added = false;
+      rows.forEach(r => {
+        const v = (r.film_camera || '').trim();
+        if (v && !items.some(x => x.toLowerCase() === v.toLowerCase())) { items.push(v); added = true; }
+      });
+      if (added) { items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })); localStorage.setItem('film_cameras', JSON.stringify(items)); refreshFilmCameraList(); }
+    }
+    refreshFilmCameraList();
+
+    // ── FILM STOCK AUTOCOMPLETE ───────────────────────────────────────────────────
+    function getFilmStocks() {
+      try { return JSON.parse(localStorage.getItem('film_stocks') || '[]'); } catch { return []; }
+    }
+    function saveFilmStock(val) {
+      if (!val) return;
+      const items = getFilmStocks();
+      if (!items.some(x => x.toLowerCase() === val.toLowerCase())) {
+        items.push(val);
+        items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('film_stocks', JSON.stringify(items));
+      }
+      refreshFilmStockList();
+    }
+    function refreshFilmStockList() {
+      const dl = document.getElementById('film-stock-list');
+      if (!dl) return;
+      dl.innerHTML = getFilmStocks().map(x => `<option value="${h(x)}">`).join('');
+    }
+    function seedFilmStocks() {
+      const items = getFilmStocks(); let added = false;
+      rows.forEach(r => {
+        const v = (r.film_stock || '').trim();
+        if (v && !items.some(x => x.toLowerCase() === v.toLowerCase())) { items.push(v); added = true; }
+      });
+      if (added) { items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })); localStorage.setItem('film_stocks', JSON.stringify(items)); refreshFilmStockList(); }
+    }
+    refreshFilmStockList();
+
+    // ── FILM DEVELOPER AUTOCOMPLETE ───────────────────────────────────────────────
+    function getFilmDevelopers() {
+      try { return JSON.parse(localStorage.getItem('film_developers') || '[]'); } catch { return []; }
+    }
+    function saveFilmDeveloper(val) {
+      if (!val) return;
+      const items = getFilmDevelopers();
+      if (!items.some(x => x.toLowerCase() === val.toLowerCase())) {
+        items.push(val);
+        items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('film_developers', JSON.stringify(items));
+      }
+      refreshFilmDeveloperList();
+    }
+    function refreshFilmDeveloperList() {
+      const dl = document.getElementById('film-developed-by-list');
+      if (!dl) return;
+      dl.innerHTML = getFilmDevelopers().map(x => `<option value="${h(x)}">`).join('');
+    }
+    function seedFilmDevelopers() {
+      const items = getFilmDevelopers(); let added = false;
+      rows.forEach(r => {
+        const v = (r.film_developed_by || '').trim();
+        if (v && !items.some(x => x.toLowerCase() === v.toLowerCase())) { items.push(v); added = true; }
+      });
+      if (added) { items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })); localStorage.setItem('film_developers', JSON.stringify(items)); refreshFilmDeveloperList(); }
+    }
+    refreshFilmDeveloperList();
+
     // ── TAG PEOPLE AUTOCOMPLETE ───────────────────────────────────────────────────
     function getTagPeopleHandles() {
       try { return JSON.parse(localStorage.getItem('tag_people_handles') || '[]'); }
@@ -2547,52 +2787,6 @@ Return ONLY valid JSON, no markdown fences:
     }
     refreshVkTagPeopleList();
 
-    // ── VK GROUPS AUTOCOMPLETE ────────────────────────────────────────────
-    function getVkGroups() {
-      try { return JSON.parse(localStorage.getItem('vk_groups_cache') || '[]'); }
-      catch { return []; }
-    }
-    function saveVkGroups(val) {
-      if (!val) return;
-      const groups = getVkGroups();
-      let added = false;
-      val.split(',').forEach(g => {
-        const t = g.trim();
-        if (t && !groups.some(x => x.toLowerCase() === t.toLowerCase())) {
-          groups.push(t);
-          added = true;
-        }
-      });
-      if (added) {
-        groups.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-        localStorage.setItem('vk_groups_cache', JSON.stringify(groups));
-        refreshVkGroupsList();
-      }
-    }
-    function refreshVkGroupsList() {
-      const dl = document.getElementById('vk-groups-list');
-      if (!dl) return;
-      dl.innerHTML = getVkGroups().map(g => `<option value="${h(g)}">`).join('');
-    }
-    function seedVkGroups() {
-      const groups = getVkGroups();
-      let added = false;
-      rows.forEach(r => {
-        (r.vk_groups || '').split(',').forEach(g => {
-          const t = g.trim();
-          if (t && !groups.some(x => x.toLowerCase() === t.toLowerCase())) {
-            groups.push(t);
-            added = true;
-          }
-        });
-      });
-      if (added) {
-        groups.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-        localStorage.setItem('vk_groups_cache', JSON.stringify(groups));
-        refreshVkGroupsList();
-      }
-    }
-    refreshVkGroupsList();
 
     function getOembedThumbnail(stashUrl) {
       return new Promise((resolve, reject) => {
@@ -2859,6 +3053,7 @@ Return ONLY valid JSON, no markdown fences:
     // INIT
     autoLoadCSV();
     loadDAData(false);
+    loadVKData(false);
     applyFilters(); updateStats();
   </script>
 </body>
