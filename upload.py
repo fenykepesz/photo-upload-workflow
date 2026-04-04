@@ -17,6 +17,7 @@ import argparse
 import csv
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -3050,6 +3051,7 @@ def main():
                         print(f"\n  500px: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── 500px Upload ──")
+                        t0_500px = time.time()
                         # Download image from Sta.sh if not already downloaded
                         if not image_path:
                             stash_url = row.get("stash_url_nsfw", "").strip()
@@ -3070,10 +3072,10 @@ def main():
 
                         if result_500px["success"]:
                             ok_500px = True
-                            print(f"  500px: SUCCESS — {result_500px.get('url_500px', '')}")
+                            print(f"  500px: SUCCESS ({time.time()-t0_500px:.0f}s) — {result_500px.get('url_500px', '')}")
                         else:
                             err = result_500px.get("error", "unknown")
-                            print(f"  500px: FAILED — {err}")
+                            print(f"  500px: FAILED ({time.time()-t0_500px:.0f}s) — {err}")
                             errors.append(f"500px: {err}")
                             # Screenshot on failure
                             ts = datetime.now().strftime("%H%M%S")
@@ -3096,6 +3098,7 @@ def main():
                         print(f"\n  35photo: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── 35photo Upload ──")
+                        t0_35p = time.time()
                         # Download image from Sta.sh if not already downloaded
                         if not image_path:
                             stash_url = row.get("stash_url_nsfw", "").strip()
@@ -3116,10 +3119,10 @@ def main():
 
                         if result_35p["success"]:
                             ok_35p = True
-                            print(f"  35photo: SUCCESS — {result_35p.get('url_35p', '')}")
+                            print(f"  35photo: SUCCESS ({time.time()-t0_35p:.0f}s) — {result_35p.get('url_35p', '')}")
                         else:
                             err = result_35p.get("error", "unknown")
-                            print(f"  35photo: FAILED — {err}")
+                            print(f"  35photo: FAILED ({time.time()-t0_35p:.0f}s) — {err}")
                             errors.append(f"35photo: {err}")
                             # Screenshot on failure
                             ts = datetime.now().strftime("%H%M%S")
@@ -3142,6 +3145,7 @@ def main():
                         print(f"\n  VK: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── VK Upload ──")
+                        t0_vk = time.time()
                         # Download image from Sta.sh if not already downloaded
                         if not image_path:
                             stash_url = row.get("stash_url_nsfw", "").strip()
@@ -3174,10 +3178,10 @@ def main():
 
                         if result_vk["success"]:
                             ok_vk = True
-                            print(f"  VK: SUCCESS — {result_vk.get('url_vk', '')}")
+                            print(f"  VK: SUCCESS ({time.time()-t0_vk:.0f}s) — {result_vk.get('url_vk', '')}")
                         else:
                             err = result_vk.get("error", "unknown")
-                            print(f"  VK: FAILED — {err}")
+                            print(f"  VK: FAILED ({time.time()-t0_vk:.0f}s) — {err}")
                             errors.append(f"VK: {err}")
 
                         # Update CSV with VK result
@@ -3198,6 +3202,7 @@ def main():
                         print(f"\n  X: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── X.com Upload ──")
+                        t0_x = time.time()
                         # Download image from Sta.sh if not already downloaded
                         if not image_path:
                             stash_url = row.get("stash_url_nsfw", "").strip()
@@ -3222,10 +3227,10 @@ def main():
 
                         if result_x["success"]:
                             ok_x = True
-                            print(f"  X: SUCCESS — {result_x.get('url_x', '')}")
+                            print(f"  X: SUCCESS ({time.time()-t0_x:.0f}s) — {result_x.get('url_x', '')}")
                         else:
                             err = result_x.get("error", "unknown")
-                            print(f"  X: FAILED — {err}")
+                            print(f"  X: FAILED ({time.time()-t0_x:.0f}s) — {err}")
                             errors.append(f"X: {err}")
 
                         # Update CSV with X result
@@ -3240,6 +3245,7 @@ def main():
                         print(f"\n  BSKY: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── Bluesky Upload ──")
+                        t0_bsky = time.time()
                         # Download image from Sta.sh if not already downloaded
                         if not image_path:
                             stash_url = row.get("stash_url_nsfw", "").strip()
@@ -3265,10 +3271,10 @@ def main():
 
                         if result_bsky["success"]:
                             ok_bsky = True
-                            print(f"  BSKY: SUCCESS — {result_bsky.get('url_bsky', '')}")
+                            print(f"  BSKY: SUCCESS ({time.time()-t0_bsky:.0f}s) — {result_bsky.get('url_bsky', '')}")
                         else:
                             err = result_bsky.get("error", "unknown")
-                            print(f"  BSKY: FAILED — {err}")
+                            print(f"  BSKY: FAILED ({time.time()-t0_bsky:.0f}s) — {err}")
                             errors.append(f"BSKY: {err}")
 
                         # Update CSV with BSKY result
@@ -3283,6 +3289,7 @@ def main():
                         print(f"\n  FB: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── Facebook Upload ──")
+                        t0_fb = time.time()
                         location_fb = row.get("location_500px", "").strip()
                         feeling_fb = row.get("fb_feeling", "").strip()
                         tag_people_fb = row.get("fb_tag_people", "").strip()
@@ -3331,10 +3338,10 @@ def main():
 
                         if result_fb["success"]:
                             ok_fb = True
-                            print(f"  FB: SUCCESS — {result_fb.get('url_fb', '')}")
+                            print(f"  FB: SUCCESS ({time.time()-t0_fb:.0f}s) — {result_fb.get('url_fb', '')}")
                         else:
                             err = result_fb.get("error", "unknown")
-                            print(f"  FB: FAILED — {err}")
+                            print(f"  FB: FAILED ({time.time()-t0_fb:.0f}s) — {err}")
                             errors.append(f"FB: {err}")
 
                         # Update CSV with FB result
@@ -3349,6 +3356,7 @@ def main():
                         print(f"\n  DA: already uploaded ({already}) — skipping")
                     else:
                         print(f"\n  ── DeviantArt Upload ──")
+                        t0_da = time.time()
                         groups = parse_groups(row.get("da_groups", ""))
                         try:
                             result_da = upload_to_da(page, row, desc_full, tags, groups, args.no_submit)
@@ -3359,10 +3367,10 @@ def main():
 
                         if result_da["success"]:
                             ok_da = True
-                            print(f"  DA: SUCCESS — {result_da.get('deviation_url', '')}")
+                            print(f"  DA: SUCCESS ({time.time()-t0_da:.0f}s) — {result_da.get('deviation_url', '')}")
                         else:
                             err = result_da.get("error", "unknown")
-                            print(f"  DA: FAILED — {err}")
+                            print(f"  DA: FAILED ({time.time()-t0_da:.0f}s) — {err}")
                             errors.append(f"DA: {err}")
                             # Screenshot on failure
                             ts = datetime.now().strftime("%H%M%S")
