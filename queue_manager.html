@@ -1375,7 +1375,8 @@
           </div>
           <div class="fg form-full">
             <label>Serial Title <span style="color:var(--accent)">*</span> <span style="font-weight:400;opacity:.6;font-size:11px">Appended to title: "Title (Serial Title)"</span></label>
-            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series">
+            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off">
+            <datalist id="serial-title-list"></datalist>
           </div>
           <div class="form-full">
             <div class="auto-row">
@@ -1937,7 +1938,7 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); seedSerialTitles(); }
     function toggleFilmFields() {
       const on = document.getElementById('m-film-used').checked;
       document.getElementById('film-camera-row').style.display = on ? '' : 'none';
@@ -2238,7 +2239,7 @@
       // Clear DA Gallery checkboxes
       document.querySelectorAll('#m-da-gallery-list input').forEach(c => c.checked = (c.value === 'Featured'));
       // Clear DA Groups
-      document.querySelectorAll('#m-da-groups-list input').forEach(c => c.checked = false);
+      document.querySelectorAll('#m-da-groups-list input').forEach(c => c.checked = true);
       document.querySelectorAll('#m-da-groups-list .da-group-folder').forEach(s => s.style.display = 'none');
 
       document.getElementById('m-time').value = '10:00';
@@ -2418,6 +2419,7 @@
       saveFilmLens(entry.film_lens);
       saveFilmStock(entry.film_stock);
       saveFilmDeveloper(entry.film_developed_by);
+      saveSerialTitle(entry.serial_title);
       saveTagPeople(entry.fb_tag_people);
       saveVkTagPeople(entry.vk_tag_people);
       document.getElementById('btn-save').disabled = false;
@@ -3273,17 +3275,11 @@ Return ONLY valid JSON, no markdown fences:
       catch { return []; }
     }
     function saveTagPeople(val) {
-      if (!val) return;
+      if (!val || !val.trim()) return;
+      const t = val.trim();
       const handles = getTagPeopleHandles();
-      let added = false;
-      val.split(',').forEach(h => {
-        const t = h.trim();
-        if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
-          handles.push(t);
-          added = true;
-        }
-      });
-      if (added) {
+      if (!handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+        handles.push(t);
         handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         localStorage.setItem('tag_people_handles', JSON.stringify(handles));
         refreshTagPeopleList();
@@ -3298,13 +3294,10 @@ Return ONLY valid JSON, no markdown fences:
       const handles = getTagPeopleHandles();
       let added = false;
       rows.forEach(r => {
-        (r.fb_tag_people || '').split(',').forEach(p => {
-          const t = p.trim();
-          if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
-            handles.push(t);
-            added = true;
-          }
-        });
+        const t = (r.fb_tag_people || '').trim();
+        if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+          handles.push(t); added = true;
+        }
       });
       if (added) {
         handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -3320,17 +3313,11 @@ Return ONLY valid JSON, no markdown fences:
       catch { return []; }
     }
     function saveVkTagPeople(val) {
-      if (!val) return;
+      if (!val || !val.trim()) return;
+      const t = val.trim();
       const handles = getVkTagPeopleHandles();
-      let added = false;
-      val.split(',').forEach(h => {
-        const t = h.trim();
-        if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
-          handles.push(t);
-          added = true;
-        }
-      });
-      if (added) {
+      if (!handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+        handles.push(t);
         handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         localStorage.setItem('vk_tag_people_handles', JSON.stringify(handles));
         refreshVkTagPeopleList();
@@ -3345,13 +3332,10 @@ Return ONLY valid JSON, no markdown fences:
       const handles = getVkTagPeopleHandles();
       let added = false;
       rows.forEach(r => {
-        (r.vk_tag_people || '').split(',').forEach(p => {
-          const t = p.trim();
-          if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
-            handles.push(t);
-            added = true;
-          }
-        });
+        const t = (r.vk_tag_people || '').trim();
+        if (t && !handles.some(x => x.toLowerCase() === t.toLowerCase())) {
+          handles.push(t); added = true;
+        }
       });
       if (added) {
         handles.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -3361,6 +3345,35 @@ Return ONLY valid JSON, no markdown fences:
     }
     refreshVkTagPeopleList();
 
+    // ── SERIAL TITLE AUTOCOMPLETE ────────────────────────────────────────
+    function getSerialTitles() {
+      try { return JSON.parse(localStorage.getItem('serial_titles') || '[]'); } catch { return []; }
+    }
+    function saveSerialTitle(val) {
+      if (!val || !val.trim()) return;
+      const t = val.trim();
+      const items = getSerialTitles();
+      if (!items.some(x => x.toLowerCase() === t.toLowerCase())) {
+        items.push(t);
+        items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('serial_titles', JSON.stringify(items));
+        refreshSerialTitleList();
+      }
+    }
+    function refreshSerialTitleList() {
+      const dl = document.getElementById('serial-title-list');
+      if (!dl) return;
+      dl.innerHTML = getSerialTitles().map(x => `<option value="${h(x)}">`).join('');
+    }
+    function seedSerialTitles() {
+      const items = getSerialTitles(); let added = false;
+      rows.forEach(r => {
+        const t = (r.serial_title || '').trim();
+        if (t && !items.some(x => x.toLowerCase() === t.toLowerCase())) { items.push(t); added = true; }
+      });
+      if (added) { items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })); localStorage.setItem('serial_titles', JSON.stringify(items)); refreshSerialTitleList(); }
+    }
+    refreshSerialTitleList();
 
     function getOembedThumbnail(stashUrl) {
       return new Promise((resolve, reject) => {
