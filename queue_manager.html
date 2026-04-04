@@ -1578,10 +1578,11 @@
 
       <!-- Tab bar -->
       <div class="s-tabs">
-        <button class="s-tab active" id="stab-ai"     onclick="showSettingsTab('ai')">AI</button>
-        <button class="s-tab"        id="stab-config" onclick="showSettingsTab('config')">Config</button>
-        <button class="s-tab"        id="stab-da"     onclick="showSettingsTab('da')">DeviantArt</button>
-        <button class="s-tab"        id="stab-vk"     onclick="showSettingsTab('vk')">VK Data</button>
+        <button class="s-tab active" id="stab-ai"      onclick="showSettingsTab('ai')">AI</button>
+        <button class="s-tab"        id="stab-config"  onclick="showSettingsTab('config')">Config</button>
+        <button class="s-tab"        id="stab-timings" onclick="showSettingsTab('timings')">Timings</button>
+        <button class="s-tab"        id="stab-da"      onclick="showSettingsTab('da')">DeviantArt</button>
+        <button class="s-tab"        id="stab-vk"      onclick="showSettingsTab('vk')">VK Data</button>
       </div>
 
       <!-- ── AI panel ── -->
@@ -1624,6 +1625,46 @@
         <div class="s-field"><span class="s-field-label">500px</span><input type="text" id="s-acc-500px" placeholder="username"></div>
         <div class="s-field"><span class="s-field-label">35photo</span><input type="text" id="s-acc-35photo" placeholder="username"></div>
         <div class="s-field"><span class="s-field-label">Facebook</span><input type="text" id="s-acc-facebook" placeholder="username"></div>
+        <div class="s-save-bar">
+          <div class="sep"></div>
+          <button class="btn btn-primary btn-sm" onclick="saveConfigFile()">Save config.json</button>
+        </div>
+      </div>
+
+      <!-- ── Timings panel ── -->
+      <div class="s-panel" id="s-tab-timings">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+          How long <code style="font-family:monospace;background:var(--surface3);padding:1px 4px;border-radius:3px">upload.py</code> waits after attaching a photo for the platform to process it before filling metadata. Stored in <code style="font-family:monospace;background:var(--surface3);padding:1px 4px;border-radius:3px">config.json</code> — load it in the Config tab first.
+        </div>
+        <div class="s-section-title">Photo Processing Waits</div>
+        <div class="s-field">
+          <span class="s-field-label">500px</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-500px" min="5" max="120" style="width:70px" value="30"><span style="font-size:12px;color:var(--muted)">seconds (default 30)</span></div>
+        </div>
+        <div class="s-field">
+          <span class="s-field-label">35photo</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-35photo" min="5" max="120" style="width:70px" value="30"><span style="font-size:12px;color:var(--muted)">seconds (default 30)</span></div>
+        </div>
+        <div class="s-field">
+          <span class="s-field-label">VK (wall post)</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-vk" min="5" max="120" style="width:70px" value="20"><span style="font-size:12px;color:var(--muted)">seconds (default 20)</span></div>
+        </div>
+        <div class="s-field">
+          <span class="s-field-label">VK (group suggest)</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-vk-group" min="5" max="120" style="width:70px" value="20"><span style="font-size:12px;color:var(--muted)">seconds (default 20)</span></div>
+        </div>
+        <div class="s-field">
+          <span class="s-field-label">X.com</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-x" min="1" max="60" style="width:70px" value="5"><span style="font-size:12px;color:var(--muted)">seconds (default 5)</span></div>
+        </div>
+        <div class="s-field">
+          <span class="s-field-label">Bluesky</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-bluesky" min="1" max="60" style="width:70px" value="10"><span style="font-size:12px;color:var(--muted)">seconds (default 10, fallback only)</span></div>
+        </div>
+        <div class="s-field">
+          <span class="s-field-label">Facebook</span>
+          <div style="display:flex;align-items:center;gap:6px"><input type="number" id="wt-facebook" min="5" max="120" style="width:70px" value="15"><span style="font-size:12px;color:var(--muted)">seconds (default 15)</span></div>
+        </div>
         <div class="s-save-bar">
           <div class="sep"></div>
           <button class="btn btn-primary btn-sm" onclick="saveConfigFile()">Save config.json</button>
@@ -2784,6 +2825,14 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('s-acc-500px').value = ac['500px'] || '';
       document.getElementById('s-acc-35photo').value = ac['35photo'] || '';
       document.getElementById('s-acc-facebook').value = ac.facebook || '';
+      const wt = configData.wait_times || {};
+      document.getElementById('wt-500px').value    = wt['500px']    ?? 30;
+      document.getElementById('wt-35photo').value  = wt['35photo']  ?? 30;
+      document.getElementById('wt-vk').value       = wt['vk']       ?? 20;
+      document.getElementById('wt-vk-group').value = wt['vk_group'] ?? 20;
+      document.getElementById('wt-x').value        = wt['x']        ?? 5;
+      document.getElementById('wt-bluesky').value  = wt['bluesky']  ?? 10;
+      document.getElementById('wt-facebook').value = wt['facebook'] ?? 15;
     }
 
     async function saveConfigFile() {
@@ -2799,6 +2848,15 @@ Return ONLY valid JSON, no markdown fences:
           '500px': document.getElementById('s-acc-500px').value.trim(),
           '35photo': document.getElementById('s-acc-35photo').value.trim(),
           facebook: document.getElementById('s-acc-facebook').value.trim(),
+        },
+        wait_times: {
+          '500px':    parseInt(document.getElementById('wt-500px').value)    || 30,
+          '35photo':  parseInt(document.getElementById('wt-35photo').value)  || 30,
+          'vk':       parseInt(document.getElementById('wt-vk').value)       || 20,
+          'vk_group': parseInt(document.getElementById('wt-vk-group').value) || 20,
+          'x':        parseInt(document.getElementById('wt-x').value)        || 5,
+          'bluesky':  parseInt(document.getElementById('wt-bluesky').value)  || 10,
+          'facebook': parseInt(document.getElementById('wt-facebook').value) || 15,
         }
       };
       const text = JSON.stringify(obj, null, 2);

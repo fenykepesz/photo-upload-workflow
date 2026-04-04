@@ -34,6 +34,17 @@ TAG_LIMIT_500PX = 15
 SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 
+# Photo-processing wait times (ms) — overridden at runtime from config.json wait_times
+WAIT_TIMES = {
+    "500px":    30000,
+    "35photo":  30000,
+    "vk":       20000,
+    "vk_group": 20000,
+    "x":         5000,
+    "bluesky":  10000,
+    "facebook": 15000,
+}
+
 COLS = [
     "upload_id", "scheduled_date", "scheduled_time",
     "stash_url_nsfw", "stash_url_safe", "title", "caption", "keywords",
@@ -552,7 +563,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
             return {"success": False, "url_500px": "", "error": f"No file input: {e}"}
 
     # Wait for upload to process (500px extracts EXIF server-side)
-    page.wait_for_timeout(30000)
+    page.wait_for_timeout(WAIT_TIMES["500px"])
 
     # ── Fill metadata fields ────────────────────────────────
     title = get_effective_title(row)
@@ -780,7 +791,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
     # Wait for upload to process and form to appear
     print("  Waiting for upload to complete...")
-    page.wait_for_timeout(30000)
+    page.wait_for_timeout(WAIT_TIMES["35photo"])
 
     # Scroll down to make the metadata form visible
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -1085,7 +1096,7 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
 
     # Wait for photo to process
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(20000)
+    page.wait_for_timeout(WAIT_TIMES["vk"])
 
     # Click "Next" button
     print("  Clicking Next...")
@@ -1312,9 +1323,9 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         else:
             return {"success": False, "error": f"Could not upload file to {group_slug}"}
 
-    # Wait for processing — same as wall post (20s)
+    # Wait for processing — same as wall post
     print(f"    Waiting for photo processing...")
-    page.wait_for_timeout(20000)
+    page.wait_for_timeout(WAIT_TIMES["vk_group"])
 
     # Click Next — same pattern as wall post
     print(f"    Clicking Next...")
@@ -1531,7 +1542,7 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
 
     # Wait for photo to process
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(5000)
+    page.wait_for_timeout(WAIT_TIMES["x"])
 
     if no_submit:
         print("  --no-submit: skipping post")
@@ -1681,7 +1692,7 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
         print("    Photo upload complete")
     except Exception:
         print("    Upload indicator not found or timed out, waiting extra...")
-        page.wait_for_timeout(10000)
+        page.wait_for_timeout(WAIT_TIMES["bluesky"])
 
     # NSFW: only handle content warning dialog if it appears automatically.
     # Do NOT proactively open the Labels dialog — just post directly.
@@ -1785,7 +1796,7 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
 
     # Wait for photo to upload/process
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(15000)
+    page.wait_for_timeout(WAIT_TIMES["facebook"])
 
     # Location — click the red pin icon ("Check in") in the composer's "Add to your post" bar.
     # IMPORTANT: Multiple [aria-label="Check in"] exist on page. We must find the one INSIDE
@@ -2971,6 +2982,15 @@ def main():
 
     # Load config
     config = load_config(args.config)
+    _wt = config.get("wait_times", {})
+    if _wt:
+        WAIT_TIMES["500px"]    = int(_wt.get("500px",    WAIT_TIMES["500px"]    // 1000)) * 1000
+        WAIT_TIMES["35photo"]  = int(_wt.get("35photo",  WAIT_TIMES["35photo"]  // 1000)) * 1000
+        WAIT_TIMES["vk"]       = int(_wt.get("vk",       WAIT_TIMES["vk"]       // 1000)) * 1000
+        WAIT_TIMES["vk_group"] = int(_wt.get("vk_group", WAIT_TIMES["vk_group"] // 1000)) * 1000
+        WAIT_TIMES["x"]        = int(_wt.get("x",        WAIT_TIMES["x"]        // 1000)) * 1000
+        WAIT_TIMES["bluesky"]  = int(_wt.get("bluesky",  WAIT_TIMES["bluesky"]  // 1000)) * 1000
+        WAIT_TIMES["facebook"] = int(_wt.get("facebook", WAIT_TIMES["facebook"] // 1000)) * 1000
 
     # Load and filter CSV
     all_rows = load_queue(args.csv)
