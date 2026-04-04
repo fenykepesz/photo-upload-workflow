@@ -2957,6 +2957,12 @@ Return ONLY valid JSON, no markdown fences:
       if (!daData) { toast('No DA data loaded', 'error'); return; }
       const text = JSON.stringify(daData, null, 4);
       cacheDAData();
+      if (!daDataHandle && typeof showSaveFilePicker !== 'undefined') {
+        try {
+          daDataHandle = await showSaveFilePicker({ suggestedName: 'da_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+          sUpdateFileStatus();
+        } catch(e) { if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error'); return; }
+      }
       if (daDataHandle) {
         try {
           const w = await daDataHandle.createWritable(); await w.write(text); await w.close();
@@ -2966,7 +2972,7 @@ Return ONLY valid JSON, no markdown fences:
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         Object.assign(document.createElement('a'), { href: url, download: 'da_data.json' }).click();
         URL.revokeObjectURL(url);
-        toast('Downloaded da_data.json (open the file first to enable direct save)', 'info');
+        toast('Downloaded da_data.json', 'info');
       }
     }
 
@@ -2999,6 +3005,12 @@ Return ONLY valid JSON, no markdown fences:
       const text = JSON.stringify(vkData, null, 2);
       cacheVKData();
       populateVKGroupsList();
+      if (!vkDataFileHandle && typeof showSaveFilePicker !== 'undefined') {
+        try {
+          vkDataFileHandle = await showSaveFilePicker({ suggestedName: 'VK_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+          sUpdateFileStatus();
+        } catch(e) { if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error'); return; }
+      }
       if (vkDataFileHandle) {
         try {
           const w = await vkDataFileHandle.createWritable(); await w.write(text); await w.close();
@@ -3008,7 +3020,7 @@ Return ONLY valid JSON, no markdown fences:
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         Object.assign(document.createElement('a'), { href: url, download: 'VK_data.json' }).click();
         URL.revokeObjectURL(url);
-        toast('Downloaded VK_data.json (open the file first to enable direct save)', 'info');
+        toast('Downloaded VK_data.json', 'info');
       }
     }
     function saveAiKey() {
