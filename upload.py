@@ -242,7 +242,7 @@ def get_effective_title(row):
     """Return title + serial_title (space-separated) if serial_title is set."""
     title = row.get("title", "").strip()
     serial = row.get("serial_title", "").strip()
-    return f"{title} {serial}".strip() if serial else title
+    return f"{title} ({serial})".strip() if serial else title
 
 
 def build_description(row, config):
