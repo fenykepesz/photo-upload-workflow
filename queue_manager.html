@@ -1707,7 +1707,7 @@
         </div>
         <div class="s-section-title">VK Groups</div>
         <table class="s-data-table">
-          <thead><tr><th>Display Name</th><th>Slug (vk.com/slug)</th><th style="width:80px"></th></tr></thead>
+          <thead><tr><th>Display Name</th><th>Slug (vk.com/slug)</th><th style="width:120px"></th></tr></thead>
           <tbody id="s-vk-tbody"><tr><td colspan="3" style="color:var(--muted);padding:8px">Load VK_data.json to edit groups.</td></tr></tbody>
         </table>
         <div style="margin-top:8px"><button class="btn btn-sm" onclick="sAddVKGroup()">+ Add Group</button></div>
@@ -3005,7 +3005,11 @@ Return ONLY valid JSON, no markdown fences:
         <tr>
           <td><input type="text" value="${h(g.name)}" onblur="sUpdateVKGroup(${i},'name',this.value)"></td>
           <td><input type="text" value="${h(g.slug)}" onblur="sUpdateVKGroup(${i},'slug',this.value)"></td>
-          <td><button class="btn btn-danger btn-sm" onclick="sRemoveVKGroup(${i})">Remove</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-ghost btn-sm" onclick="sMoveVKGroup(${i},-1)" title="Move up">↑</button>
+            <button class="btn btn-ghost btn-sm" onclick="sMoveVKGroup(${i},1)" title="Move down">↓</button>
+            <button class="btn btn-danger btn-sm" onclick="sRemoveVKGroup(${i})">✕</button>
+          </td>
         </tr>`).join('');
     }
     function sAddVKGroup() {
@@ -3016,6 +3020,11 @@ Return ONLY valid JSON, no markdown fences:
     }
     function sRemoveVKGroup(i){vkData.groups.splice(i,1);sRenderVKTable();}
     function sUpdateVKGroup(i,field,val){if(vkData&&vkData.groups[i])vkData.groups[i][field]=val.trim();}
+    function sMoveVKGroup(i, dir) {
+      const a = vkData.groups, n = i + dir;
+      if (n < 0 || n >= a.length) return;
+      [a[i], a[n]] = [a[n], a[i]]; sRenderVKTable();
+    }
 
     async function saveVKDataFile() {
       if (!vkData) { toast('No VK data loaded', 'error'); return; }
