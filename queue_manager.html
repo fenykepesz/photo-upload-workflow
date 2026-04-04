@@ -1022,6 +1022,13 @@
     </button>
     <button class="icon-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode"></button>
     <div class="sep"></div>
+    <button class="btn btn-warning" id="btn-reconnect" onclick="reconnectCSV()" title="Re-grant file access (no need to pick the file again)" style="display:none">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 5.36A9 9 0 0020.49 15"/>
+      </svg>
+      Reconnect CSV
+    </button>
     <button class="btn" onclick="loadCSV()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -1801,13 +1808,14 @@
         refresh();
       } catch (e) { if (e.name !== 'AbortError') toast('Load error: ' + e.message, 'error'); }
     }
+    let _pendingReconnectHandle = null;
     async function autoLoadCSV() {
       // Try to re-read from disk using stored fileHandle (always fresh)
       const storedFH = await getStoredFileHandle();
       if (storedFH) {
         try {
-          // Check if we still have permission (no prompt for read)
-          if ((await storedFH.queryPermission({ mode: 'readwrite' })) === 'granted') {
+          const perm = await storedFH.queryPermission({ mode: 'readwrite' });
+          if (perm === 'granted') {
             fileHandle = storedFH;
             const file = await storedFH.getFile();
             const txt = await file.text();
@@ -1817,17 +1825,46 @@
             document.getElementById('btn-save').disabled = false;
             refresh();
             return;
+          } else if (perm === 'prompt') {
+            // Permission lapsed after page close — store handle and show reconnect button
+            _pendingReconnectHandle = storedFH;
+            document.getElementById('btn-reconnect').style.display = '';
           }
-        } catch (e) { /* permission revoked or file gone — fall through to cache */ }
+        } catch (e) { /* file gone — fall through to cache */ }
       }
       // Fallback: use localStorage cache
       const cached = localStorage.getItem('csv_cache');
       if (!cached) return;
       rows = parseCSV(cached);
       const name = localStorage.getItem('csv_filename') || 'upload_queue.csv';
-      document.getElementById('file-label').textContent = '📄 ' + name + ' (cached)';
+      document.getElementById('file-label').textContent = '📄 ' + name + ' (cached — click Reconnect CSV)';
       document.getElementById('btn-save').disabled = false;
       refresh();
+    }
+    async function reconnectCSV() {
+      const fh = _pendingReconnectHandle;
+      if (!fh) { loadCSV(); return; }
+      try {
+        const perm = await fh.requestPermission({ mode: 'readwrite' });
+        if (perm === 'granted') {
+          fileHandle = fh;
+          _pendingReconnectHandle = null;
+          document.getElementById('btn-reconnect').style.display = 'none';
+          const file = await fh.getFile();
+          const txt = await file.text();
+          rows = parseCSV(txt);
+          cacheCSV(txt, fh.name);
+          document.getElementById('file-label').textContent = '📄 ' + fh.name;
+          document.getElementById('btn-save').disabled = false;
+          refresh();
+          toast('Reconnected to ' + fh.name, 'success');
+        } else {
+          // User denied — fall back to full file picker
+          loadCSV();
+        }
+      } catch (e) {
+        loadCSV();
+      }
     }
     async function saveCSV() {
       const csv = toCSV(rows);
