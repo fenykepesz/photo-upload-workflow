@@ -1523,7 +1523,10 @@
             <datalist id="vk-tag-people-list"></datalist>
           </div>
           <div class="fg form-full">
-            <label>VK Groups <span style="font-weight:400;opacity:.6">(select groups to suggest post to)</span></label>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <label style="margin:0">VK Groups <span style="font-weight:400;opacity:.6">(select groups to suggest post to)</span></label>
+              <button type="button" class="btn btn-sm" style="margin-left:auto" onclick="vkGroupsToggleAll()">Select / Unselect All</button>
+            </div>
             <div id="m-vk-groups-container" style="background:var(--surface3);padding:10px;border-radius:var(--radius);border:1px solid var(--border);max-height:180px;overflow-y:auto">
               <div id="m-vk-groups-list" style="color:var(--text2);font-size:13px">No VK data loaded — click Sync</div>
             </div>
@@ -2665,7 +2668,7 @@
       }
       list.innerHTML = groups.map(g => `
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;cursor:pointer">
-          <input type="checkbox" value="${h(g.slug)}" style="width:auto;flex-shrink:0">
+          <input type="checkbox" value="${h(g.slug)}" style="width:auto;flex-shrink:0" checked>
           <span>${h(g.name)}</span>
           <span style="color:var(--muted);font-size:11px">(${h(g.slug)})</span>
         </label>
@@ -2680,6 +2683,11 @@
     function getVkGroupsSelected() {
       return Array.from(document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]:checked'))
         .map(cb => cb.value).join(',');
+    }
+    function vkGroupsToggleAll() {
+      const boxes = document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]');
+      const anyUnchecked = Array.from(boxes).some(cb => !cb.checked);
+      boxes.forEach(cb => cb.checked = anyUnchecked);
     }
 
     // ── THEME ──────────────────────────────────────────────────────────────────
