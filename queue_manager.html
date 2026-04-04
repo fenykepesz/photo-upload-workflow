@@ -1627,6 +1627,9 @@
         <div class="s-field"><span class="s-field-label">DeviantArt</span><input type="text" id="s-acc-deviantart" placeholder="username"></div>
         <div class="s-field"><span class="s-field-label">500px</span><input type="text" id="s-acc-500px" placeholder="username"></div>
         <div class="s-field"><span class="s-field-label">35photo</span><input type="text" id="s-acc-35photo" placeholder="username"></div>
+        <div class="s-field"><span class="s-field-label">VK</span><input type="text" id="s-acc-vk" placeholder="id123456 or username"></div>
+        <div class="s-field"><span class="s-field-label">X.com</span><input type="text" id="s-acc-x" placeholder="username"></div>
+        <div class="s-field"><span class="s-field-label">Bluesky</span><input type="text" id="s-acc-bsky" placeholder="handle.bsky.social"></div>
         <div class="s-field"><span class="s-field-label">Facebook</span><input type="text" id="s-acc-facebook" placeholder="username"></div>
         <div class="s-save-bar">
           <div class="sep"></div>
@@ -2252,8 +2255,9 @@
       document.getElementById('m-fb-feeling').value = 'happy';
       document.getElementById('m-fb-tag-people').value = '';
       document.getElementById('m-vk-tag-people').value = '';
-      document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(c => c.checked = false);
-      document.getElementById('m-vk-group-caption').value = '';
+      document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(c => c.checked = true);
+      const _vkAcct = configData?.accounts?.vk?.trim();
+      document.getElementById('m-vk-group-caption').value = _vkAcct ? `Photographer: [@${_vkAcct.replace(/^@/, '')}]` : '';
       ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'].forEach(id => document.getElementById(id).checked = true);
     }
     function openAddModal() {
@@ -2832,6 +2836,9 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('s-acc-deviantart').value = ac.deviantart || '';
       document.getElementById('s-acc-500px').value = ac['500px'] || '';
       document.getElementById('s-acc-35photo').value = ac['35photo'] || '';
+      document.getElementById('s-acc-vk').value = ac.vk || '';
+      document.getElementById('s-acc-x').value = ac.x || '';
+      document.getElementById('s-acc-bsky').value = ac.bluesky || '';
       document.getElementById('s-acc-facebook').value = ac.facebook || '';
       const wt = configData.wait_times || {};
       document.getElementById('wt-500px').value    = wt['500px']    ?? 30;
@@ -2855,6 +2862,9 @@ Return ONLY valid JSON, no markdown fences:
           deviantart: document.getElementById('s-acc-deviantart').value.trim(),
           '500px': document.getElementById('s-acc-500px').value.trim(),
           '35photo': document.getElementById('s-acc-35photo').value.trim(),
+          vk: document.getElementById('s-acc-vk').value.trim(),
+          x: document.getElementById('s-acc-x').value.trim(),
+          bluesky: document.getElementById('s-acc-bsky').value.trim(),
           facebook: document.getElementById('s-acc-facebook').value.trim(),
         },
         wait_times: {
