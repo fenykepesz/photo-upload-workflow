@@ -2860,16 +2860,29 @@ Return ONLY valid JSON, no markdown fences:
         }
       };
       const text = JSON.stringify(obj, null, 2);
+      if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
+        try {
+          configHandle = await showSaveFilePicker({
+            suggestedName: 'config.json',
+            types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+          });
+          sUpdateFileStatus();
+        } catch(e) {
+          if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error');
+          return;
+        }
+      }
       if (configHandle) {
         try {
           const w = await configHandle.createWritable(); await w.write(text); await w.close();
           toast('config.json saved', 'success');
         } catch(e) { toast('Save error: ' + e.message, 'error'); }
       } else {
+        // Fallback for browsers without File System Access API
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         Object.assign(document.createElement('a'), { href: url, download: 'config.json' }).click();
         URL.revokeObjectURL(url);
-        toast('Downloaded config.json (open the file first to enable direct save)', 'info');
+        toast('Downloaded config.json', 'info');
       }
     }
 
