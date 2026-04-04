@@ -867,9 +867,9 @@
     .ai-key-overlay.open { display: flex; }
     .ai-key-dialog {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-      padding: 24px; width: 540px; max-width: 90vw;
+      padding: 24px; width: 700px; max-width: 95vw; max-height: 90vh;
+      display: flex; flex-direction: column;
     }
-    .ai-key-dialog h3 { margin-bottom: 12px; font-size: 14px; }
     .ai-key-dialog input {
       width: 100%; padding: 8px 10px; border-radius: var(--radius);
       border: 1px solid var(--border); background: var(--surface2); color: var(--text);
@@ -892,7 +892,61 @@
       font-size: 11px; padding: 0; text-decoration: underline;
     }
     .ai-key-dialog .btn-link:hover { opacity: .7; }
-    .ai-key-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
+    .ai-key-dialog .btn-row { display: flex; gap: 8px; align-items: center; }
+    /* Settings tabs */
+    .s-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; flex-shrink: 0; }
+    .s-tab { padding: 7px 16px; border: none; background: transparent; color: var(--muted);
+      font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+      border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all .15s; }
+    .s-tab:hover { color: var(--text); }
+    .s-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .s-panel { display: none; overflow-y: auto; flex: 1; min-height: 0; }
+    .s-panel.active { display: block; }
+    .s-section-title { font-size: 11.5px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 8px; }
+    .s-section-title:first-child { margin-top: 0; }
+    .s-field { display: grid; grid-template-columns: 140px 1fr; gap: 8px;
+      align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .s-field:last-child { border-bottom: none; }
+    .s-field-label { font-size: 12px; color: var(--muted); }
+    .s-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 5px 9px; color: var(--text);
+      font-family: inherit; font-size: 12.5px; }
+    .s-field input:focus { outline: none; border-color: var(--accent); }
+    .s-file-bar { display: flex; align-items: center; gap: 8px; padding: 6px 0 10px;
+      border-bottom: 1px solid var(--border); margin-bottom: 10px; font-size: 12px; }
+    .s-file-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .s-file-dot.loaded { background: var(--success); }
+    .s-list-item { display: flex; align-items: center; gap: 6px; padding: 4px 0;
+      border-bottom: 1px solid var(--border); }
+    .s-list-item:last-child { border-bottom: none; }
+    .s-list-item input { flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 4px 8px; color: var(--text); font-family: inherit; font-size: 12.5px; }
+    .s-list-item input:focus { outline: none; border-color: var(--accent); }
+    .s-group-card { background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 10px; margin-bottom: 8px; }
+    .s-group-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .s-group-header input { flex: 1; font-weight: 600; background: var(--surface3);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 8px;
+      color: var(--text); font-family: inherit; font-size: 12.5px; }
+    .s-group-header input:focus { outline: none; border-color: var(--accent); }
+    .s-folder-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+    .s-folder-item:last-child { border-bottom: none; }
+    .s-folder-item input { flex: 1; background: var(--surface3); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 3px 7px; color: var(--text); font-family: inherit; font-size: 12px; }
+    .s-folder-item input:focus { outline: none; border-color: var(--accent); }
+    .s-data-table { width: 100%; border-collapse: collapse; }
+    .s-data-table th { text-align: left; padding: 6px 8px; font-size: 11.5px;
+      color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+    .s-data-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+    .s-data-table tr:last-child td { border-bottom: none; }
+    .s-data-table td input { width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 4px 7px; color: var(--text); font-family: inherit; font-size: 12px; }
+    .s-data-table td input:focus { outline: none; border-color: var(--accent); }
+    .s-save-bar { display: flex; gap: 8px; margin-top: 14px; padding-top: 10px;
+      border-top: 1px solid var(--border); }
+    .s-dialog-footer { display: flex; gap: 8px; justify-content: flex-end;
+      border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; flex-shrink: 0; }
 
     .ai-generate-btn {
       background: linear-gradient(135deg, #7c3aed, #5b8dee); color: #fff;
@@ -960,10 +1014,10 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.0.0</span>
+      Photo Upload Queue <span>· v2.1.0</span>
     </div>
-    <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openAiKeyDialog()" title="Anthropic API Key">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+    <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
       <span class="dot"></span>
     </button>
     <button class="icon-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode"></button>
@@ -1312,6 +1366,10 @@
                 onclick="document.getElementById('m-title').value=''">Clear</button>
             </div>
           </div>
+          <div class="fg form-full">
+            <label>Serial Title <span style="color:var(--accent)">*</span> <span style="font-weight:400;opacity:.6;font-size:11px">Appended to title: "Title Serial Title"</span></label>
+            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series">
+          </div>
           <div class="form-full">
             <div class="auto-row">
               <div class="fg"><label>Caption</label><textarea id="m-caption" rows="3" placeholder="e.g. Shot in natural morning light on Kodak Tri-X..."></textarea>
@@ -1348,6 +1406,11 @@
             <label>Camera <span style="color:var(--accent)">*</span></label>
             <input type="text" id="m-film-camera" placeholder="e.g. Yashica MAT-124g" list="film-camera-list" autocomplete="off">
             <datalist id="film-camera-list"></datalist>
+          </div>
+          <div class="fg" id="film-lens-row" style="display:none">
+            <label>Lens</label>
+            <input type="text" id="m-film-lens" placeholder="e.g. Planar 80mm f/2.8" list="film-lens-list" autocomplete="off">
+            <datalist id="film-lens-list"></datalist>
           </div>
           <div class="fg" id="film-stock-row" style="display:none">
             <label>Film Stock <span style="color:var(--accent)">*</span></label>
@@ -1502,29 +1565,111 @@
     </div>
   </div>
 
-  <!-- AI KEY DIALOG -->
+  <!-- SETTINGS DIALOG -->
   <div class="ai-key-overlay" id="ai-key-overlay">
     <div class="ai-key-dialog">
-      <h3>AI Settings</h3>
-      <label for="ai-key-input">API Key</label>
-      <input type="password" id="ai-key-input" placeholder="sk-ant-api03-...">
-      <label for="ai-model-select">Model</label>
-      <select id="ai-model-select">
-        <option value="claude-opus-4-6">Opus 4.6 — Best quality, slower</option>
-        <option value="claude-sonnet-4-5-20250929" selected>Sonnet 4.5 — Balanced</option>
-        <option value="claude-haiku-4-5-20251001">Haiku 4.5 — Fastest, cheapest</option>
-      </select>
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
-        <label for="ai-prompt-input" style="margin-bottom:0">Prompt</label>
-        <button class="btn-link" onclick="resetAiPrompt()" style="font-size:11px">Reset to Default</button>
+
+      <!-- Tab bar -->
+      <div class="s-tabs">
+        <button class="s-tab active" id="stab-ai"     onclick="showSettingsTab('ai')">AI</button>
+        <button class="s-tab"        id="stab-config" onclick="showSettingsTab('config')">Config</button>
+        <button class="s-tab"        id="stab-da"     onclick="showSettingsTab('da')">DeviantArt</button>
+        <button class="s-tab"        id="stab-vk"     onclick="showSettingsTab('vk')">VK Data</button>
       </div>
-      <textarea id="ai-prompt-input" rows="8" spellcheck="false"></textarea>
-      <div class="btn-row">
-        <button class="btn btn-ghost btn-sm" onclick="clearAiKey()">Clear Key</button>
-        <div class="sep"></div>
-        <button class="btn btn-ghost btn-sm" onclick="closeAiKeyDialog()">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="saveAiKey()">Save</button>
+
+      <!-- ── AI panel ── -->
+      <div class="s-panel active" id="s-tab-ai">
+        <label for="ai-key-input">Anthropic API Key</label>
+        <input type="password" id="ai-key-input" placeholder="sk-ant-api03-...">
+        <label for="ai-model-select">Model</label>
+        <select id="ai-model-select">
+          <option value="claude-opus-4-6">Opus 4.6 — Best quality, slower</option>
+          <option value="claude-sonnet-4-5-20250929" selected>Sonnet 4.5 — Balanced</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — Fastest, cheapest</option>
+        </select>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+          <label for="ai-prompt-input" style="margin-bottom:0">Prompt</label>
+          <button class="btn-link" onclick="resetAiPrompt()">Reset to Default</button>
+        </div>
+        <textarea id="ai-prompt-input" rows="8" spellcheck="false"></textarea>
+        <div class="s-save-bar">
+          <button class="btn btn-ghost btn-sm" onclick="clearAiKey()">Clear Key</button>
+          <div class="sep"></div>
+          <button class="btn btn-primary btn-sm" onclick="saveAiKey()">Save</button>
+        </div>
       </div>
+
+      <!-- ── Config panel ── -->
+      <div class="s-panel" id="s-tab-config">
+        <div class="s-file-bar">
+          <div class="s-file-dot" id="s-config-dot"></div>
+          <span id="s-config-label" style="color:var(--muted)">config.json — not loaded</span>
+          <div class="sep"></div>
+          <button class="btn btn-sm" onclick="loadConfigFile(true)">Open file…</button>
+        </div>
+        <div class="s-section-title">Social Links <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px">— appended to descriptions on DA, 500px, 35photo</span></div>
+        <div class="s-field"><span class="s-field-label">Web</span><input type="text" id="s-sl-web" placeholder="erikrozman.com/"></div>
+        <div class="s-field"><span class="s-field-label">Instagram</span><input type="text" id="s-sl-instagram" placeholder="instagram.com/you/"></div>
+        <div class="s-field"><span class="s-field-label">500px</span><input type="text" id="s-sl-500px" placeholder="500px.com/you"></div>
+        <div class="s-field"><span class="s-field-label">DeviantArt</span><input type="text" id="s-sl-deviantart" placeholder="you.deviantart.com/"></div>
+        <div class="s-section-title">Accounts</div>
+        <div class="s-field"><span class="s-field-label">DeviantArt</span><input type="text" id="s-acc-deviantart" placeholder="username"></div>
+        <div class="s-field"><span class="s-field-label">500px</span><input type="text" id="s-acc-500px" placeholder="username"></div>
+        <div class="s-field"><span class="s-field-label">35photo</span><input type="text" id="s-acc-35photo" placeholder="username"></div>
+        <div class="s-field"><span class="s-field-label">Facebook</span><input type="text" id="s-acc-facebook" placeholder="username"></div>
+        <div class="s-save-bar">
+          <div class="sep"></div>
+          <button class="btn btn-primary btn-sm" onclick="saveConfigFile()">Save config.json</button>
+        </div>
+      </div>
+
+      <!-- ── DeviantArt panel ── -->
+      <div class="s-panel" id="s-tab-da">
+        <div class="s-file-bar">
+          <div class="s-file-dot" id="s-da-dot"></div>
+          <span id="s-da-label" style="color:var(--muted)">da_data.json — not loaded</span>
+          <div class="sep"></div>
+          <button class="btn btn-sm" onclick="loadDAData(true)">Open file…</button>
+        </div>
+        <div class="s-section-title">Galleries</div>
+        <div id="s-galleries"><span style="color:var(--muted);font-size:12px">Load da_data.json to edit galleries.</span></div>
+        <div style="margin-top:8px"><button class="btn btn-sm" onclick="sAddGallery()">+ Add Gallery</button></div>
+        <div class="s-section-title" style="margin-top:16px">Groups</div>
+        <div id="s-groups"><span style="color:var(--muted);font-size:12px">Load da_data.json to edit groups.</span></div>
+        <div style="margin-top:8px"><button class="btn btn-sm" onclick="sAddGroup()">+ Add Group</button></div>
+        <div class="s-save-bar">
+          <div class="sep"></div>
+          <button class="btn btn-primary btn-sm" onclick="saveDADataFile()">Save da_data.json</button>
+        </div>
+      </div>
+
+      <!-- ── VK Data panel ── -->
+      <div class="s-panel" id="s-tab-vk">
+        <div class="s-file-bar">
+          <div class="s-file-dot" id="s-vk-dot"></div>
+          <span id="s-vk-label" style="color:var(--muted)">VK_data.json — not loaded</span>
+          <div class="sep"></div>
+          <button class="btn btn-sm" onclick="loadVKData(true)">Open file…</button>
+        </div>
+        <div class="s-section-title">VK Groups</div>
+        <table class="s-data-table">
+          <thead><tr><th>Display Name</th><th>Slug (vk.com/slug)</th><th style="width:80px"></th></tr></thead>
+          <tbody id="s-vk-tbody"><tr><td colspan="3" style="color:var(--muted);padding:8px">Load VK_data.json to edit groups.</td></tr></tbody>
+        </table>
+        <div style="margin-top:8px"><button class="btn btn-sm" onclick="sAddVKGroup()">+ Add Group</button></div>
+        <div class="s-section-title" style="margin-top:16px">Sync Info</div>
+        <div style="font-size:12px;color:var(--muted)">Last sync: <span id="s-vk-last-sync">—</span></div>
+        <div class="s-save-bar">
+          <div class="sep"></div>
+          <button class="btn btn-primary btn-sm" onclick="saveVKDataFile()">Save VK_data.json</button>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="s-dialog-footer">
+        <button class="btn btn-ghost btn-sm" onclick="closeAiKeyDialog()">Close</button>
+      </div>
+
     </div>
   </div>
 
@@ -1548,7 +1693,8 @@
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
       'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result',
-      'film_used', 'film_camera', 'film_stock', 'film_developed_by'];
+      'film_used', 'film_camera', 'film_lens', 'film_stock', 'film_developed_by',
+      'serial_title'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
     function parseCSV(txt) {
@@ -1707,10 +1853,11 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmStocks(); seedFilmDevelopers(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); }
     function toggleFilmFields() {
       const on = document.getElementById('m-film-used').checked;
       document.getElementById('film-camera-row').style.display = on ? '' : 'none';
+      document.getElementById('film-lens-row').style.display = on ? '' : 'none';
       document.getElementById('film-stock-row').style.display = on ? '' : 'none';
       document.getElementById('film-developed-by-row').style.display = on ? '' : 'none';
     }
@@ -2000,7 +2147,7 @@
       return `PH-${yr}-${String(n + 1).padStart(3, '0')}`;
     }
     function clearForm() {
-      ['m-date', 'm-time', 'm-nsfw', 'm-safe', 'm-title', 'm-caption', 'm-keywords',
+      ['m-date', 'm-time', 'm-nsfw', 'm-safe', 'm-title', 'm-serial-title', 'm-caption', 'm-keywords',
         'm-notes', 'm-model-name', 'm-loc-500px'].forEach(id => {
           const el = document.getElementById(id); if (el) el.value = '';
         });
@@ -2014,6 +2161,7 @@
       document.getElementById('m-nsfw-flag').checked = false;
       document.getElementById('m-film-used').checked = false;
       document.getElementById('m-film-camera').value = '';
+      document.getElementById('m-film-lens').value = '';
       document.getElementById('m-film-stock').value = '';
       document.getElementById('m-film-developed-by').value = '';
       toggleFilmFields();
@@ -2048,11 +2196,13 @@
       document.getElementById('m-nsfw').value = r.stash_url_nsfw || '';
       document.getElementById('m-safe').value = r.stash_url_safe || '';
       document.getElementById('m-title').value = r.title || '';
+      document.getElementById('m-serial-title').value = r.serial_title || '';
       document.getElementById('m-caption').value = r.caption || '';
       document.getElementById('m-keywords').value = r.keywords || '';
       document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
       document.getElementById('m-film-used').checked = r.film_used === 'TRUE';
       document.getElementById('m-film-camera').value = r.film_camera || '';
+      document.getElementById('m-film-lens').value = r.film_lens || '';
       document.getElementById('m-film-stock').value = r.film_stock || '';
       document.getElementById('m-film-developed-by').value = r.film_developed_by || '';
       toggleFilmFields();
@@ -2115,6 +2265,7 @@
       if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
       if (platforms.includes('35P') && !document.getElementById('m-cat-35p').value) { toast('35photo category is required', 'error'); return; }
       if (needsModelName() && !document.getElementById('m-model-name').value.trim()) { toast('Model name is required for this category', 'error'); return; }
+      if (!document.getElementById('m-serial-title').value.trim()) { toast('Serial Title is required', 'error'); return; }
       if (document.getElementById('m-film-used').checked) {
         if (!document.getElementById('m-film-camera').value.trim()) { toast('Camera is required when Film Used is checked', 'error'); return; }
         if (!document.getElementById('m-film-stock').value.trim()) { toast('Film Stock is required when Film Used is checked', 'error'); return; }
@@ -2146,8 +2297,10 @@
         vk_groups_result: existing?.vk_groups_result || '',
         film_used: document.getElementById('m-film-used').checked ? 'TRUE' : 'FALSE',
         film_camera: document.getElementById('m-film-camera').value.trim(),
+        film_lens: document.getElementById('m-film-lens').value.trim(),
         film_stock: document.getElementById('m-film-stock').value.trim(),
         film_developed_by: document.getElementById('m-film-developed-by').value.trim(),
+        serial_title: document.getElementById('m-serial-title').value.trim(),
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
           const folder = c.closest('.da-group-row').querySelector('.da-group-folder').value;
@@ -2177,6 +2330,7 @@
       saveModelName(entry.model_name);
       saveLocation(entry.location_500px);
       saveFilmCamera(entry.film_camera);
+      saveFilmLens(entry.film_lens);
       saveFilmStock(entry.film_stock);
       saveFilmDeveloper(entry.film_developed_by);
       saveTagPeople(entry.fb_tag_people);
@@ -2327,6 +2481,7 @@
     }
 
     function populateDAChoices() {
+      sRenderGalleries(); sRenderGroups(); sUpdateFileStatus();
       const gList = document.getElementById('m-da-gallery-list');
       if (gList) {
         gList.innerHTML = (daData.galleries || ['Featured']).map(g => `
@@ -2422,6 +2577,7 @@
     }
 
     function populateVKGroupsList() {
+      sRenderVKTable(); sUpdateFileStatus();
       const list = document.getElementById('m-vk-groups-list');
       if (!list) return;
       const groups = vkData.groups || [];
@@ -2498,13 +2654,255 @@ Return ONLY valid JSON, no markdown fences:
       const btn = document.getElementById('ai-key-btn');
       if (btn) btn.classList.toggle('has-key', !!getAiKey());
     }
-    function openAiKeyDialog() {
+    // ── SETTINGS DIALOG ────────────────────────────────────────────────────────
+    function openSettings(tab) {
       document.getElementById('ai-key-input').value = getAiKey();
       document.getElementById('ai-model-select').value = getAiModel();
       document.getElementById('ai-prompt-input').value = getAiPrompt();
       document.getElementById('ai-key-overlay').classList.add('open');
+      showSettingsTab(tab || localStorage.getItem('settings_tab') || 'ai');
+      // Render DA/VK panels from current in-memory data
+      sRenderGalleries();
+      sRenderGroups();
+      sRenderVKTable();
+      sUpdateFileStatus();
     }
-    function closeAiKeyDialog() { document.getElementById('ai-key-overlay').classList.remove('open'); }
+    function openAiKeyDialog() { openSettings('ai'); }
+    function closeAiKeyDialog() {
+      document.getElementById('ai-key-overlay').classList.remove('open');
+    }
+    function showSettingsTab(name) {
+      document.querySelectorAll('.s-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.s-tab').forEach(b => b.classList.remove('active'));
+      const panel = document.getElementById('s-tab-' + name);
+      const tab = document.getElementById('stab-' + name);
+      if (panel) panel.classList.add('active');
+      if (tab) tab.classList.add('active');
+      localStorage.setItem('settings_tab', name);
+    }
+    function sUpdateFileStatus() {
+      // DA
+      const daLoaded = daData && (daData.galleries.length > 0 || Object.keys(daData.groups).length > 0);
+      document.getElementById('s-da-dot').classList.toggle('loaded', !!daDataHandle || daLoaded);
+      document.getElementById('s-da-label').textContent = daDataHandle ? 'da_data.json — loaded' : 'da_data.json — use cached data';
+      // VK
+      const vkLoaded = vkData && vkData.groups.length > 0;
+      document.getElementById('s-vk-dot').classList.toggle('loaded', !!vkDataFileHandle || vkLoaded);
+      document.getElementById('s-vk-label').textContent = vkDataFileHandle ? 'VK_data.json — loaded' : 'VK_data.json — use cached data';
+      // Config
+      document.getElementById('s-config-dot').classList.toggle('loaded', !!configHandle);
+      document.getElementById('s-config-label').textContent = configHandle ? 'config.json — loaded' : 'config.json — not loaded';
+    }
+
+    // ── CONFIG FILE ────────────────────────────────────────────────────────────
+    let configHandle = null;
+    let configData = null;
+
+    async function loadConfigFile(interactive = false) {
+      try {
+        const res = await fetch('config.json');
+        if (!res.ok) throw new Error('fetch failed');
+        configData = await res.json();
+        sApplyConfig();
+        if (interactive) toast('config.json loaded', 'success');
+        sUpdateFileStatus();
+        return;
+      } catch (e) {}
+
+      if (interactive) {
+        try {
+          if (typeof showOpenFilePicker !== 'undefined') {
+            const [fh] = await showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+            configHandle = fh;
+            configData = JSON.parse(await (await fh.getFile()).text());
+          } else {
+            await new Promise(resolve => {
+              const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' });
+              inp.onchange = async ev => {
+                const f = ev.target.files[0]; if (!f) { resolve(); return; }
+                configData = JSON.parse(await f.text());
+                resolve();
+              };
+              inp.click();
+            });
+          }
+          sApplyConfig();
+          toast('config.json loaded', 'success');
+          sUpdateFileStatus();
+        } catch(e) {
+          if (e.name !== 'AbortError') toast('Could not load config.json: ' + e.message, 'error');
+        }
+      }
+    }
+
+    function sApplyConfig() {
+      if (!configData) return;
+      const sl = configData.social_links || {};
+      const ac = configData.accounts || {};
+      document.getElementById('s-sl-web').value = sl.web || '';
+      document.getElementById('s-sl-instagram').value = sl.instagram || '';
+      document.getElementById('s-sl-500px').value = sl['500px'] || '';
+      document.getElementById('s-sl-deviantart').value = sl.deviantart || '';
+      document.getElementById('s-acc-deviantart').value = ac.deviantart || '';
+      document.getElementById('s-acc-500px').value = ac['500px'] || '';
+      document.getElementById('s-acc-35photo').value = ac['35photo'] || '';
+      document.getElementById('s-acc-facebook').value = ac.facebook || '';
+    }
+
+    async function saveConfigFile() {
+      const obj = {
+        social_links: {
+          web: document.getElementById('s-sl-web').value.trim(),
+          instagram: document.getElementById('s-sl-instagram').value.trim(),
+          '500px': document.getElementById('s-sl-500px').value.trim(),
+          deviantart: document.getElementById('s-sl-deviantart').value.trim(),
+        },
+        accounts: {
+          deviantart: document.getElementById('s-acc-deviantart').value.trim(),
+          '500px': document.getElementById('s-acc-500px').value.trim(),
+          '35photo': document.getElementById('s-acc-35photo').value.trim(),
+          facebook: document.getElementById('s-acc-facebook').value.trim(),
+        }
+      };
+      const text = JSON.stringify(obj, null, 2);
+      if (configHandle) {
+        try {
+          const w = await configHandle.createWritable(); await w.write(text); await w.close();
+          toast('config.json saved', 'success');
+        } catch(e) { toast('Save error: ' + e.message, 'error'); }
+      } else {
+        const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+        Object.assign(document.createElement('a'), { href: url, download: 'config.json' }).click();
+        URL.revokeObjectURL(url);
+        toast('Downloaded config.json (open the file first to enable direct save)', 'info');
+      }
+    }
+
+    // ── DA SETTINGS EDITING ────────────────────────────────────────────────────
+    function sRenderGalleries() {
+      const c = document.getElementById('s-galleries');
+      if (!c) return;
+      const gals = (daData && daData.galleries) || [];
+      if (!gals.length) { c.innerHTML = '<span style="color:var(--muted);font-size:12px">No galleries yet.</span>'; return; }
+      c.innerHTML = gals.map((name, i) => `
+        <div class="s-list-item">
+          <input type="text" value="${h(name)}" oninput="daData.galleries[${i}]=this.value">
+          <button class="btn btn-ghost btn-sm" onclick="sMoveGallery(${i},-1)" title="Up">↑</button>
+          <button class="btn btn-ghost btn-sm" onclick="sMoveGallery(${i},1)" title="Down">↓</button>
+          <button class="btn btn-danger btn-sm" onclick="sRemoveGallery(${i})">✕</button>
+        </div>`).join('');
+    }
+    function sAddGallery() {
+      if (!daData) { toast('Load da_data.json first', 'error'); return; }
+      daData.galleries.push(''); sRenderGalleries();
+      const ins = document.querySelectorAll('#s-galleries input');
+      if (ins.length) ins[ins.length-1].focus();
+    }
+    function sRemoveGallery(i) { daData.galleries.splice(i,1); sRenderGalleries(); }
+    function sMoveGallery(i, dir) {
+      const a = daData.galleries, n = i+dir;
+      if (n<0||n>=a.length) return;
+      [a[i],a[n]]=[a[n],a[i]]; sRenderGalleries();
+    }
+
+    function sRenderGroups() {
+      const c = document.getElementById('s-groups');
+      if (!c) return;
+      const groups = (daData && daData.groups) || {};
+      const entries = Object.entries(groups);
+      if (!entries.length) { c.innerHTML = '<span style="color:var(--muted);font-size:12px">No groups yet.</span>'; return; }
+      c.innerHTML = entries.map(([gname, folders]) => `
+        <div class="s-group-card">
+          <div class="s-group-header">
+            <input type="text" value="${h(gname)}" data-orig="${h(gname)}"
+              onblur="sRenameGroup('${h(gname)}',this.value)">
+            <button class="btn btn-danger btn-sm" data-group="${h(gname)}" onclick="sRemoveGroupBtn(this)">Remove</button>
+          </div>
+          <div id="sg-folders-${h(gname)}">
+            ${(folders||[]).map((f,fi)=>`
+              <div class="s-folder-item">
+                <input type="text" value="${h(f)}" onblur="sUpdateFolder('${h(gname)}',${fi},this.value)">
+                <button class="btn btn-danger btn-sm" data-group="${h(gname)}" data-fi="${fi}" onclick="sRemoveFolderBtn(this)">✕</button>
+              </div>`).join('')}
+          </div>
+          <button class="btn btn-sm" style="margin-top:6px" data-group="${h(gname)}" onclick="sAddFolderBtn(this)">+ Folder</button>
+        </div>`).join('');
+    }
+    function sAddGroup() {
+      if (!daData) { toast('Load da_data.json first', 'error'); return; }
+      let name='New Group', n=2;
+      while(daData.groups[name]!==undefined) name='New Group '+n++;
+      daData.groups[name]=[]; sRenderGroups();
+    }
+    function sRemoveGroupBtn(btn) { delete daData.groups[btn.dataset.group]; sRenderGroups(); }
+    function sRenameGroup(old, nw) {
+      nw=nw.trim(); if(!nw||nw===old) return;
+      if(daData.groups[nw]!==undefined){toast('Group name already exists','error');sRenderGroups();return;}
+      const r={}; for(const[k,v] of Object.entries(daData.groups)) r[k===old?nw:k]=v;
+      daData.groups=r; sRenderGroups();
+    }
+    function sUpdateFolder(g,fi,v){if(daData.groups[g])daData.groups[g][fi]=v.trim();}
+    function sAddFolderBtn(btn){const g=btn.dataset.group;if(!daData.groups[g])daData.groups[g]=[];daData.groups[g].push('');sRenderGroups();}
+    function sRemoveFolderBtn(btn){const g=btn.dataset.group,fi=parseInt(btn.dataset.fi,10);daData.groups[g].splice(fi,1);sRenderGroups();}
+
+    async function saveDADataFile() {
+      if (!daData) { toast('No DA data loaded', 'error'); return; }
+      const text = JSON.stringify(daData, null, 4);
+      cacheDAData();
+      if (daDataHandle) {
+        try {
+          const w = await daDataHandle.createWritable(); await w.write(text); await w.close();
+          toast('da_data.json saved', 'success');
+        } catch(e) { toast('Save error: ' + e.message, 'error'); }
+      } else {
+        const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+        Object.assign(document.createElement('a'), { href: url, download: 'da_data.json' }).click();
+        URL.revokeObjectURL(url);
+        toast('Downloaded da_data.json (open the file first to enable direct save)', 'info');
+      }
+    }
+
+    // ── VK SETTINGS EDITING ────────────────────────────────────────────────────
+    function sRenderVKTable() {
+      const tbody = document.getElementById('s-vk-tbody');
+      if (!tbody) return;
+      const groups = (vkData && vkData.groups) || [];
+      document.getElementById('s-vk-last-sync').textContent = (vkData && vkData.last_sync) || '—';
+      if (!groups.length) { tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted);padding:8px">No groups yet.</td></tr>'; return; }
+      tbody.innerHTML = groups.map((g,i) => `
+        <tr>
+          <td><input type="text" value="${h(g.name)}" onblur="sUpdateVKGroup(${i},'name',this.value)"></td>
+          <td><input type="text" value="${h(g.slug)}" onblur="sUpdateVKGroup(${i},'slug',this.value)"></td>
+          <td><button class="btn btn-danger btn-sm" onclick="sRemoveVKGroup(${i})">Remove</button></td>
+        </tr>`).join('');
+    }
+    function sAddVKGroup() {
+      if (!vkData) { toast('No VK data loaded', 'error'); return; }
+      vkData.groups.push({slug:'',name:''}); sRenderVKTable();
+      const rows=document.querySelectorAll('#s-vk-tbody tr');
+      if(rows.length){const inp=rows[rows.length-1].querySelector('input');if(inp)inp.focus();}
+    }
+    function sRemoveVKGroup(i){vkData.groups.splice(i,1);sRenderVKTable();}
+    function sUpdateVKGroup(i,field,val){if(vkData&&vkData.groups[i])vkData.groups[i][field]=val.trim();}
+
+    async function saveVKDataFile() {
+      if (!vkData) { toast('No VK data loaded', 'error'); return; }
+      document.querySelectorAll('#s-vk-tbody input').forEach(inp=>inp.dispatchEvent(new Event('blur')));
+      const text = JSON.stringify(vkData, null, 2);
+      cacheVKData();
+      populateVKGroupsList();
+      if (vkDataFileHandle) {
+        try {
+          const w = await vkDataFileHandle.createWritable(); await w.write(text); await w.close();
+          toast('VK_data.json saved', 'success');
+        } catch(e) { toast('Save error: ' + e.message, 'error'); }
+      } else {
+        const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+        Object.assign(document.createElement('a'), { href: url, download: 'VK_data.json' }).click();
+        URL.revokeObjectURL(url);
+        toast('Downloaded VK_data.json (open the file first to enable direct save)', 'info');
+      }
+    }
     function saveAiKey() {
       const key = document.getElementById('ai-key-input').value.trim();
       if (key) localStorage.setItem('anthropic_api_key', key);
@@ -2663,6 +3061,35 @@ Return ONLY valid JSON, no markdown fences:
       if (added) { items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })); localStorage.setItem('film_stocks', JSON.stringify(items)); refreshFilmStockList(); }
     }
     refreshFilmStockList();
+
+    // ── FILM LENS AUTOCOMPLETE ────────────────────────────────────────────────
+    function getFilmLenses() {
+      try { return JSON.parse(localStorage.getItem('film_lenses') || '[]'); } catch { return []; }
+    }
+    function saveFilmLens(val) {
+      if (!val) return;
+      const items = getFilmLenses();
+      if (!items.some(x => x.toLowerCase() === val.toLowerCase())) {
+        items.push(val);
+        items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        localStorage.setItem('film_lenses', JSON.stringify(items));
+      }
+      refreshFilmLensList();
+    }
+    function refreshFilmLensList() {
+      const dl = document.getElementById('film-lens-list');
+      if (!dl) return;
+      dl.innerHTML = getFilmLenses().map(x => `<option value="${h(x)}">`).join('');
+    }
+    function seedFilmLenses() {
+      const items = getFilmLenses(); let added = false;
+      rows.forEach(r => {
+        const v = (r.film_lens || '').trim();
+        if (v && !items.some(x => x.toLowerCase() === v.toLowerCase())) { items.push(v); added = true; }
+      });
+      if (added) { items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })); localStorage.setItem('film_lenses', JSON.stringify(items)); refreshFilmLensList(); }
+    }
+    refreshFilmLensList();
 
     // ── FILM DEVELOPER AUTOCOMPLETE ───────────────────────────────────────────────
     function getFilmDevelopers() {
@@ -3052,8 +3479,9 @@ Return ONLY valid JSON, no markdown fences:
 
     // INIT
     autoLoadCSV();
-    loadDAData(false);
-    loadVKData(false);
+    loadDAData(false).then(() => { sRenderGalleries(); sRenderGroups(); sUpdateFileStatus(); });
+    loadVKData(false).then(() => { sRenderVKTable(); sUpdateFileStatus(); });
+    loadConfigFile(false).then(() => sUpdateFileStatus());
     applyFilters(); updateStats();
   </script>
 </body>

@@ -42,7 +42,8 @@ COLS = [
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
     "fb_feeling", "fb_tag_people",
     "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
-    "film_used", "film_camera", "film_stock", "film_developed_by",
+    "film_used", "film_camera", "film_lens", "film_stock", "film_developed_by",
+    "serial_title",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -65,6 +66,7 @@ def parse_args():
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="Path to config.json")
     p.add_argument("--profile", type=Path, default=BROWSER_PROFILE, help="Browser profile directory")
     p.add_argument("--login", action="store_true", help="Open browser to log into DeviantArt (first-time setup)")
+    p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
     return p.parse_args()
 
 
@@ -158,7 +160,91 @@ def filter_rows(rows, target_id=None):
     return targets
 
 
+# ── Login Preflight ───────────────────────────────────────────
+def collect_required_platforms(rows):
+    """Return union of all platforms needed across the given rows."""
+    needed = set()
+    for row in rows:
+        needed |= get_row_platforms(row)
+    return needed
+
+
+def verify_login(page, platform):
+    """
+    Navigate to platform home and check whether the user is logged in.
+    Returns True if logged in, False otherwise.
+    """
+    checks = {
+        "500PX": "https://500px.com/",
+        "35P":   "https://35photo.pro/",
+        "VK":    "https://vk.com/",
+        "X":     "https://x.com/",
+        "BSKY":  "https://bsky.app/",
+        "FB":    "https://www.facebook.com/",
+        "DA":    "https://www.deviantart.com/",
+    }
+    if platform not in checks:
+        return True
+    try:
+        page.goto(checks[platform], wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(2000)
+        url = page.url.lower()
+
+        if platform == "500PX":
+            if "login" in url or "sign" in url:
+                return False
+            has_login_link = page.locator('a:has-text("Log in"), button:has-text("Log in")').count() > 0
+            has_avatar = page.locator('[class*="userAvatar"], [class*="user-avatar"], [data-testid*="avatar"]').count() > 0
+            return not (has_login_link and not has_avatar)
+        elif platform == "35P":
+            return "login" not in url
+        elif platform == "VK":
+            return "login" not in url and "authorize" not in url
+        elif platform == "X":
+            if "login" in url or "i/flow/login" in url:
+                return False
+            return page.locator('[data-testid="loginButton"]').count() == 0
+        elif platform == "BSKY":
+            if "login" in url:
+                return False
+            return page.locator('button:has-text("Sign in")').count() == 0
+        elif platform == "FB":
+            return "/login" not in url
+        elif platform == "DA":
+            return "users/login" not in url
+    except Exception:
+        return False
+    return True
+
+
+def run_login_checks(page, platforms):
+    """
+    Check login state for each required platform.
+    Prints a status table and returns list of failed platform names.
+    """
+    platform_order = ["500PX", "35P", "VK", "X", "BSKY", "FB", "DA"]
+    ordered = [p for p in platform_order if p in platforms]
+
+    print("\n── Pre-flight login check ──────────────────────────────")
+    failed = []
+    for plat in ordered:
+        ok = verify_login(page, plat)
+        status = "✓ PASS" if ok else "✗ FAIL"
+        print(f"  {plat:<8} {status}")
+        if not ok:
+            failed.append(plat)
+    print()
+    return failed
+
+
 # ── Description & Tags ────────────────────────────────────────
+def get_effective_title(row):
+    """Return title + serial_title (space-separated) if serial_title is set."""
+    title = row.get("title", "").strip()
+    serial = row.get("serial_title", "").strip()
+    return f"{title} {serial}".strip() if serial else title
+
+
 def build_description(row, config):
     """Assemble desc_full: model credit + caption + social links."""
     parts = []
@@ -173,11 +259,14 @@ def build_description(row, config):
     # Film info
     if row.get("film_used", "").strip().upper() == "TRUE":
         camera = row.get("film_camera", "").strip()
+        lens = row.get("film_lens", "").strip()
         film = row.get("film_stock", "").strip()
         developed_by = row.get("film_developed_by", "").strip()
         film_parts = []
         if camera:
             film_parts.append(f"Camera: {camera}")
+        if lens:
+            film_parts.append(f"Lens: {lens}")
         if film:
             film_parts.append(f"Film: {film}")
         if developed_by:
@@ -212,11 +301,14 @@ def build_description_fb(row):
     # Film info
     if row.get("film_used", "").strip().upper() == "TRUE":
         camera = row.get("film_camera", "").strip()
+        lens = row.get("film_lens", "").strip()
         film = row.get("film_stock", "").strip()
         developed_by = row.get("film_developed_by", "").strip()
         film_parts = []
         if camera:
             film_parts.append(f"Camera: {camera}")
+        if lens:
+            film_parts.append(f"Lens: {lens}")
         if film:
             film_parts.append(f"Film: {film}")
         if developed_by:
@@ -462,7 +554,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     page.wait_for_timeout(30000)
 
     # ── Fill metadata fields ────────────────────────────────
-    title = row.get("title", "").strip()
+    title = get_effective_title(row)
     nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
 
     def js_escape_500px(s):
@@ -651,7 +743,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
         return {"success": False, "url_35p": "", "error": "No image file available"}
 
     category = row.get("category_35p", "").strip()
-    title = row.get("title", "").strip()
+    title = get_effective_title(row)
     nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
 
     # ── Navigate to 35photo upload page ──────────────────────
@@ -2372,7 +2464,7 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 
     # ── Fill form fields ─────────────────────────────────────
     print("\n  Filling form...")
-    title = row.get("title", "").strip()
+    title = get_effective_title(row)
     nsfw_flag = row.get("da_nsfw_flag", "FALSE").strip().upper()
 
     def js_escape(s):
@@ -2917,6 +3009,17 @@ def main():
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
+        # ── Pre-flight login verification ─────────────────────
+        if not args.skip_login_check:
+            needed_platforms = collect_required_platforms(target_rows)
+            failed_logins = run_login_checks(page, needed_platforms)
+            if failed_logins:
+                print("ERROR: Not logged in to: " + ", ".join(failed_logins))
+                print("Run:   python upload.py --login")
+                context.close()
+                sys.exit(1)
+            print("All login checks passed. Starting uploads...")
+
         results_summary = []
 
         try:
@@ -3053,6 +3156,7 @@ def main():
                         _vk_film_parts = []
                         if row.get("film_used", "").strip().upper() == "TRUE":
                             if row.get("film_camera", "").strip(): _vk_film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip(): _vk_film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _vk_film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _vk_film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
 
@@ -3105,9 +3209,10 @@ def main():
                         _film_parts = []
                         if row.get("film_used", "").strip().upper() == "TRUE":
                             if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_x_post_text(row.get("title", ""), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
+                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -3147,9 +3252,10 @@ def main():
                         _film_parts = []
                         if row.get("film_used", "").strip().upper() == "TRUE":
                             if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_bsky_post_text(row.get("title", ""), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
+                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
