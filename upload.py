@@ -923,7 +923,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
 
 # ── VK Upload (Playwright) ────────────────────────────────────
-def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", no_submit=False):
+def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", photographer="", model_name="", no_submit=False):
     """
     Post a photo to the VK wall via browser automation, then suggest to VK groups.
     Flow: feed → Create post → write caption → upload photo → Next → Publish → groups.
@@ -1132,14 +1132,18 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     if not group_slugs:
         return wall_result
 
-    # Build group caption (without @mentions — those are handled via autocomplete in the group function)
-    # desc_full already contains film info; if a separate vk_group_caption is provided, append film_info
+    # Build group caption — always assembled from parts, never falls back to full wall post
+    _grp_parts = []
+    if photographer:
+        handle = photographer.strip().lstrip("@")
+        _grp_parts.append(f"Photographer: [@{handle}]")
+    if model_name:
+        _grp_parts.append(f"Model: {model_name.strip()}")
     if vk_group_caption.strip():
-        group_caption_text = vk_group_caption.strip()
-        if film_info:
-            group_caption_text += "\n\n" + film_info
-    else:
-        group_caption_text = desc_full
+        _grp_parts.append(vk_group_caption.strip())
+    if film_info:
+        _grp_parts.append(film_info)
+    group_caption_text = "\n\n".join(_grp_parts)
 
     group_results = []
     for slug in group_slugs:
@@ -3191,6 +3195,8 @@ def main():
                                 vk_groups=vk_groups,
                                 vk_group_caption=vk_group_caption,
                                 film_info="\n".join(_vk_film_parts),
+                                photographer=config.get("accounts", {}).get("vk", ""),
+                                model_name=row.get("model_name", "").strip(),
                                 no_submit=args.no_submit,
                             )
                         except Exception as e:
