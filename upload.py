@@ -2976,6 +2976,8 @@ def main():
                     "--no-default-browser-check",
                 ],
                 viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
             )
             page = ctx.new_page()
             # Hide automation flags so sites like X.com don't block login
@@ -3058,6 +3060,8 @@ def main():
             ],
             viewport={"width": 1280, "height": 900},
             slow_mo=100,
+            timezone_id="Asia/Jerusalem",
+            locale="en-IL",
         )
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
