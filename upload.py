@@ -1228,6 +1228,63 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     except Exception:
         pass
 
+    # Clear any silently-restored draft (VK restores drafts without prompting).
+    # If the caption area already has text, or photo attachments exist, clear them
+    # before adding new content — otherwise we get duplicate text and a carousel.
+    try:
+        draft_state = page.evaluate("""() => {
+            let hasText = false, hasPhotos = false;
+            // Find largest visible contenteditable (caption area)
+            for (const el of document.querySelectorAll('[contenteditable="true"],[role="textbox"]')) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 100 && r.height > 10 && r.top > 50 && r.top < window.innerHeight) {
+                    if (el.textContent.trim().length > 0) { hasText = true; break; }
+                }
+            }
+            // Any img tags inside the compose area indicate an attached photo
+            const compose = document.querySelector('[class*="PostForm"],[class*="wall_post"],[class*="compose"]');
+            if (compose && compose.querySelectorAll('img').length > 0) hasPhotos = true;
+            return { hasText, hasPhotos };
+        }""")
+        if draft_state.get("hasText") or draft_state.get("hasPhotos"):
+            print(f"    Silent draft detected (text={draft_state['hasText']}, photos={draft_state['hasPhotos']}) — clearing...")
+            if draft_state.get("hasText"):
+                # Focus and select-all-delete the caption area
+                page.evaluate("""() => {
+                    for (const el of document.querySelectorAll('[contenteditable="true"],[role="textbox"]')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width > 100 && r.height > 10 && r.top > 50 && r.top < window.innerHeight) {
+                            el.focus(); el.click();
+                            document.execCommand('selectAll');
+                            document.execCommand('delete');
+                            break;
+                        }
+                    }
+                }""")
+                page.wait_for_timeout(300)
+            if draft_state.get("hasPhotos"):
+                # Click every visible remove/close/delete button in the compose area
+                removed = page.evaluate("""() => {
+                    let count = 0;
+                    for (const el of document.querySelectorAll('button,[role="button"]')) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) continue;
+                        const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+                        const cls = (el.className || '').toLowerCase();
+                        const txt = (el.textContent || '').trim().toLowerCase();
+                        if (lbl.includes('remove') || lbl.includes('delete') || lbl.includes('close') ||
+                            cls.includes('remove') || cls.includes('delete') ||
+                            txt === '×' || txt === '✕' || txt === 'x') {
+                            el.click(); count++;
+                        }
+                    }
+                    return count;
+                }""")
+                print(f"      Clicked {removed} remove button(s) on existing attachments")
+                page.wait_for_timeout(1000)
+    except Exception as e:
+        print(f"    Could not clear silent draft: {e}")
+
     # Split at signature separator so @mentions land between caption and signature
     _SIG_SEP = "\n\n---\n"
     if _SIG_SEP in caption:
