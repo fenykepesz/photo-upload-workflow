@@ -1423,10 +1423,58 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         print(f"    --no-submit: skipping suggest")
         return {"success": True, "error": "", "no_submit": True}
 
-    # Click "Suggest post" — multiple matches exist on page (group wall + dialog button).
-    # Pick the one with the HIGHEST Y value — that's the one inside the Settings dialog at bottom.
+    # Click the submit button inside the Settings dialog.
+    # Strategy: scope search to the topmost visible [role="dialog"] — this avoids matching
+    # the group wall's "Suggest post" trigger button which is still in the DOM behind the dialog.
+    # Within the dialog: try action-text match first, fall back to bottom-right button.
     print(f"    Submitting suggestion...")
     coords = page.evaluate("""() => {
+        // Find topmost visible dialog (Settings dialog opened by Next)
+        const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+        const visible = dialogs.filter(d => {
+            const r = d.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        });
+
+        if (visible.length > 0) {
+            const dialog = visible[visible.length - 1];
+
+            // Try 1: leaf element with action text inside dialog
+            const actionRe = /suggest|submit|publish|send|предложить|отправить/i;
+            const all = Array.from(dialog.querySelectorAll('*'));
+            const textMatches = [];
+            for (const el of all) {
+                if (el.children.length !== 0) continue;
+                const t = el.textContent.trim();
+                if (!actionRe.test(t)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) continue;
+                textMatches.push({el, docY: r.top + window.scrollY, x: r.left + r.width/2, y: r.top + r.height/2, text: t});
+            }
+            if (textMatches.length > 0) {
+                textMatches.sort((a, b) => b.docY - a.docY || b.x - a.x);
+                const t = textMatches[0];
+                t.el.scrollIntoView({block: 'center', behavior: 'instant'});
+                const r2 = t.el.getBoundingClientRect();
+                return {x: r2.left + r2.width/2, y: r2.top + r2.height/2, text: t.text, method: 'dialog-text'};
+            }
+
+            // Try 2: bottom-right button in dialog (primary action position)
+            const btns = Array.from(dialog.querySelectorAll('button, [role="button"]'))
+                .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+            if (btns.length > 0) {
+                btns.sort((a, b) => {
+                    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+                    return (rb.top + window.scrollY) - (ra.top + window.scrollY) || rb.right - ra.right;
+                });
+                const btn = btns[0];
+                btn.scrollIntoView({block: 'center', behavior: 'instant'});
+                const r2 = btn.getBoundingClientRect();
+                return {x: r2.left + r2.width/2, y: r2.top + r2.height/2, text: btn.textContent.trim(), method: 'dialog-button'};
+            }
+        }
+
+        // Fallback: whole-page text match, highest document-Y (deepest = inside dialog)
         const all = Array.from(document.querySelectorAll('*'));
         const matches = [];
         for (const el of all) {
@@ -1435,30 +1483,36 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                 && el.children.length === 0) {
                 const r = el.getBoundingClientRect();
                 if (r.width > 0 && r.height > 0) {
-                    // Use document-absolute Y so off-screen elements are ranked correctly
-                    matches.push({el, docY: r.top + window.scrollY, text: t});
+                    matches.push({el, docY: r.top + window.scrollY, x: r.left + r.width/2, y: r.top + r.height/2, text: t});
                 }
             }
         }
         if (matches.length === 0) return null;
-        // The dialog button is deepest in the document — pick highest docY
         matches.sort((a, b) => b.docY - a.docY);
-        const target = matches[0].el;
-        // Scroll into view so the element is guaranteed inside the viewport
-        target.scrollIntoView({block: 'center', behavior: 'instant'});
-        // Get fresh viewport-relative coordinates after scroll
-        const r2 = target.getBoundingClientRect();
-        return {x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, text: matches[0].text};
+        const target = matches[0];
+        target.el.scrollIntoView({block: 'center', behavior: 'instant'});
+        const r2 = target.el.getBoundingClientRect();
+        return {x: r2.left + r2.width/2, y: r2.top + r2.height/2, text: target.text, method: 'fallback'};
     }""")
     if not coords:
-        return {"success": False, "error": f"Could not find Suggest post button in {group_slug}"}
-    print(f"      Found '{coords['text']}' at ({coords['x']:.0f}, {coords['y']:.0f}) — clicking via mouse")
+        return {"success": False, "error": f"Could not find submit button in {group_slug}"}
+    print(f"      Found '{coords['text']}' via {coords.get('method','?')} at ({coords['x']:.0f}, {coords['y']:.0f}) — clicking via mouse")
     page.wait_for_timeout(500)  # let scroll settle before clicking
     page.mouse.click(coords["x"], coords["y"])
 
-    page.wait_for_timeout(5000)
-    print(f"    Suggested to {group_slug}")
-    return {"success": True, "error": ""}
+    # Verify success: the Settings dialog should close within 8s
+    try:
+        page.wait_for_function("""() => {
+            const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+            return !dialogs.some(d => {
+                const r = d.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            });
+        }""", timeout=8000)
+        print(f"    Suggested to {group_slug}")
+        return {"success": True, "error": ""}
+    except Exception:
+        return {"success": False, "error": f"Dialog did not close after submit click in {group_slug} — wrong button may have been clicked"}
 
 
 # ── X.com Upload (Playwright) ─────────────────────────────────
