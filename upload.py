@@ -1423,7 +1423,8 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         print(f"    --no-submit: skipping suggest")
         return {"success": True, "error": "", "no_submit": True}
 
-    # Enable "Author's name" toggle in the Settings dialog (if present and not already on)
+    # Enable "Author's name" toggle in the Settings dialog (if present and not already on).
+    # VK uses a custom toggle component — search by class pattern and by label proximity.
     author_toggled = page.evaluate("""() => {
         const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
         const visible = dialogs.filter(d => {
@@ -1432,28 +1433,45 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         });
         if (visible.length === 0) return 'no-dialog';
         const dialog = visible[visible.length - 1];
-        // Find the Author's name label, then locate the toggle switch near it
+
+        // Helper: check/set toggle state and click if off
+        function tryToggle(toggle) {
+            if (!toggle) return null;
+            const isOn = toggle.checked !== undefined ? toggle.checked
+                       : toggle.getAttribute('aria-checked') === 'true'
+                       || toggle.getAttribute('aria-pressed') === 'true'
+                       || toggle.classList.toString().includes('on')
+                       || toggle.classList.toString().includes('active');
+            if (!isOn) { toggle.click(); return 'clicked'; }
+            return 'already-on';
+        }
+
+        // Strategy 1: find by label text (English or Russian), walk up to find toggle
+        const labelRe = /author.{0,5}name|имя автора|подпись автора/i;
         const all = Array.from(dialog.querySelectorAll('*'));
         for (const el of all) {
-            if (el.children.length === 0 && /author.s name/i.test(el.textContent.trim())) {
-                // Walk up to find a container with a toggle (input[type=checkbox] or [role=switch])
-                let parent = el.parentElement;
-                for (let i = 0; i < 6; i++) {
-                    if (!parent) break;
-                    const toggle = parent.querySelector('input[type="checkbox"], [role="switch"]');
-                    if (toggle) {
-                        const isOn = toggle.type === 'checkbox' ? toggle.checked
-                                   : toggle.getAttribute('aria-checked') === 'true';
-                        if (!isOn) {
-                            toggle.click();
-                            return 'clicked';
-                        }
-                        return 'already-on';
-                    }
-                    parent = parent.parentElement;
-                }
+            const t = el.textContent.trim();
+            if (t.length > 50) continue;  // skip large containers
+            if (!labelRe.test(t)) continue;
+            let parent = el.parentElement;
+            for (let i = 0; i < 8; i++) {
+                if (!parent || parent === dialog) break;
+                const toggle = parent.querySelector(
+                    'input[type="checkbox"], [role="switch"], [role="checkbox"],' +
+                    ' [class*="Switch"], [class*="switch"], [class*="Toggle"], [class*="toggle"]'
+                );
+                if (toggle) return tryToggle(toggle);
+                parent = parent.parentElement;
             }
         }
+
+        // Strategy 2: any toggle in dialog not already on (last resort)
+        const toggles = Array.from(dialog.querySelectorAll(
+            'input[type="checkbox"], [role="switch"], [role="checkbox"],' +
+            ' [class*="Switch__"], [class*="switch__"]'
+        ));
+        if (toggles.length === 1) return tryToggle(toggles[0]);
+
         return 'not-found';
     }""")
     print(f"    Author's name toggle: {author_toggled}")
