@@ -1186,6 +1186,17 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         return {"success": False, "error": f"Timeout loading {group_url}"}
     page.wait_for_timeout(3000)
 
+    # Dismiss "Leave without saving?" dialog if VK shows it after navigating away
+    # from a previous group's unsaved compose session
+    try:
+        leave_btn = page.locator('button:has-text("Leave without saving"), button:has-text("Leave")')
+        if leave_btn.count() > 0:
+            leave_btn.first.click(timeout=3000)
+            print(f"    Dismissed 'Leave without saving?' dialog")
+            page.wait_for_timeout(1000)
+    except Exception:
+        pass
+
     # Check the page loaded (not a 404 or redirect)
     if "/404" in page.url:
         return {"success": False, "error": f"Group not found: {group_slug}"}
@@ -1377,8 +1388,14 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     page.wait_for_timeout(500)  # let scroll settle before clicking
     page.mouse.click(coords["x"], coords["y"])
 
-    page.wait_for_timeout(5000)
-    print(f"    Suggested to {group_slug}")
+    # Wait for the compose dialog to close before proceeding to the next group
+    try:
+        page.wait_for_selector('[role="dialog"]', state="hidden", timeout=15000)
+        print(f"    Compose dialog closed — post submitted to {group_slug}")
+    except Exception:
+        # Dialog may have already closed or selector didn't match — wait a fixed amount
+        page.wait_for_timeout(5000)
+        print(f"    Suggested to {group_slug} (dialog close not detected)")
     return {"success": True, "error": ""}
 
 
