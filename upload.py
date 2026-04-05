@@ -1423,59 +1423,67 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         print(f"    --no-submit: skipping suggest")
         return {"success": True, "error": "", "no_submit": True}
 
-    # Enable "Author's name" toggle in the Settings dialog (if present and not already on).
-    # VK uses a custom toggle component — search by class pattern and by label proximity.
-    author_toggled = page.evaluate("""() => {
+    # Enable "Author's name" toggle in the Settings dialog via real mouse click.
+    # JS .click() does not work on VK's custom toggle — must use page.mouse.click().
+    # JS returns coordinates of the toggle element (or debug info if not found).
+    author_info = page.evaluate("""() => {
         const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
         const visible = dialogs.filter(d => {
             const r = d.getBoundingClientRect();
             return r.width > 0 && r.height > 0;
         });
-        if (visible.length === 0) return 'no-dialog';
+        if (visible.length === 0) return {status: 'no-dialog'};
         const dialog = visible[visible.length - 1];
 
-        // Helper: check/set toggle state and click if off
-        function tryToggle(toggle) {
-            if (!toggle) return null;
-            const isOn = toggle.checked !== undefined ? toggle.checked
-                       : toggle.getAttribute('aria-checked') === 'true'
-                       || toggle.getAttribute('aria-pressed') === 'true'
-                       || toggle.classList.toString().includes('on')
-                       || toggle.classList.toString().includes('active');
-            if (!isOn) { toggle.click(); return 'clicked'; }
-            return 'already-on';
-        }
-
-        // Strategy 1: find by label text (English or Russian), walk up to find toggle
-        const labelRe = /author.{0,5}name|имя автора|подпись автора/i;
+        // Collect all elements in dialog for debugging if needed
         const all = Array.from(dialog.querySelectorAll('*'));
+
+        // Strategy 1: find by label text (English or Russian), walk up to find toggle element
+        const labelRe = /author.{0,5}name|имя автора|подпись автора/i;
         for (const el of all) {
             const t = el.textContent.trim();
-            if (t.length > 50) continue;  // skip large containers
+            if (t.length > 60) continue;
             if (!labelRe.test(t)) continue;
             let parent = el.parentElement;
-            for (let i = 0; i < 8; i++) {
+            for (let i = 0; i < 10; i++) {
                 if (!parent || parent === dialog) break;
                 const toggle = parent.querySelector(
                     'input[type="checkbox"], [role="switch"], [role="checkbox"],' +
                     ' [class*="Switch"], [class*="switch"], [class*="Toggle"], [class*="toggle"]'
                 );
-                if (toggle) return tryToggle(toggle);
+                if (toggle) {
+                    toggle.scrollIntoView({block: 'center', behavior: 'instant'});
+                    const r = toggle.getBoundingClientRect();
+                    return {status: 'found', x: r.left + r.width/2, y: r.top + r.height/2,
+                            cls: toggle.className, tag: toggle.tagName};
+                }
                 parent = parent.parentElement;
             }
         }
 
-        // Strategy 2: any toggle in dialog not already on (last resort)
+        // Strategy 2: single toggle anywhere in dialog
         const toggles = Array.from(dialog.querySelectorAll(
             'input[type="checkbox"], [role="switch"], [role="checkbox"],' +
-            ' [class*="Switch__"], [class*="switch__"]'
-        ));
-        if (toggles.length === 1) return tryToggle(toggles[0]);
+            ' [class*="Switch__"], [class*="switch__"], [class*="Toggle__"], [class*="toggle__"]'
+        )).filter(t => { const r = t.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+        if (toggles.length === 1) {
+            const toggle = toggles[0];
+            toggle.scrollIntoView({block: 'center', behavior: 'instant'});
+            const r = toggle.getBoundingClientRect();
+            return {status: 'found-single', x: r.left + r.width/2, y: r.top + r.height/2,
+                    cls: toggle.className, tag: toggle.tagName};
+        }
 
-        return 'not-found';
+        // Debug: dump class names of all elements in dialog to help identify the toggle
+        const classes = [...new Set(all.map(e => e.className).filter(c => typeof c === 'string' && c.includes('witch') || typeof c === 'string' && c.includes('oggle') || typeof c === 'string' && c.includes('heck')))];
+        return {status: 'not-found', toggleCount: toggles.length, clues: classes.slice(0, 10)};
     }""")
-    print(f"    Author's name toggle: {author_toggled}")
-    if author_toggled == 'clicked':
+    print(f"    Author's name toggle: {author_info.get('status')} "
+          + (f"({author_info.get('tag')} {author_info.get('cls','')})" if author_info.get('x') else str(author_info.get('clues', ''))))
+    if author_info.get('x'):
+        page.wait_for_timeout(300)
+        page.mouse.click(author_info['x'], author_info['y'])
+        print(f"      Clicked toggle at ({author_info['x']:.0f}, {author_info['y']:.0f})")
         page.wait_for_timeout(500)
 
     # Click the submit button inside the Settings dialog.
@@ -1552,7 +1560,7 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     if not coords:
         return {"success": False, "error": f"Could not find submit button in {group_slug}"}
     print(f"      Found '{coords['text']}' via {coords.get('method','?')} at ({coords['x']:.0f}, {coords['y']:.0f}) — clicking via mouse")
-    page.wait_for_timeout(500)  # let scroll settle before clicking
+    page.wait_for_timeout(2000)  # pause before clicking — lets toggle settle and allows visual check
     page.mouse.click(coords["x"], coords["y"])
 
     # Verify success: the Settings dialog should close within 8s
