@@ -1218,6 +1218,16 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                 return {"success": False, "error": f"Could not find 'Suggest post' button in {group_slug}"}
     page.wait_for_timeout(2000)
 
+    # Handle stuck draft — click "Start over" if VK shows a saved draft dialog
+    try:
+        start_over = page.locator('text="Start over"')
+        if start_over.count() > 0 and start_over.first.is_visible():
+            print(f"    Draft dialog found — clicking 'Start over'")
+            start_over.first.click()
+            page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
     # Split at signature separator so @mentions land between caption and signature
     _SIG_SEP = "\n\n---\n"
     if _SIG_SEP in caption:
