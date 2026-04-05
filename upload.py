@@ -1423,6 +1423,43 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         print(f"    --no-submit: skipping suggest")
         return {"success": True, "error": "", "no_submit": True}
 
+    # Enable "Author's name" toggle in the Settings dialog (if present and not already on)
+    author_toggled = page.evaluate("""() => {
+        const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+        const visible = dialogs.filter(d => {
+            const r = d.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        });
+        if (visible.length === 0) return 'no-dialog';
+        const dialog = visible[visible.length - 1];
+        // Find the Author's name label, then locate the toggle switch near it
+        const all = Array.from(dialog.querySelectorAll('*'));
+        for (const el of all) {
+            if (el.children.length === 0 && /author.s name/i.test(el.textContent.trim())) {
+                // Walk up to find a container with a toggle (input[type=checkbox] or [role=switch])
+                let parent = el.parentElement;
+                for (let i = 0; i < 6; i++) {
+                    if (!parent) break;
+                    const toggle = parent.querySelector('input[type="checkbox"], [role="switch"]');
+                    if (toggle) {
+                        const isOn = toggle.type === 'checkbox' ? toggle.checked
+                                   : toggle.getAttribute('aria-checked') === 'true';
+                        if (!isOn) {
+                            toggle.click();
+                            return 'clicked';
+                        }
+                        return 'already-on';
+                    }
+                    parent = parent.parentElement;
+                }
+            }
+        }
+        return 'not-found';
+    }""")
+    print(f"    Author's name toggle: {author_toggled}")
+    if author_toggled == 'clicked':
+        page.wait_for_timeout(500)
+
     # Click the submit button inside the Settings dialog.
     # Strategy: scope search to the topmost visible [role="dialog"] — this avoids matching
     # the group wall's "Suggest post" trigger button which is still in the DOM behind the dialog.
