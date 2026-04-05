@@ -1136,7 +1136,7 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     _grp_parts = []
     if photographer:
         handle = photographer.strip().lstrip("@")
-        _grp_parts.append(f"Photographer: [@{handle}]")
+        _grp_parts.append(f"Photographer: @{handle}")
     if model_name:
         _grp_parts.append(f"Model: {model_name.strip()}")
     if vk_group_caption.strip():
@@ -1356,18 +1356,25 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                 && el.children.length === 0) {
                 const r = el.getBoundingClientRect();
                 if (r.width > 0 && r.height > 0) {
-                    matches.push({x: r.left + r.width / 2, y: r.top + r.height / 2, text: t});
+                    // Use document-absolute Y so off-screen elements are ranked correctly
+                    matches.push({el, docY: r.top + window.scrollY, text: t});
                 }
             }
         }
         if (matches.length === 0) return null;
-        // The dialog button is at the bottom of the screen — pick highest Y
-        matches.sort((a, b) => b.y - a.y);
-        return matches[0];
+        // The dialog button is deepest in the document — pick highest docY
+        matches.sort((a, b) => b.docY - a.docY);
+        const target = matches[0].el;
+        // Scroll into view so the element is guaranteed inside the viewport
+        target.scrollIntoView({block: 'center', behavior: 'instant'});
+        // Get fresh viewport-relative coordinates after scroll
+        const r2 = target.getBoundingClientRect();
+        return {x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, text: matches[0].text};
     }""")
     if not coords:
         return {"success": False, "error": f"Could not find Suggest post button in {group_slug}"}
     print(f"      Found '{coords['text']}' at ({coords['x']:.0f}, {coords['y']:.0f}) — clicking via mouse")
+    page.wait_for_timeout(500)  # let scroll settle before clicking
     page.mouse.click(coords["x"], coords["y"])
 
     page.wait_for_timeout(5000)
