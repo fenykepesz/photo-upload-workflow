@@ -79,6 +79,7 @@ def parse_args():
     p.add_argument("--profile", type=Path, default=BROWSER_PROFILE, help="Browser profile directory")
     p.add_argument("--login", action="store_true", help="Open browser to log into DeviantArt (first-time setup)")
     p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
+    p.add_argument("--clear-vk-drafts", action="store_true", help="Open browser and clear stuck VK group drafts")
     return p.parse_args()
 
 
@@ -3069,6 +3070,53 @@ def main():
             input()
             ctx.close()
         print("Logins saved. You can now run: python upload.py --no-submit")
+        sys.exit(0)
+
+    # Clear VK drafts mode
+    if args.clear_vk_drafts:
+        print(f"Opening browser to clear VK drafts (profile: {args.profile})")
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(args.profile),
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
+            )
+            page = ctx.new_page()
+            page.goto("https://vk.com", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
+
+            # Attempt programmatic clear of VK's localStorage and IndexedDB
+            result = page.evaluate("""async () => {
+                const cleared = [];
+                // Clear localStorage
+                const lsCount = localStorage.length;
+                localStorage.clear();
+                cleared.push('localStorage (' + lsCount + ' keys)');
+                // Clear sessionStorage
+                sessionStorage.clear();
+                cleared.push('sessionStorage');
+                // Clear all IndexedDB databases
+                try {
+                    const dbs = await indexedDB.databases();
+                    for (const db of dbs) {
+                        indexedDB.deleteDatabase(db.name);
+                    }
+                    cleared.push('IndexedDB (' + dbs.length + ' databases)');
+                } catch(e) {
+                    cleared.push('IndexedDB (error: ' + e.message + ')');
+                }
+                return cleared;
+            }""")
+            print("Cleared: " + ", ".join(result))
+            print("\nIf drafts are still visible, clear them manually:")
+            print("  DevTools (F12) → Application → Storage → Clear site data")
+            print("\nPress ENTER when done...")
+            input()
+            ctx.close()
+        print("VK drafts cleared. You can now run the upload.")
         sys.exit(0)
 
     # Load config
