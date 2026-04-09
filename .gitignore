@@ -6,6 +6,9 @@ da_data.json
 # Temporary local photo files used during upload
 temp/
 
+# Persistent image cache — survives re-runs, never committed
+image_cache/
+
 # macOS
 .DS_Store
 

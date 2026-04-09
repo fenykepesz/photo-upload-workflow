@@ -8,9 +8,11 @@ Upload order: 500PX → 35P → VK → X → DA (DA consumes the Sta.sh item on 
 Usage:
     python upload.py                          # all Approved rows with supported platforms
     python upload.py --row PH-2026-001        # specific row only
+    python upload.py --row PH-2026-001 --platform DA   # re-upload one platform only
     python upload.py --dry-run                # preview what would happen
     python upload.py --no-submit              # fill form but don't submit
     python upload.py --csv path/to/queue.csv  # custom CSV path
+    python upload.py --clear-image-cache      # delete all cached images in image_cache/
 """
 
 import argparse
@@ -33,6 +35,7 @@ TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
 SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY"}
 TEMP_DIR = SCRIPT_DIR / "temp"
+IMAGE_CACHE_DIR = SCRIPT_DIR / "image_cache"  # persistent — survives re-runs, never auto-deleted
 
 # Photo-processing wait times (ms) — overridden at runtime from config.json wait_times
 WAIT_TIMES = {
@@ -72,6 +75,8 @@ def parse_args():
         description="Upload approved photos to 500px, 35photo, and DeviantArt via Playwright"
     )
     p.add_argument("--row", help="Upload only this upload_id (e.g. PH-2026-001)")
+    p.add_argument("--platform", metavar="PLATFORM",
+                   help="Restrict to one platform only, e.g. --platform DA (must be used with --row)")
     p.add_argument("--dry-run", action="store_true", help="Preview without launching browser")
     p.add_argument("--no-submit", action="store_true", help="Fill form but don't click Submit")
     p.add_argument("--csv", type=Path, default=DEFAULT_CSV, help="Path to upload_queue.csv")
@@ -80,6 +85,7 @@ def parse_args():
     p.add_argument("--login", action="store_true", help="Open browser to log into DeviantArt (first-time setup)")
     p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
     p.add_argument("--clear-vk-drafts", action="store_true", help="Open browser and clear stuck VK group drafts")
+    p.add_argument("--clear-image-cache", action="store_true", help="Delete all cached images in image_cache/ and exit")
     return p.parse_args()
 
 
@@ -374,9 +380,15 @@ def parse_groups(groups_str):
 def download_stash_image(page, stash_url, upload_id):
     """Navigate to Sta.sh URL, click Download in '...' menu to get the original
     file with EXIF intact.  Uses Playwright's native download handling.
+    Saves to IMAGE_CACHE_DIR (persistent across runs) — if cached copy exists, uses it.
     Returns the local file Path, or None on failure."""
-    TEMP_DIR.mkdir(exist_ok=True)
-    dest = TEMP_DIR / f"{upload_id}.jpg"
+    IMAGE_CACHE_DIR.mkdir(exist_ok=True)
+    dest = IMAGE_CACHE_DIR / f"{upload_id}.jpg"
+
+    # Use cached copy if available (e.g. re-run after DA consumed Sta.sh item)
+    if dest.exists():
+        print(f"  Using cached image: {dest.name} ({dest.stat().st_size / 1024:.0f} KB)")
+        return dest
 
     print(f"  Downloading image from Sta.sh: {stash_url}")
     try:
@@ -3179,6 +3191,17 @@ def main():
         print("Logins saved. You can now run: python upload.py --no-submit")
         sys.exit(0)
 
+    # Clear image cache mode
+    if args.clear_image_cache:
+        if IMAGE_CACHE_DIR.exists():
+            files = list(IMAGE_CACHE_DIR.glob("*.jpg")) + list(IMAGE_CACHE_DIR.glob("*.png"))
+            for f in files:
+                f.unlink()
+            print(f"Deleted {len(files)} cached image(s) from {IMAGE_CACHE_DIR}")
+        else:
+            print("Image cache directory does not exist — nothing to clear.")
+        sys.exit(0)
+
     # Clear VK drafts mode
     if args.clear_vk_drafts:
         print(f"Opening browser to clear VK drafts (profile: {args.profile})")
@@ -3298,6 +3321,12 @@ def main():
                 print(f"{'=' * 60}")
 
                 platforms = get_row_platforms(row)
+                if args.platform:
+                    requested = args.platform.strip().upper()
+                    if requested not in platforms:
+                        print(f"  WARNING: --platform {requested} not in row's platforms ({', '.join(sorted(platforms))}) — skipping")
+                        continue
+                    platforms = {requested}
                 print(f"  Platforms: {', '.join(sorted(platforms))}")
 
                 desc_full = build_description(row, config)
@@ -3582,13 +3611,6 @@ def main():
                                     result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, feeling_fb, tag_people_fb, args.no_submit)
                                 except Exception as e:
                                     result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
-                                finally:
-                                    # Clean up the separate safe image
-                                    if fb_image_path and Path(fb_image_path).exists():
-                                        try:
-                                            Path(fb_image_path).unlink()
-                                        except Exception:
-                                            pass
                         else:
                             # Non-NSFW: use the regular image (already downloaded or download now)
                             if not image_path:
@@ -3656,13 +3678,7 @@ def main():
                         if da_url and da_url not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"da_deviation_url": da_url})
 
-                # ── Clean up temp image ───────────────────────────
-                if image_path and Path(image_path).exists():
-                    try:
-                        Path(image_path).unlink()
-                        print(f"  Cleaned up temp file: {image_path}")
-                    except Exception as e:
-                        print(f"  WARNING: Could not delete temp file: {e}")
+                # Image stays in image_cache/ for re-upload resilience — not auto-deleted.
 
                 # ── Update row status ─────────────────────────────
                 # Check which platforms are now done (either this run or previously)
@@ -3730,12 +3746,6 @@ def main():
                 results_summary.append((row["upload_id"], ", ".join(summary_detail)))
 
         finally:
-            # Clean up temp directory if empty
-            if TEMP_DIR.exists():
-                try:
-                    TEMP_DIR.rmdir()  # only removes if empty
-                except OSError:
-                    pass
             context.close()
 
     # Summary
