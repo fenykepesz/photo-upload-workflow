@@ -13,6 +13,7 @@ Usage:
     python upload.py --no-submit              # fill form but don't submit
     python upload.py --csv path/to/queue.csv  # custom CSV path
     python upload.py --clear-image-cache      # delete all cached images in image_cache/
+    python upload.py --import-x-cookies cookies.json  # import X.com cookies from Cookie-Editor export
 """
 
 import argparse
@@ -86,6 +87,8 @@ def parse_args():
     p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
     p.add_argument("--clear-vk-drafts", action="store_true", help="Open browser and clear stuck VK group drafts")
     p.add_argument("--clear-image-cache", action="store_true", help="Delete all cached images in image_cache/ and exit")
+    p.add_argument("--import-x-cookies", metavar="FILE",
+                   help="Import X.com cookies from a Cookie-Editor JSON export into the browser profile")
     return p.parse_args()
 
 
@@ -3200,6 +3203,56 @@ def main():
             print(f"Deleted {len(files)} cached image(s) from {IMAGE_CACHE_DIR}")
         else:
             print("Image cache directory does not exist — nothing to clear.")
+        sys.exit(0)
+
+    # Import X.com cookies mode
+    if args.import_x_cookies:
+        cookie_file = Path(args.import_x_cookies)
+        if not cookie_file.exists():
+            print(f"ERROR: Cookie file not found: {cookie_file}")
+            sys.exit(1)
+        with open(cookie_file, encoding="utf-8") as f:
+            raw_cookies = json.load(f)
+
+        # Normalise Cookie-Editor export format → Playwright format
+        pw_cookies = []
+        for c in raw_cookies:
+            cookie = {
+                "name":   c["name"],
+                "value":  c["value"],
+                "domain": c.get("domain", ".x.com"),
+                "path":   c.get("path", "/"),
+                "secure": c.get("secure", False),
+                "httpOnly": c.get("httpOnly", False),
+                "sameSite": c.get("sameSite", "None") or "None",
+            }
+            if c.get("expirationDate"):
+                cookie["expires"] = int(c["expirationDate"])
+            pw_cookies.append(cookie)
+
+        print(f"Importing {len(pw_cookies)} cookies into profile...")
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(args.profile),
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
+            )
+            ctx.add_cookies(pw_cookies)
+            page = ctx.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            if "home" in page.url:
+                print("SUCCESS: Logged into X.com.")
+            else:
+                print(f"WARNING: Expected x.com/home but ended up at {page.url}")
+                print("You may not be fully logged in — check the browser window.")
+            print("Press ENTER to close...")
+            input()
+            ctx.close()
         sys.exit(0)
 
     # Clear VK drafts mode
