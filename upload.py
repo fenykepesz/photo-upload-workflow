@@ -31,6 +31,30 @@ try:
 except ImportError:
     def apply_stealth(page): pass  # graceful fallback if not installed
 
+import platform as _platform
+
+def find_chrome():
+    """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
+    system = _platform.system()
+    candidates = []
+    if system == "Windows":
+        candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    elif system == "Darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ]
+    elif system == "Linux":
+        candidates = ["/usr/bin/google-chrome", "/usr/bin/chromium-browser"]
+    for path in candidates:
+        if Path(path).exists():
+            print(f"  Using real Chrome: {path}")
+            return path
+    print("  Real Chrome not found — using Playwright's bundled Chromium")
+    return None
+
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DEFAULT_CSV = SCRIPT_DIR / "upload_queue.csv"
@@ -3155,6 +3179,7 @@ def main():
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(args.profile),
                 headless=False,
+                executable_path=find_chrome(),
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
@@ -3240,6 +3265,7 @@ def main():
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(args.profile),
                 headless=False,
+                executable_path=find_chrome(),
                 args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
@@ -3268,6 +3294,7 @@ def main():
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(args.profile),
                 headless=False,
+                executable_path=find_chrome(),
                 args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
@@ -3347,6 +3374,7 @@ def main():
         context = pw.chromium.launch_persistent_context(
             user_data_dir=str(args.profile),
             headless=False,
+            executable_path=find_chrome(),
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
