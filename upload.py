@@ -25,6 +25,11 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+try:
+    from playwright_stealth import stealth_sync as _stealth_sync
+    def apply_stealth(page): _stealth_sync(page)
+except ImportError:
+    def apply_stealth(page): pass  # graceful fallback if not installed
 
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -3160,8 +3165,8 @@ def main():
                 locale="en-IL",
             )
             page = ctx.new_page()
-            # Hide automation flags so sites like X.com don't block login
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            apply_stealth(page)
             def login_step(url, msg, next_msg):
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 print(msg)
@@ -3237,6 +3242,7 @@ def main():
             ctx.add_cookies(pw_cookies)
             page = ctx.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            apply_stealth(page)
             page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(3000)
             if "home" in page.url:
@@ -3347,6 +3353,7 @@ def main():
         )
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        apply_stealth(page)
 
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
