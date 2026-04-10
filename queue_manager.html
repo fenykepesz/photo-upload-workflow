@@ -2853,31 +2853,35 @@ Return ONLY valid JSON, no markdown fences:
     }
 
     async function saveConfigFile() {
-      const obj = {
-        social_links: {
-          web: document.getElementById('s-sl-web').value.trim(),
-          instagram: document.getElementById('s-sl-instagram').value.trim(),
-          '500px': document.getElementById('s-sl-500px').value.trim(),
-          deviantart: document.getElementById('s-sl-deviantart').value.trim(),
-        },
-        accounts: {
-          deviantart: document.getElementById('s-acc-deviantart').value.trim(),
-          '500px': document.getElementById('s-acc-500px').value.trim(),
-          '35photo': document.getElementById('s-acc-35photo').value.trim(),
-          vk: document.getElementById('s-acc-vk').value.trim(),
-          x: document.getElementById('s-acc-x').value.trim(),
-          bluesky: document.getElementById('s-acc-bsky').value.trim(),
-          facebook: document.getElementById('s-acc-facebook').value.trim(),
-        },
-        wait_times: {
-          '500px':    parseInt(document.getElementById('wt-500px').value)    || 30,
-          '35photo':  parseInt(document.getElementById('wt-35photo').value)  || 30,
-          'vk':       parseInt(document.getElementById('wt-vk').value)       || 20,
-          'vk_group': parseInt(document.getElementById('wt-vk-group').value) || 20,
-          'x':        parseInt(document.getElementById('wt-x').value)        || 5,
-          'bluesky':  parseInt(document.getElementById('wt-bluesky').value)  || 10,
-          'facebook': parseInt(document.getElementById('wt-facebook').value) || 15,
-        }
+      // Start from existing configData so fields not visible in the UI are preserved.
+      // Then overlay with current DOM values so edits are captured.
+      const obj = JSON.parse(JSON.stringify(configData || {}));
+      obj.social_links = {
+        ...(obj.social_links || {}),
+        web: document.getElementById('s-sl-web').value.trim(),
+        instagram: document.getElementById('s-sl-instagram').value.trim(),
+        '500px': document.getElementById('s-sl-500px').value.trim(),
+        deviantart: document.getElementById('s-sl-deviantart').value.trim(),
+      };
+      obj.accounts = {
+        ...(obj.accounts || {}),
+        deviantart: document.getElementById('s-acc-deviantart').value.trim(),
+        '500px': document.getElementById('s-acc-500px').value.trim(),
+        '35photo': document.getElementById('s-acc-35photo').value.trim(),
+        vk: document.getElementById('s-acc-vk').value.trim(),
+        x: document.getElementById('s-acc-x').value.trim(),
+        bluesky: document.getElementById('s-acc-bsky').value.trim(),
+        facebook: document.getElementById('s-acc-facebook').value.trim(),
+      };
+      obj.wait_times = {
+        ...(obj.wait_times || {}),
+        '500px':    parseInt(document.getElementById('wt-500px').value)    || 30,
+        '35photo':  parseInt(document.getElementById('wt-35photo').value)  || 30,
+        'vk':       parseInt(document.getElementById('wt-vk').value)       || 20,
+        'vk_group': parseInt(document.getElementById('wt-vk-group').value) || 20,
+        'x':        parseInt(document.getElementById('wt-x').value)        || 5,
+        'bluesky':  parseInt(document.getElementById('wt-bluesky').value)  || 10,
+        'facebook': parseInt(document.getElementById('wt-facebook').value) || 15,
       };
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
