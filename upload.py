@@ -13,6 +13,7 @@ Usage:
     python upload.py --no-submit              # fill form but don't submit
     python upload.py --csv path/to/queue.csv  # custom CSV path
     python upload.py --clear-image-cache      # delete all cached images in image_cache/
+    python upload.py --import-x-cookies cookies.json  # import X.com cookies from Cookie-Editor export
 """
 
 import argparse
@@ -24,6 +25,35 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+try:
+    from playwright_stealth import stealth_sync as _stealth_sync
+    def apply_stealth(page): _stealth_sync(page)
+except ImportError:
+    def apply_stealth(page): pass  # graceful fallback if not installed
+
+import platform as _platform
+
+def find_chrome():
+    """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
+    system = _platform.system()
+    candidates = []
+    if system == "Windows":
+        candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    elif system == "Darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ]
+    elif system == "Linux":
+        candidates = ["/usr/bin/google-chrome", "/usr/bin/chromium-browser"]
+    for path in candidates:
+        if Path(path).exists():
+            print(f"  Using real Chrome: {path}")
+            return path
+    print("  Real Chrome not found — using Playwright's bundled Chromium")
+    return None
 
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -86,6 +116,8 @@ def parse_args():
     p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
     p.add_argument("--clear-vk-drafts", action="store_true", help="Open browser and clear stuck VK group drafts")
     p.add_argument("--clear-image-cache", action="store_true", help="Delete all cached images in image_cache/ and exit")
+    p.add_argument("--import-x-cookies", metavar="FILE",
+                   help="Import X.com cookies from a Cookie-Editor JSON export into the browser profile")
     return p.parse_args()
 
 
@@ -3147,6 +3179,7 @@ def main():
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(args.profile),
                 headless=False,
+                executable_path=find_chrome(),
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
@@ -3157,36 +3190,36 @@ def main():
                 locale="en-IL",
             )
             page = ctx.new_page()
-            # Hide automation flags so sites like X.com don't block login
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            page.goto("https://500px.com/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into 500px in the browser window.")
-            print("Press ENTER when done (will open 35photo next)...")
-            input()
-            page.goto("https://35photo.pro/login/", wait_until="domcontentloaded", timeout=30000)
-            print("Log into 35photo in the browser window.")
-            print("Press ENTER when done (will open VK next)...")
-            input()
-            page.goto("https://vk.com/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into VK in the browser window.")
-            print("Press ENTER when done (will open X next)...")
-            input()
-            page.goto("https://x.com/login", wait_until="domcontentloaded", timeout=30000)
+            apply_stealth(page)
+            def login_step(url, msg, next_msg):
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                print(msg)
+                print(f"Press ENTER when done ({next_msg})...")
+                input()
+                # Wait for any in-progress redirects (e.g. Facebook 2FA) to settle
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(1000)
+
+            login_step("https://500px.com/login",         "Log into 500px in the browser window.",    "will open 35photo next")
+            login_step("https://35photo.pro/login/",      "Log into 35photo in the browser window.",  "will open VK next")
+            login_step("https://vk.com/login",            "Log into VK in the browser window.",       "will open X next")
+            page.goto("https://x.com", wait_until="domcontentloaded", timeout=30000)
             print("Log into X.com in the browser window.")
+            print("  → Click 'Sign in' on the page yourself")
             print("Press ENTER when done (will open Bluesky next)...")
             input()
-            page.goto("https://bsky.app/", wait_until="domcontentloaded", timeout=30000)
-            print("Log into Bluesky in the browser window.")
-            print("Press ENTER when done (will open Facebook next)...")
-            input()
-            page.goto("https://www.facebook.com/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into Facebook in the browser window.")
-            print("Press ENTER when done (will open DeviantArt next)...")
-            input()
-            page.goto("https://www.deviantart.com/users/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into DeviantArt in the browser window.")
-            print("Press ENTER when done...")
-            input()
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1000)
+            login_step("https://bsky.app/",                      "Log into Bluesky in the browser window.",     "will open Facebook next")
+            login_step("https://www.facebook.com/login",         "Log into Facebook in the browser window.",    "will open DeviantArt next")
+            login_step("https://www.deviantart.com/users/login", "Log into DeviantArt in the browser window.",  "press ENTER to finish")
             ctx.close()
         print("Logins saved. You can now run: python upload.py --no-submit")
         sys.exit(0)
@@ -3202,6 +3235,58 @@ def main():
             print("Image cache directory does not exist — nothing to clear.")
         sys.exit(0)
 
+    # Import X.com cookies mode
+    if args.import_x_cookies:
+        cookie_file = Path(args.import_x_cookies)
+        if not cookie_file.exists():
+            print(f"ERROR: Cookie file not found: {cookie_file}")
+            sys.exit(1)
+        with open(cookie_file, encoding="utf-8") as f:
+            raw_cookies = json.load(f)
+
+        # Normalise Cookie-Editor export format → Playwright format
+        pw_cookies = []
+        for c in raw_cookies:
+            cookie = {
+                "name":   c["name"],
+                "value":  c["value"],
+                "domain": c.get("domain", ".x.com"),
+                "path":   c.get("path", "/"),
+                "secure": c.get("secure", False),
+                "httpOnly": c.get("httpOnly", False),
+                "sameSite": c.get("sameSite", "None") or "None",
+            }
+            if c.get("expirationDate"):
+                cookie["expires"] = int(c["expirationDate"])
+            pw_cookies.append(cookie)
+
+        print(f"Importing {len(pw_cookies)} cookies into profile...")
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(args.profile),
+                headless=False,
+                executable_path=find_chrome(),
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
+            )
+            ctx.add_cookies(pw_cookies)
+            page = ctx.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            apply_stealth(page)
+            page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            if "home" in page.url:
+                print("SUCCESS: Logged into X.com.")
+            else:
+                print(f"WARNING: Expected x.com/home but ended up at {page.url}")
+                print("You may not be fully logged in — check the browser window.")
+            print("Press ENTER to close...")
+            input()
+            ctx.close()
+        sys.exit(0)
+
     # Clear VK drafts mode
     if args.clear_vk_drafts:
         print(f"Opening browser to clear VK drafts (profile: {args.profile})")
@@ -3209,6 +3294,7 @@ def main():
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(args.profile),
                 headless=False,
+                executable_path=find_chrome(),
                 args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
@@ -3288,6 +3374,7 @@ def main():
         context = pw.chromium.launch_persistent_context(
             user_data_dir=str(args.profile),
             headless=False,
+            executable_path=find_chrome(),
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
@@ -3300,6 +3387,7 @@ def main():
         )
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        apply_stealth(page)
 
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
