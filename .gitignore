@@ -25,6 +25,12 @@ chrome-profile/
 # Error screenshots from upload.py
 error_*.png
 
+# Python virtual environments and bytecode — platform-specific, never sync
+.venv/
+venv/
+__pycache__/
+*.pyc
+
 # Old / test files
 test_queue.csv
 upload_queue_old.csv
