@@ -3162,35 +3162,34 @@ def main():
             page = ctx.new_page()
             # Hide automation flags so sites like X.com don't block login
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            page.goto("https://500px.com/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into 500px in the browser window.")
-            print("Press ENTER when done (will open 35photo next)...")
-            input()
-            page.goto("https://35photo.pro/login/", wait_until="domcontentloaded", timeout=30000)
-            print("Log into 35photo in the browser window.")
-            print("Press ENTER when done (will open VK next)...")
-            input()
-            page.goto("https://vk.com/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into VK in the browser window.")
-            print("Press ENTER when done (will open X next)...")
-            input()
+            def login_step(url, msg, next_msg):
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                print(msg)
+                print(f"Press ENTER when done ({next_msg})...")
+                input()
+                # Wait for any in-progress redirects (e.g. Facebook 2FA) to settle
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(1000)
+
+            login_step("https://500px.com/login",         "Log into 500px in the browser window.",    "will open 35photo next")
+            login_step("https://35photo.pro/login/",      "Log into 35photo in the browser window.",  "will open VK next")
+            login_step("https://vk.com/login",            "Log into VK in the browser window.",       "will open X next")
             page.goto("https://x.com", wait_until="domcontentloaded", timeout=30000)
             print("Log into X.com in the browser window.")
             print("  → Click 'Sign in' on the page yourself (do NOT go to x.com/login directly)")
             print("Press ENTER when done (will open Bluesky next)...")
             input()
-            page.goto("https://bsky.app/", wait_until="domcontentloaded", timeout=30000)
-            print("Log into Bluesky in the browser window.")
-            print("Press ENTER when done (will open Facebook next)...")
-            input()
-            page.goto("https://www.facebook.com/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into Facebook in the browser window.")
-            print("Press ENTER when done (will open DeviantArt next)...")
-            input()
-            page.goto("https://www.deviantart.com/users/login", wait_until="domcontentloaded", timeout=30000)
-            print("Log into DeviantArt in the browser window.")
-            print("Press ENTER when done...")
-            input()
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1000)
+            login_step("https://bsky.app/",                      "Log into Bluesky in the browser window.",     "will open Facebook next")
+            login_step("https://www.facebook.com/login",         "Log into Facebook in the browser window.",    "will open DeviantArt next")
+            login_step("https://www.deviantart.com/users/login", "Log into DeviantArt in the browser window.",  "press ENTER to finish")
             ctx.close()
         print("Logins saved. You can now run: python upload.py --no-submit")
         sys.exit(0)
