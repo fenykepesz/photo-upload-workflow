@@ -3176,17 +3176,11 @@ def main():
 
             login_step("https://500px.com/login",         "Log into 500px in the browser window.",    "will open 35photo next")
             login_step("https://35photo.pro/login/",      "Log into 35photo in the browser window.",  "will open VK next")
-            login_step("https://vk.com/login",            "Log into VK in the browser window.",       "will open X next")
-            page.goto("https://x.com", wait_until="domcontentloaded", timeout=30000)
-            print("Log into X.com in the browser window.")
-            print("  → Click 'Sign in' on the page yourself (do NOT go to x.com/login directly)")
-            print("Press ENTER when done (will open Bluesky next)...")
-            input()
-            try:
-                page.wait_for_load_state("domcontentloaded", timeout=5000)
-            except Exception:
-                pass
-            page.wait_for_timeout(1000)
+            login_step("https://vk.com/login",            "Log into VK in the browser window.",       "will open Bluesky next")
+            print("  NOTE: X.com login is handled separately — run after this:")
+            print("    python upload.py --import-x-cookies cookies.json")
+            print("  (Export cookies from x.com in regular Chrome via Cookie-Editor extension)")
+            print()
             login_step("https://bsky.app/",                      "Log into Bluesky in the browser window.",     "will open Facebook next")
             login_step("https://www.facebook.com/login",         "Log into Facebook in the browser window.",    "will open DeviantArt next")
             login_step("https://www.deviantart.com/users/login", "Log into DeviantArt in the browser window.",  "press ENTER to finish")
