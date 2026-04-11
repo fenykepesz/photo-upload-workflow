@@ -1014,7 +1014,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.4.0</span>
+      Photo Upload Queue <span>· v2.5.0</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -1374,6 +1374,12 @@
             </div>
           </div>
           <div class="fg form-full">
+            <label>Model Name <span style="font-weight:400;opacity:.6">(if provided, adds "Please respect the
+                model")</span></label>
+            <input type="text" id="m-model-name" placeholder="e.g. Elena" list="model-name-list" autocomplete="off" onchange="applyModelLookup(this.value)">
+            <datalist id="model-name-list"></datalist>
+          </div>
+          <div class="fg form-full">
             <label>Serial Title <span style="color:var(--accent)">*</span> <span style="font-weight:400;opacity:.6;font-size:11px">Appended to title: "Title (Serial Title)"</span></label>
             <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off">
             <datalist id="serial-title-list"></datalist>
@@ -1394,12 +1400,6 @@
               <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap"
                 onclick="document.getElementById('m-keywords').value=''">Clear</button>
             </div>
-          </div>
-          <div class="fg form-full">
-            <label>Model Name <span style="font-weight:400;opacity:.6">(if provided, adds "Please respect the
-                model")</span></label>
-            <input type="text" id="m-model-name" placeholder="e.g. Elena" list="model-name-list" autocomplete="off">
-            <datalist id="model-name-list"></datalist>
           </div>
           <div class="fg form-full">
             <label>Location <span style="font-weight:400;opacity:.6">(used by 500px &amp; Facebook)</span></label>
@@ -1457,35 +1457,10 @@
             <label>500px Category</label>
             <select id="m-cat-500px">
               <option value="">— select —</option>
-              <option>Abstract</option>
-              <option>Aerial</option>
-              <option>Animals</option>
-              <option>Black and White</option>
-              <option>Celebrities</option>
               <option>City and Architecture</option>
-              <option>Commercial</option>
-              <option>Concert</option>
-              <option>Family</option>
-              <option>Fashion</option>
-              <option>Film</option>
-              <option>Fine Art</option>
-              <option>Food</option>
-              <option>Journalism</option>
-              <option>Landscapes</option>
-              <option>Macro</option>
-              <option>Nature</option>
-              <option>Night</option>
               <option>Nude</option>
               <option>People</option>
-              <option>Performing Arts</option>
-              <option>Sport</option>
-              <option>Still Life</option>
               <option>Street</option>
-              <option>Transportation</option>
-              <option>Travel</option>
-              <option>Underwater</option>
-              <option>Urban Exploration</option>
-              <option>Wedding</option>
             </select>
           </div>
           <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">35photo</div>
@@ -1552,8 +1527,10 @@
             </div>
           </div>
           <div class="fg form-full">
-            <label>DA Groups &amp; Folders <span style="font-weight:400;opacity:.6">(Select group to pick
-                folder)</span></label>
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+              <label style="margin-bottom:0">DA Groups &amp; Folders <span style="font-weight:400;opacity:.6">(uncheck to exclude)</span></label>
+              <button type="button" class="btn-link" style="font-size:11px" onclick="daGroupsToggleAll()">Select / Deselect All</button>
+            </div>
             <div id="m-da-groups-container"
               style="background:var(--surface3);padding:10px;border-radius:var(--radius);border:1px solid var(--border)">
               <div id="m-da-groups-list">
@@ -1587,6 +1564,7 @@
         <button class="s-tab"        id="stab-timings" onclick="showSettingsTab('timings')">Timings</button>
         <button class="s-tab"        id="stab-da"      onclick="showSettingsTab('da')">DeviantArt</button>
         <button class="s-tab"        id="stab-vk"      onclick="showSettingsTab('vk')">VK Data</button>
+        <button class="s-tab"        id="stab-models"  onclick="showSettingsTab('models')">Models</button>
       </div>
 
       <!-- ── AI panel ── -->
@@ -1717,6 +1695,34 @@
         <div class="s-save-bar">
           <div class="sep"></div>
           <button class="btn btn-primary btn-sm" onclick="saveVKDataFile()">Save VK_data.json</button>
+        </div>
+      </div>
+
+      <!-- ── Models panel ── -->
+      <div class="s-panel" id="s-tab-models">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+          Map model names to auto-fill DA gallery, serial title prefix, FB tags, and VK tags.
+          When you type a known model name in the form, these defaults are applied automatically.
+        </div>
+        <div class="s-section-title">Model Lookup Table</div>
+        <table class="s-data-table" id="model-lookup-table">
+          <thead><tr><th>Name</th><th>DA Gallery</th><th>FB Tags</th><th>VK Tags</th><th style="width:90px"></th></tr></thead>
+          <tbody id="model-lookup-tbody"><tr><td colspan="5" style="color:var(--muted);padding:8px">No models configured yet.</td></tr></tbody>
+        </table>
+        <div style="margin-top:10px"><button class="btn btn-sm" onclick="mlAddNew()">+ Add Model</button></div>
+
+        <!-- Inline edit form (hidden by default) -->
+        <div id="model-lookup-form" style="display:none;margin-top:14px;background:var(--surface3);padding:12px;border-radius:var(--radius);border:1px solid var(--border)">
+          <div class="s-section-title" style="margin-bottom:8px" id="ml-form-title">Add Model</div>
+          <input type="hidden" id="ml-edit-name">
+          <div class="s-field"><span class="s-field-label">Name</span><input type="text" id="ml-name" placeholder="e.g. Elena" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">DA Gallery</span><input type="text" id="ml-da-gallery" placeholder="Gallery name (must match exactly)" autocomplete="off" list="ml-gallery-list"><datalist id="ml-gallery-list"></datalist></div>
+          <div class="s-field"><span class="s-field-label">FB Tags</span><input type="text" id="ml-fb-tags" placeholder="e.g. jane.doe, john.smith" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">VK Tags</span><input type="text" id="ml-vk-tags" placeholder="e.g. @id123456789, some_user" autocomplete="off"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="mlSave()">Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="mlCancel()">Cancel</button>
+          </div>
         </div>
       </div>
 
@@ -1945,6 +1951,20 @@
       document.getElementById('film-lens-row').style.display = on ? '' : 'none';
       document.getElementById('film-stock-row').style.display = on ? '' : 'none';
       document.getElementById('film-developed-by-row').style.display = on ? '' : 'none';
+      if (on) {
+        // Default "Developed by" to Panda Labs if empty
+        const devEl = document.getElementById('m-film-developed-by');
+        if (devEl && !devEl.value.trim()) devEl.value = 'Panda Labs';
+        // Append film lab FB tag if not already present
+        const fbEl = document.getElementById('m-fb-tag-people');
+        if (fbEl) {
+          const current = fbEl.value;
+          const filmTag = 'tammy.miller.1447';
+          if (!current.split(',').map(s => s.trim()).includes(filmTag)) {
+            fbEl.value = current ? current + ', ' + filmTag : filmTag;
+          }
+        }
+      }
     }
 
     function applyFilters() {
@@ -2238,9 +2258,9 @@
         });
       // Clear DA Gallery checkboxes
       document.querySelectorAll('#m-da-gallery-list input').forEach(c => c.checked = (c.value === 'Featured'));
-      // Clear DA Groups
+      // Clear DA Groups — check all, show all folders
       document.querySelectorAll('#m-da-groups-list input').forEach(c => c.checked = true);
-      document.querySelectorAll('#m-da-groups-list .da-group-folder').forEach(s => s.style.display = 'none');
+      document.querySelectorAll('#m-da-groups-list .da-group-folder').forEach(s => s.style.display = 'inline-block');
 
       document.getElementById('m-time').value = '10:00';
       document.getElementById('m-nsfw-flag').checked = false;
@@ -2265,7 +2285,20 @@
       editId = null;
       document.getElementById('modal-title').textContent = 'Add Photo';
       clearForm();
-      document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
+      // Smart date: use max existing date + 1 day, unless it's older than yesterday → use today
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const dates = rows.map(r => r.scheduled_date).filter(Boolean).sort();
+      const maxDate = dates.length ? dates[dates.length - 1] : null;
+      let newDate = todayStr;
+      if (maxDate && maxDate >= yesterdayStr) {
+        const d = new Date(maxDate + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        newDate = d.toISOString().split('T')[0];
+      }
+      document.getElementById('m-date').value = newDate;
       document.getElementById('p-da').checked = true;
       updateRequiredFields();
       document.getElementById('overlay').classList.add('open');
@@ -2318,16 +2351,22 @@
       const groupPairs = (r.da_groups || '').split(',').filter(Boolean).map(p => {
         const [g, f] = p.split(':'); return { group: g?.trim(), folder: f?.trim() };
       });
-      document.querySelectorAll('#m-da-groups-list input').forEach(c => {
-        const pair = groupPairs.find(p => p.group === c.value);
-        if (pair) {
-          c.checked = true;
+      // If the row has explicit da_groups data, restore exactly that selection;
+      // otherwise leave all checked (clearForm default)
+      if (r.da_groups) {
+        document.querySelectorAll('#m-da-groups-list input').forEach(c => {
+          const pair = groupPairs.find(p => p.group === c.value);
           const row = c.closest('.da-group-row');
           const sel = row.querySelector('.da-group-folder');
-          sel.style.display = 'inline-block';
-          if (pair.folder) sel.value = pair.folder;
-        }
-      });
+          if (pair) {
+            c.checked = true;
+            if (sel) { sel.style.display = 'inline-block'; if (pair.folder) sel.value = pair.folder; }
+          } else {
+            c.checked = false;
+            if (sel) sel.style.display = 'none';
+          }
+        });
+      }
       const pls = (r.platforms || '').split(',').map(x => x.trim());
       document.getElementById('p-da').checked = pls.includes('DA');
       document.getElementById('p-500').checked = pls.includes('500PX');
@@ -2581,8 +2620,8 @@
         grpList.innerHTML = Object.keys(daData.groups || {}).map(g => {
           const folders = (daData.groups[g] || []).map(f => `<option value="${h(f)}">${h(f)}</option>`).join('');
           return `<div class="da-group-row" style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
-            <label style="white-space:nowrap"><input type="checkbox" value="${h(g)}" style="width:auto" onchange="groupToggled(this)"> ${h(g)}</label>
-            <select class="da-group-folder" data-group="${h(g)}" style="display:none;font-size:12px;flex:1">${folders}</select>
+            <label style="white-space:nowrap"><input type="checkbox" value="${h(g)}" style="width:auto" checked onchange="groupToggled(this)"> ${h(g)}</label>
+            <select class="da-group-folder" data-group="${h(g)}" style="display:inline-block;font-size:12px;flex:1">${folders}</select>
           </div>`;
         }).join('');
       }
@@ -2590,7 +2629,7 @@
 
     function groupToggled(cb) {
       const sel = cb.closest('.da-group-row').querySelector('.da-group-folder');
-      sel.style.display = cb.checked ? 'inline-block' : 'none';
+      if (sel) sel.style.display = cb.checked ? 'inline-block' : 'none';
     }
 
     // ── VK DATA ────────────────────────────────────────────────────────────────
@@ -2695,6 +2734,15 @@
       const anyUnchecked = Array.from(boxes).some(cb => !cb.checked);
       boxes.forEach(cb => cb.checked = anyUnchecked);
     }
+    function daGroupsToggleAll() {
+      const boxes = document.querySelectorAll('#m-da-groups-list input[type="checkbox"]');
+      const anyUnchecked = Array.from(boxes).some(cb => !cb.checked);
+      boxes.forEach(cb => {
+        cb.checked = anyUnchecked;
+        const sel = cb.closest('.da-group-row').querySelector('.da-group-folder');
+        if (sel) sel.style.display = anyUnchecked ? 'inline-block' : 'none';
+      });
+    }
 
     // ── THEME ──────────────────────────────────────────────────────────────────
     function toggleTheme() {
@@ -2733,7 +2781,7 @@
    - No spaces or hyphens within tags
    - Cover these categories as appropriate: location, subject, technique, mood/aesthetic, composition, genre, discovery terms, gear
 
-4. Suggested 500px category (exactly one of: Abstract, Aerial, Animals, Black and White, Celebrities, City and Architecture, Commercial, Concert, Family, Fashion, Film, Fine Art, Food, Journalism, Landscapes, Macro, Nature, Night, Nude, People, Performing Arts, Sport, Still Life, Street, Transportation, Travel, Underwater, Urban Exploration, Wedding)
+4. Suggested 500px category (exactly one of: City and Architecture, Nude, People, Street)
 
 5. Suggested 35photo category (exactly one of: Female portrait, City/Architecture, Fine Nudes, Portrait)
 
@@ -2758,6 +2806,7 @@ Return ONLY valid JSON, no markdown fences:
       sRenderGroups();
       sRenderVKTable();
       sUpdateFileStatus();
+      renderModelLookupTable();
     }
     function openAiKeyDialog() { openSettings('ai'); }
     function closeAiKeyDialog() {
@@ -3118,6 +3167,147 @@ Return ONLY valid JSON, no markdown fences:
       }
     }
     refreshModelNameList();
+
+    // ── MODEL LOOKUP TABLE ────────────────────────────────────────────────────────
+    // Each entry: { name, da_gallery, serial_prefix, fb_tags, vk_tags }
+    function getModelLookup() {
+      try { return JSON.parse(localStorage.getItem('model_lookup') || '[]'); } catch { return []; }
+    }
+    function saveModelLookupData(arr) {
+      localStorage.setItem('model_lookup', JSON.stringify(arr));
+    }
+    function renderModelLookupTable() {
+      const tbody = document.getElementById('model-lookup-tbody');
+      if (!tbody) return;
+      const arr = getModelLookup();
+      if (!arr.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No models configured yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = arr.map(m => `<tr>
+        <td>${h(m.name)}</td>
+        <td>${h(m.da_gallery || '—')}</td>
+        <td style="font-size:11px">${h(m.fb_tags || '—')}</td>
+        <td style="font-size:11px">${h(m.vk_tags || '—')}</td>
+        <td>
+          <button class="btn btn-sm btn-ghost" onclick="mlEdit(${JSON.stringify(h(m.name))})">Edit</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="mlDelete(${JSON.stringify(h(m.name))})">✕</button>
+        </td>
+      </tr>`).join('');
+    }
+    function mlRefreshGalleryList() {
+      const dl = document.getElementById('ml-gallery-list');
+      if (!dl) return;
+      dl.innerHTML = (daData.galleries || []).map(g => `<option value="${h(g)}">`).join('');
+    }
+    function mlAddNew() {
+      document.getElementById('ml-form-title').textContent = 'Add Model';
+      document.getElementById('ml-edit-name').value = '';
+      document.getElementById('ml-name').value = '';
+      document.getElementById('ml-da-gallery').value = '';
+      document.getElementById('ml-fb-tags').value = '';
+      document.getElementById('ml-vk-tags').value = '';
+      mlRefreshGalleryList();
+      document.getElementById('model-lookup-form').style.display = '';
+      document.getElementById('ml-name').focus();
+    }
+    function mlEdit(name) {
+      const decoded = name.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
+      const arr = getModelLookup();
+      const m = arr.find(x => x.name === decoded);
+      if (!m) return;
+      document.getElementById('ml-form-title').textContent = 'Edit Model';
+      document.getElementById('ml-edit-name').value = m.name;
+      document.getElementById('ml-name').value = m.name;
+      document.getElementById('ml-da-gallery').value = m.da_gallery || '';
+      document.getElementById('ml-fb-tags').value = m.fb_tags || '';
+      document.getElementById('ml-vk-tags').value = m.vk_tags || '';
+      mlRefreshGalleryList();
+      document.getElementById('model-lookup-form').style.display = '';
+      document.getElementById('ml-name').focus();
+    }
+    function mlDelete(name) {
+      const decoded = name.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
+      const arr = getModelLookup().filter(x => x.name !== decoded);
+      saveModelLookupData(arr);
+      renderModelLookupTable();
+    }
+    function mlSave() {
+      const editName = document.getElementById('ml-edit-name').value;
+      const name = document.getElementById('ml-name').value.trim();
+      if (!name) { toast('Model name is required', 'error'); return; }
+      const entry = {
+        name,
+        da_gallery: document.getElementById('ml-da-gallery').value.trim(),
+        fb_tags: document.getElementById('ml-fb-tags').value.trim(),
+        vk_tags: document.getElementById('ml-vk-tags').value.trim(),
+      };
+      let arr = getModelLookup();
+      if (editName) arr = arr.filter(x => x.name !== editName);
+      // Replace existing entry with same name (case-insensitive) or push new
+      const idx = arr.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
+      if (idx >= 0) arr[idx] = entry; else arr.push(entry);
+      arr.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      saveModelLookupData(arr);
+      saveModelName(name);
+      renderModelLookupTable();
+      document.getElementById('model-lookup-form').style.display = 'none';
+      toast('Model saved', 'success');
+
+      // If DA gallery is set but doesn't exist yet, offer to add it
+      const gallery = entry.da_gallery;
+      if (gallery && !(daData.galleries || []).some(g => g === gallery)) {
+        const add = confirm(`Gallery "${gallery}" doesn't exist in your DA data yet.\n\nDouble-check the spelling — typos here will break gallery selection.\n\nAdd "${gallery}" as a new DA gallery?`);
+        if (add) {
+          daData.galleries = daData.galleries || [];
+          daData.galleries.push(gallery);
+          daData.galleries.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+          populateDAChoices();
+          sRenderGalleries();
+          toast(`Gallery "${gallery}" added — remember to save da_data.json`, 'info');
+        }
+      }
+    }
+    function mlCancel() {
+      document.getElementById('model-lookup-form').style.display = 'none';
+    }
+
+    // Auto-fill form fields when model name is selected
+    function applyModelLookup(modelName) {
+      if (!modelName) return;
+      const arr = getModelLookup();
+      const m = arr.find(x => x.name.toLowerCase() === modelName.toLowerCase());
+      if (!m) return;
+
+      // DA Gallery — check the matching gallery checkbox (in addition to Featured)
+      if (m.da_gallery) {
+        document.querySelectorAll('#m-da-gallery-list input').forEach(cb => {
+          if (cb.value === m.da_gallery) cb.checked = true;
+        });
+      }
+
+      // Serial title — derive prefix from DA gallery, match "Gallery N" or "Gallery #N"
+      if (m.da_gallery) {
+        const escaped = m.da_gallery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp('^' + escaped + '\\s+#?(\\d+)$', 'i');
+        let maxN = 0;
+        rows.forEach(r => { const match = (r.serial_title || '').match(re); if (match) maxN = Math.max(maxN, parseInt(match[1])); });
+        const serialEl = document.getElementById('m-serial-title');
+        if (serialEl) serialEl.value = m.da_gallery + ' ' + (maxN + 1);
+      }
+
+      // FB tags — set if empty
+      if (m.fb_tags) {
+        const fbEl = document.getElementById('m-fb-tag-people');
+        if (fbEl && !fbEl.value.trim()) fbEl.value = m.fb_tags;
+      }
+
+      // VK tags — set if empty
+      if (m.vk_tags) {
+        const vkEl = document.getElementById('m-vk-tag-people');
+        if (vkEl && !vkEl.value.trim()) vkEl.value = m.vk_tags;
+      }
+    }
 
     // ── LOCATION AUTOCOMPLETE ─────────────────────────────────────────────────────
     function getLocations() {
