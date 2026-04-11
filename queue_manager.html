@@ -2839,40 +2839,92 @@ Return ONLY valid JSON, no markdown fences:
     let configHandle = null;
     let configData = null;
 
-    async function loadConfigFile(interactive = false) {
+    function storeConfigHandle(fh) {
+      try {
+        const req = indexedDB.open('qm_handles', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('handles');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('handles', 'readwrite');
+          tx.objectStore('handles').put(fh, 'config');
+        };
+      } catch (e) {}
+    }
+    function getStoredConfigHandle() {
+      return new Promise(resolve => {
+        try {
+          const req = indexedDB.open('qm_handles', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('handles');
+          req.onsuccess = () => {
+            const tx = req.result.transaction('handles', 'readonly');
+            const get = tx.objectStore('handles').get('config');
+            get.onsuccess = () => resolve(get.result || null);
+            get.onerror = () => resolve(null);
+          };
+          req.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      });
+    }
+    async function autoLoadConfig() {
+      // 1. Try fetch (works when served via HTTP / Python server)
       try {
         const res = await fetch('config.json');
-        if (!res.ok) throw new Error('fetch failed');
-        configData = await res.json();
-        sApplyConfig();
-        if (interactive) toast('config.json loaded', 'success');
-        sUpdateFileStatus();
-        return;
-      } catch (e) {}
-
-      if (interactive) {
-        try {
-          if (typeof showOpenFilePicker !== 'undefined') {
-            const [fh] = await showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
-            configHandle = fh;
-            configData = JSON.parse(await (await fh.getFile()).text());
-          } else {
-            await new Promise(resolve => {
-              const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' });
-              inp.onchange = async ev => {
-                const f = ev.target.files[0]; if (!f) { resolve(); return; }
-                configData = JSON.parse(await f.text());
-                resolve();
-              };
-              inp.click();
-            });
-          }
-          sApplyConfig();
-          toast('config.json loaded', 'success');
-          sUpdateFileStatus();
-        } catch(e) {
-          if (e.name !== 'AbortError') toast('Could not load config.json: ' + e.message, 'error');
+        if (res.ok) {
+          configData = await res.json();
+          sApplyConfig(); sUpdateFileStatus();
+          return;
         }
+      } catch (e) {}
+      // 2. Try stored fileHandle from IndexedDB
+      const storedFH = await getStoredConfigHandle();
+      if (storedFH) {
+        try {
+          const perm = await storedFH.queryPermission({ mode: 'readwrite' });
+          if (perm === 'granted') {
+            configHandle = storedFH;
+            configData = JSON.parse(await (await storedFH.getFile()).text());
+            sApplyConfig(); sUpdateFileStatus();
+            return;
+          }
+          if (perm === 'prompt') {
+            // Will need user gesture to re-grant — show status as not loaded but keep handle ready
+            configHandle = storedFH;
+          }
+        } catch (e) {}
+      }
+    }
+    async function loadConfigFile(interactive = false) {
+      if (!interactive) { await autoLoadConfig(); return; }
+      // Interactive: try fetch first, then file picker
+      try {
+        const res = await fetch('config.json');
+        if (res.ok) {
+          configData = await res.json();
+          sApplyConfig(); toast('config.json loaded', 'success'); sUpdateFileStatus();
+          return;
+        }
+      } catch (e) {}
+      try {
+        if (typeof showOpenFilePicker !== 'undefined') {
+          const [fh] = await showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+          configHandle = fh;
+          storeConfigHandle(fh);
+          configData = JSON.parse(await (await fh.getFile()).text());
+        } else {
+          await new Promise(resolve => {
+            const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' });
+            inp.onchange = async ev => {
+              const f = ev.target.files[0]; if (!f) { resolve(); return; }
+              configData = JSON.parse(await f.text());
+              resolve();
+            };
+            inp.click();
+          });
+        }
+        sApplyConfig();
+        toast('config.json loaded', 'success');
+        sUpdateFileStatus();
+      } catch(e) {
+        if (e.name !== 'AbortError') toast('Could not load config.json: ' + e.message, 'error');
       }
     }
 
@@ -2906,7 +2958,7 @@ Return ONLY valid JSON, no markdown fences:
       }
     }
 
-    async function saveConfigFile() {
+    async function saveConfigFile(silent = false) {
       // Start from existing configData so fields not visible in the UI are preserved.
       // Then overlay with current DOM values so edits are captured.
       const obj = JSON.parse(JSON.stringify(configData || {}));
@@ -2941,11 +2993,13 @@ Return ONLY valid JSON, no markdown fences:
       obj.model_lookup = getModelLookup();
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
+        if (silent) return; // No handle yet and silent mode — skip, user hasn't linked the file yet
         try {
           configHandle = await showSaveFilePicker({
             suggestedName: 'config.json',
             types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
           });
+          storeConfigHandle(configHandle);
           sUpdateFileStatus();
         } catch(e) {
           if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error');
@@ -2955,9 +3009,10 @@ Return ONLY valid JSON, no markdown fences:
       if (configHandle) {
         try {
           const w = await configHandle.createWritable(); await w.write(text); await w.close();
-          toast('config.json saved', 'success');
-        } catch(e) { toast('Save error: ' + e.message, 'error'); }
+          if (!silent) toast('config.json saved', 'success');
+        } catch(e) { if (!silent) toast('Save error: ' + e.message, 'error'); }
       } else {
+        if (silent) return;
         // Fallback for browsers without File System Access API
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         Object.assign(document.createElement('a'), { href: url, download: 'config.json' }).click();
@@ -3184,6 +3239,8 @@ Return ONLY valid JSON, no markdown fences:
       localStorage.setItem('model_lookup', JSON.stringify(arr));
       // Keep configData in sync so saving from any Settings tab includes latest models
       if (configData) configData.model_lookup = arr;
+      // Auto-save to config.json silently if the file is already linked
+      saveConfigFile(true);
     }
     function renderModelLookupTable() {
       const tbody = document.getElementById('model-lookup-tbody');
