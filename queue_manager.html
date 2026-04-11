@@ -3190,8 +3190,8 @@ Return ONLY valid JSON, no markdown fences:
         <td style="font-size:11px">${h(m.fb_tags || '—')}</td>
         <td style="font-size:11px">${h(m.vk_tags || '—')}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" onclick="mlEdit(${JSON.stringify(h(m.name))})">Edit</button>
-          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="mlDelete(${JSON.stringify(h(m.name))})">✕</button>
+          <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="mlEdit(this.dataset.name)">Edit</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="mlDelete(this.dataset.name)">✕</button>
         </td>
       </tr>`).join('');
     }
@@ -3212,9 +3212,8 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ml-name').focus();
     }
     function mlEdit(name) {
-      const decoded = name.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
       const arr = getModelLookup();
-      const m = arr.find(x => x.name === decoded);
+      const m = arr.find(x => x.name === name);
       if (!m) return;
       document.getElementById('ml-form-title').textContent = 'Edit Model';
       document.getElementById('ml-edit-name').value = m.name;
@@ -3227,8 +3226,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ml-name').focus();
     }
     function mlDelete(name) {
-      const decoded = name.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
-      const arr = getModelLookup().filter(x => x.name !== decoded);
+      const arr = getModelLookup().filter(x => x.name !== name);
       saveModelLookupData(arr);
       renderModelLookupTable();
     }
