@@ -2993,7 +2993,7 @@ Return ONLY valid JSON, no markdown fences:
       obj.model_lookup = getModelLookup();
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
-        if (silent) return; // No handle yet and silent mode — skip, user hasn't linked the file yet
+        if (silent) { toast('config.json not linked — open it in Settings → Config to enable auto-save', 'warning'); return; }
         try {
           configHandle = await showSaveFilePicker({
             suggestedName: 'config.json',
