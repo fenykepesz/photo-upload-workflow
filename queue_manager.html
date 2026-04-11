@@ -2899,6 +2899,11 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('wt-x').value        = wt['x']        ?? 5;
       document.getElementById('wt-bluesky').value  = wt['bluesky']  ?? 10;
       document.getElementById('wt-facebook').value = wt['facebook'] ?? 15;
+      // Load model lookup from config into localStorage (source of truth is config.json)
+      if (Array.isArray(configData.model_lookup)) {
+        localStorage.setItem('model_lookup', JSON.stringify(configData.model_lookup));
+        renderModelLookupTable();
+      }
     }
 
     async function saveConfigFile() {
@@ -2932,6 +2937,8 @@ Return ONLY valid JSON, no markdown fences:
         'bluesky':  parseInt(document.getElementById('wt-bluesky').value)  || 10,
         'facebook': parseInt(document.getElementById('wt-facebook').value) || 15,
       };
+      // Always persist the current model lookup into config.json
+      obj.model_lookup = getModelLookup();
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
         try {
@@ -3175,6 +3182,8 @@ Return ONLY valid JSON, no markdown fences:
     }
     function saveModelLookupData(arr) {
       localStorage.setItem('model_lookup', JSON.stringify(arr));
+      // Keep configData in sync so saving from any Settings tab includes latest models
+      if (configData) configData.model_lookup = arr;
     }
     function renderModelLookupTable() {
       const tbody = document.getElementById('model-lookup-tbody');
