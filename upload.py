@@ -176,7 +176,7 @@ def filter_rows(rows, target_id=None):
     for row in rows:
         # Specific row requested
         if target_id:
-            if row["upload_id"] != target_id:
+            if row["upload_id"].strip().upper() != target_id.strip().upper():
                 continue
             # Allow any status when explicitly targeting a row
         else:
