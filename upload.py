@@ -713,7 +713,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 loc_input.click()
                 page.wait_for_timeout(300)
                 page.keyboard.type(location, delay=50)
-                page.wait_for_timeout(5000)  # wait for autocomplete suggestions
+                page.wait_for_timeout(8000)  # wait for autocomplete suggestions
                 # Click the first suggestion containing the query text
                 clicked = page.evaluate(r"""(query) => {
                     const input = document.querySelector('input[placeholder*="Location"]');
@@ -744,8 +744,13 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 if clicked.get("ok"):
                     print(f"    Selected: {clicked.get('text')}")
                 else:
-                    print(f"    WARNING: No location suggestion found ({clicked.get('reason')})")
-                page.wait_for_timeout(5000)
+                    print(f"    WARNING: No location suggestion found ({clicked.get('reason')}) — clearing field and continuing without location")
+                    # Clear the field so the dropdown closes and Next button re-enables
+                    loc_input.triple_click()
+                    page.keyboard.press("Delete")
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(500)
+                page.wait_for_timeout(2000)
             else:
                 print(f"  Location already set (EXIF): {has_location}")
         except Exception as e:
