@@ -714,43 +714,69 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 page.wait_for_timeout(300)
                 page.keyboard.type(location, delay=50)
                 page.wait_for_timeout(8000)  # wait for autocomplete suggestions
-                # Click the first suggestion containing the query text
+
+                # First attempt: JS click on matching suggestion
                 clicked = page.evaluate(r"""(query) => {
                     const input = document.querySelector('input[placeholder*="Location"]');
                     if (!input) return {ok: false, reason: 'no input'};
                     const rect = input.getBoundingClientRect();
-                    // Split query into words for flexible matching
-                    // "San Francisco, USA" matches "San Francisco, CA, USA" (all words present)
                     const words = query.toLowerCase().replace(/[,-]/g, ' ').split(/\s+/).filter(w => w.length > 0);
                     const matchesQuery = (text) => {
                         const lt = text.toLowerCase();
                         return words.every(w => lt.includes(w));
                     };
-                    // Search broadly — location suggestions use different components than category
                     const all = document.querySelectorAll('div, li, a, span');
                     for (const el of all) {
                         const r = el.getBoundingClientRect();
                         const text = el.textContent.trim();
                         if (r.top >= rect.bottom + 2 && r.top < rect.bottom + 400
                             && r.height > 20 && r.height < 80 && r.width > 100
-                            && matchesQuery(text)
-                            && el.children.length <= 3) {
+                            && matchesQuery(text)) {
                             el.click();
                             return {ok: true, text: text.substring(0, 60)};
                         }
                     }
-                    return {ok: false, reason: 'no matching suggestions', inputVal: input.value};
+                    return {ok: false, reason: 'no matching suggestions'};
                 }""", location)
+
                 if clicked.get("ok"):
                     print(f"    Selected: {clicked.get('text')}")
+                    page.wait_for_timeout(1000)
                 else:
-                    print(f"    WARNING: No location suggestion found ({clicked.get('reason')}) — clearing field and continuing without location")
-                    # Clear the field so the dropdown closes and Next button re-enables
-                    loc_input.triple_click()
-                    page.keyboard.press("Delete")
-                    page.keyboard.press("Escape")
+                    # Fallback: keyboard navigation — ArrowDown to first suggestion + Enter
+                    print(f"    JS click failed ({clicked.get('reason')}) — trying keyboard navigation")
+                    page.keyboard.press("ArrowDown")
                     page.wait_for_timeout(500)
-                page.wait_for_timeout(2000)
+                    # Check if a suggestion is now highlighted
+                    highlighted = page.evaluate(r"""() => {
+                        const all = document.querySelectorAll('[class*="highlight"], [class*="active"], [class*="focused"], [aria-selected="true"]');
+                        for (const el of all) {
+                            const t = el.textContent.trim();
+                            if (t.length > 3) return t.substring(0, 60);
+                        }
+                        return null;
+                    }""")
+                    if highlighted:
+                        page.keyboard.press("Enter")
+                        print(f"    Selected via keyboard: {highlighted}")
+                        page.wait_for_timeout(1000)
+                    else:
+                        # Last resort: just press Enter on whatever is first
+                        page.keyboard.press("Enter")
+                        page.wait_for_timeout(1000)
+                        # Verify something was selected
+                        val = page.evaluate("""() => {
+                            const el = document.querySelector('input[placeholder*="Location"]');
+                            return el ? el.value.trim() : '';
+                        }""")
+                        if val and val.lower() != location.lower():
+                            print(f"    Selected via Enter: {val}")
+                        else:
+                            print(f"    WARNING: Could not select location — clearing field and continuing without location")
+                            loc_input.triple_click()
+                            page.keyboard.press("Delete")
+                            page.keyboard.press("Escape")
+                            page.wait_for_timeout(500)
             else:
                 print(f"  Location already set (EXIF): {has_location}")
         except Exception as e:
