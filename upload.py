@@ -3636,52 +3636,14 @@ def main():
         if not token or not user_id:
             print("ERROR: access_token and user_id required in config.json accounts.instagram")
             sys.exit(1)
-        print("Fetching recent Instagram posts to extract location IDs...")
-        seen = {}
-        next_url = None
-        params = {"fields": "id,timestamp,location", "limit": 50, "access_token": token}
-        try:
-            page_num = 0
-            while True:
-                resp = requests.get(
-                    next_url or f"https://graph.facebook.com/v21.0/{user_id}/media",
-                    params=params if not next_url else None,
-                    timeout=15,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("data", [])
-                page_num += 1
-                print(f"  Page {page_num}: {len(items)} posts fetched")
-                if page_num == 1 and items:
-                    print(f"  Sample item fields: {list(items[0].keys())}")
-                    print(f"  Sample item: {items[0]}")
-                for item in items:
-                    loc = item.get("location")
-                    if loc and loc.get("id") and loc["id"] not in seen:
-                        seen[loc["id"]] = loc
-                        print(f"    Found location: {loc.get('name', '?')} (ID: {loc['id']})")
-                next_url = data.get("paging", {}).get("next")
-                params = None
-                if not next_url or page_num >= 2:
-                    break
-            if not seen:
-                print("\nNo location-tagged posts found.")
-                print("Tag a location on a post via the Instagram app first, then re-run.")
-            else:
-                print(f"\nFound {len(seen)} unique location(s):\n")
-                for loc in sorted(seen.values(), key=lambda x: x.get("name", "")):
-                    print(f"  ID:   {loc['id']}")
-                    print(f"  Name: {loc.get('name', '—')}")
-                    print(f"  → In Settings → Locations: name = your location_500px value, Place ID = {loc['id']}")
-                    print()
-        except Exception as e:
-            detail = ""
-            try: detail = e.response.json().get("error", {}).get("message", "")
-            except Exception: pass
-            print(f"ERROR: {e}")
-            if detail: print(f"Detail: {detail}")
-            sys.exit(1)
+        print("\nNote: The Instagram Graph API does not return location data without")
+        print("'instagram_manage_insights' permission, which requires Meta app review.")
+        print("\nTo find a Place ID manually:")
+        print("  1. Open the Instagram app and find any post with the location tagged.")
+        print("  2. Tap the location name — it opens:")
+        print("     https://www.instagram.com/explore/locations/{ID}/")
+        print("  3. That number is the Place ID.")
+        print("  4. Add it in Settings → Locations in queue_manager.html.")
         sys.exit(0)
 
     # Refresh Instagram long-lived token
