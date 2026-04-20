@@ -4090,6 +4090,8 @@ def main():
                         location_fb = row.get("location_500px", "").strip()
                         feeling_fb = row.get("fb_feeling", "").strip()
                         tag_people_fb = row.get("fb_tag_people", "").strip()
+                        if _lab.get("fb_tags"):
+                            tag_people_fb = ",".join(filter(None, [tag_people_fb, _lab["fb_tags"].strip()]))
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
 
                         # NSFW safety: never upload NSFW image to Facebook

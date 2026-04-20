@@ -1786,8 +1786,8 @@
         </div>
         <div class="s-section-title">Lab Lookup Table</div>
         <table class="s-data-table" id="lab-lookup-table">
-          <thead><tr><th>Name</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th style="width:90px"></th></tr></thead>
-          <tbody id="lab-lookup-tbody"><tr><td colspan="6" style="color:var(--muted);padding:8px">No labs configured yet.</td></tr></tbody>
+          <thead><tr><th>Name</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th>FB Tags</th><th style="width:90px"></th></tr></thead>
+          <tbody id="lab-lookup-tbody"><tr><td colspan="7" style="color:var(--muted);padding:8px">No labs configured yet.</td></tr></tbody>
         </table>
         <div style="margin-top:10px"><button class="btn btn-sm" onclick="llAddNew()">+ Add Lab Contact</button></div>
 
@@ -1799,6 +1799,7 @@
           <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="ll-bsky-handle" placeholder="e.g. pandalabs.bsky.social" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">IG Handle</span><input type="text" id="ll-ig-handle" placeholder="e.g. pandalabs (without @)" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">VK Handle</span><input type="text" id="ll-vk-handle" placeholder="e.g. @id123456 or username" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">FB Tags</span><input type="text" id="ll-fb-tags" placeholder="e.g. tammy.miller.1447" autocomplete="off"></div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="btn btn-primary btn-sm" onclick="llSave()">Save</button>
             <button class="btn btn-ghost btn-sm" onclick="llCancel()">Cancel</button>
@@ -3541,7 +3542,7 @@ Return ONLY valid JSON, no markdown fences:
       if (!tbody) return;
       const arr = getLabLookup();
       if (!arr.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No labs configured yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No labs configured yet.</td></tr>';
         return;
       }
       tbody.innerHTML = arr.map(m => `<tr>
@@ -3550,6 +3551,7 @@ Return ONLY valid JSON, no markdown fences:
         <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
         <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
         <td style="font-size:11px">${h(m.vk_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.fb_tags || '—')}</td>
         <td>
           <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="llEdit(this.dataset.name)">Edit</button>
           <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="llDelete(this.dataset.name)">✕</button>
@@ -3564,6 +3566,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ll-bsky-handle').value = '';
       document.getElementById('ll-ig-handle').value = '';
       document.getElementById('ll-vk-handle').value = '';
+      document.getElementById('ll-fb-tags').value = '';
       document.getElementById('lab-lookup-form').style.display = '';
       document.getElementById('ll-name').focus();
     }
@@ -3578,6 +3581,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ll-bsky-handle').value = m.bsky_handle || '';
       document.getElementById('ll-ig-handle').value = m.ig_handle || '';
       document.getElementById('ll-vk-handle').value = m.vk_handle || '';
+      document.getElementById('ll-fb-tags').value = m.fb_tags || '';
       document.getElementById('lab-lookup-form').style.display = '';
       document.getElementById('ll-name').focus();
     }
@@ -3596,6 +3600,7 @@ Return ONLY valid JSON, no markdown fences:
         bsky_handle: document.getElementById('ll-bsky-handle').value.trim(),
         ig_handle:   document.getElementById('ll-ig-handle').value.trim(),
         vk_handle:   document.getElementById('ll-vk-handle').value.trim(),
+        fb_tags:     document.getElementById('ll-fb-tags').value.trim(),
       };
       let arr = getLabLookup();
       if (editName) arr = arr.filter(x => x.name !== editName);
