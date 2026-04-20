@@ -3632,6 +3632,40 @@ def main():
         WAIT_TIMES["bluesky"]  = int(_wt.get("bluesky",  WAIT_TIMES["bluesky"]  // 1000)) * 1000
         WAIT_TIMES["facebook"] = int(_wt.get("facebook", WAIT_TIMES["facebook"] // 1000)) * 1000
 
+    # Auto-refresh Instagram token every 30 days
+    _ig_cfg = config.get("accounts", {}).get("instagram", {})
+    if _ig_cfg.get("access_token") and _ig_cfg.get("app_id") and _ig_cfg.get("app_secret"):
+        from datetime import date as _date
+        _last = _ig_cfg.get("token_last_refreshed", "")
+        _needs_refresh = True
+        if _last:
+            try:
+                _delta = (_date.today() - _date.fromisoformat(_last)).days
+                _needs_refresh = _delta >= 30
+            except ValueError:
+                pass
+        if _needs_refresh:
+            print("Auto-refreshing Instagram token (30-day interval)...")
+            try:
+                _resp = requests.get(
+                    "https://graph.facebook.com/v21.0/oauth/access_token",
+                    params={"grant_type": "fb_exchange_token",
+                            "client_id": _ig_cfg["app_id"],
+                            "client_secret": _ig_cfg["app_secret"],
+                            "fb_exchange_token": _ig_cfg["access_token"]},
+                    timeout=15,
+                )
+                _resp.raise_for_status()
+                _new_token = _resp.json()["access_token"]
+                _ig_cfg["access_token"] = _new_token
+                _ig_cfg["token_last_refreshed"] = _date.today().isoformat()
+                config["accounts"]["instagram"] = _ig_cfg
+                with open(args.config, "w", encoding="utf-8") as _f:
+                    json.dump(config, _f, indent=2, ensure_ascii=False)
+                print("  Instagram token refreshed and saved.")
+            except Exception as _e:
+                print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
+
     # Load and filter CSV
     all_rows = load_queue(args.csv)
     target_rows = filter_rows(all_rows, args.row)

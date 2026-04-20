@@ -1647,10 +1647,12 @@
         <div class="s-field"><span class="s-field-label">X.com</span><input type="text" id="s-acc-x" placeholder="username"></div>
         <div class="s-field"><span class="s-field-label">Bluesky</span><input type="text" id="s-acc-bsky" placeholder="handle.bsky.social"></div>
         <div class="s-field"><span class="s-field-label">Facebook</span><input type="text" id="s-acc-facebook" placeholder="username"></div>
-        <div class="s-section-title">Instagram Credentials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px">— Facebook Graph API token (expires every 60 days, run <code style="font-family:monospace">--refresh-ig-token</code> to extend)</span></div>
+        <div class="s-section-title">Instagram Credentials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px">— Facebook Graph API token (auto-refreshed every 30 days if App ID + Secret are set)</span></div>
         <div class="s-field"><span class="s-field-label">Access Token</span><input type="text" id="s-ig-token" placeholder="EAAUa8..." style="font-family:monospace;font-size:11px"></div>
         <div class="s-field"><span class="s-field-label">User ID</span><input type="text" id="s-ig-userid" placeholder="17841400396060390" style="font-family:monospace"></div>
         <div class="s-field"><span class="s-field-label">imgbb API Key</span><input type="text" id="s-ig-imgbb" placeholder="219658..." style="font-family:monospace"></div>
+        <div class="s-field"><span class="s-field-label">App ID</span><input type="text" id="s-ig-appid" placeholder="Meta app ID" style="font-family:monospace"></div>
+        <div class="s-field"><span class="s-field-label">App Secret</span><input type="password" id="s-ig-appsecret" placeholder="Meta app secret" style="font-family:monospace"></div>
         <div class="s-save-bar">
           <div class="sep"></div>
           <button class="btn btn-primary btn-sm" onclick="saveConfigFile()">Save config.json</button>
@@ -3007,9 +3009,11 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('s-acc-bsky').value = ac.bluesky || '';
       document.getElementById('s-acc-facebook').value = ac.facebook || '';
       const ig = ac.instagram || {};
-      document.getElementById('s-ig-token').value  = ig.access_token  || '';
-      document.getElementById('s-ig-userid').value = ig.user_id       || '';
-      document.getElementById('s-ig-imgbb').value  = ig.imgbb_api_key || '';
+      document.getElementById('s-ig-token').value     = ig.access_token  || '';
+      document.getElementById('s-ig-userid').value    = ig.user_id       || '';
+      document.getElementById('s-ig-imgbb').value     = ig.imgbb_api_key || '';
+      document.getElementById('s-ig-appid').value     = ig.app_id        || '';
+      document.getElementById('s-ig-appsecret').value = ig.app_secret    || '';
       const wt = configData.wait_times || {};
       document.getElementById('wt-500px').value    = wt['500px']    ?? 30;
       document.getElementById('wt-35photo').value  = wt['35photo']  ?? 30;
@@ -3050,6 +3054,8 @@ Return ONLY valid JSON, no markdown fences:
           access_token:  document.getElementById('s-ig-token').value.trim(),
           user_id:       document.getElementById('s-ig-userid').value.trim(),
           imgbb_api_key: document.getElementById('s-ig-imgbb').value.trim(),
+          app_id:        document.getElementById('s-ig-appid').value.trim(),
+          app_secret:    document.getElementById('s-ig-appsecret').value.trim(),
         },
       };
       obj.wait_times = {
