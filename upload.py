@@ -128,6 +128,8 @@ def parse_args():
                    help="Open browser to Facebook profile settings so you can set the Current City")
     p.add_argument("--refresh-ig-token", action="store_true",
                    help="Refresh the Instagram long-lived access token and update config.json")
+    p.add_argument("--setup-ig", action="store_true",
+                   help="Find your Instagram Business Account ID and print it for config.json")
     return p.parse_args()
 
 
@@ -1798,11 +1800,11 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
         print("  --no-submit: skipping Instagram post")
         return {"success": True, "url_ig": "NO_SUBMIT", "error": ""}
 
-    # Step 2: create media container
+    # Step 2: create media container (Facebook Login flow uses graph.facebook.com)
     print("  Creating Instagram media container...")
     try:
         resp = requests.post(
-            f"https://graph.instagram.com/v21.0/{user_id}/media",
+            f"https://graph.facebook.com/v21.0/{user_id}/media",
             data={"image_url": image_url, "caption": caption, "access_token": access_token},
             timeout=30,
         )
@@ -1810,7 +1812,10 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
         creation_id = resp.json()["id"]
         print(f"    Container: {creation_id}")
     except Exception as e:
-        return {"success": False, "url_ig": "", "error": f"Container creation failed: {e}"}
+        detail = ""
+        try: detail = e.response.json()
+        except Exception: pass
+        return {"success": False, "url_ig": "", "error": f"Container creation failed: {e} {detail}"}
 
     # Step 3: wait for Instagram to process the image
     print("  Waiting for media to be ready...")
@@ -1820,7 +1825,7 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
     print("  Publishing...")
     try:
         resp = requests.post(
-            f"https://graph.instagram.com/v21.0/{user_id}/media_publish",
+            f"https://graph.facebook.com/v21.0/{user_id}/media_publish",
             data={"creation_id": creation_id, "access_token": access_token},
             timeout=30,
         )
@@ -1828,12 +1833,15 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
         media_id = resp.json()["id"]
         print(f"    Published: {media_id}")
     except Exception as e:
-        return {"success": False, "url_ig": "", "error": f"Publish failed: {e}"}
+        detail = ""
+        try: detail = e.response.json()
+        except Exception: pass
+        return {"success": False, "url_ig": "", "error": f"Publish failed: {e} {detail}"}
 
     # Step 5: get permalink
     try:
         resp = requests.get(
-            f"https://graph.instagram.com/v21.0/{media_id}",
+            f"https://graph.facebook.com/v21.0/{media_id}",
             params={"fields": "permalink", "access_token": access_token},
             timeout=15,
         )
@@ -3490,6 +3498,45 @@ def main():
             ctx.close()
         sys.exit(0)
 
+    # Find Instagram Business Account ID
+    if args.setup_ig:
+        config = load_config(args.config)
+        token = config.get("accounts", {}).get("instagram", {}).get("access_token", "").strip()
+        if not token:
+            print("ERROR: No access_token in config.json accounts.instagram")
+            sys.exit(1)
+        print("Looking up Facebook Pages and linked Instagram Business Accounts...")
+        try:
+            resp = requests.get(
+                "https://graph.facebook.com/v21.0/me/accounts",
+                params={"access_token": token},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            pages = resp.json().get("data", [])
+            if not pages:
+                print("No Facebook Pages found for this token.")
+                sys.exit(1)
+            for page in pages:
+                page_id   = page["id"]
+                page_name = page["name"]
+                page_token = page.get("access_token", token)
+                ig_resp = requests.get(
+                    f"https://graph.facebook.com/v21.0/{page_id}",
+                    params={"fields": "instagram_business_account", "access_token": page_token},
+                    timeout=15,
+                )
+                ig_data = ig_resp.json().get("instagram_business_account", {})
+                ig_id = ig_data.get("id", "none")
+                print(f"  Page: {page_name} (ID: {page_id})")
+                print(f"    → Instagram Business Account ID: {ig_id}")
+                if ig_id != "none":
+                    print(f"    → Put this in config.json accounts.instagram.user_id: {ig_id}")
+        except Exception as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
     # Refresh Instagram long-lived token
     if args.refresh_ig_token:
         config = load_config(args.config)
@@ -3499,9 +3546,15 @@ def main():
             print("ERROR: No access_token in config.json accounts.instagram")
             sys.exit(1)
         try:
+            app_id     = ig_cfg.get("app_id", "").strip()
+            app_secret = ig_cfg.get("app_secret", "").strip()
+            if not app_id or not app_secret:
+                print("ERROR: app_id and app_secret required in config.json accounts.instagram for token refresh")
+                sys.exit(1)
             resp = requests.get(
-                "https://graph.instagram.com/refresh_access_token",
-                params={"grant_type": "ig_refresh_token", "access_token": token},
+                "https://graph.facebook.com/v21.0/oauth/access_token",
+                params={"grant_type": "fb_exchange_token", "client_id": app_id,
+                        "client_secret": app_secret, "fb_exchange_token": token},
                 timeout=15,
             )
             resp.raise_for_status()
