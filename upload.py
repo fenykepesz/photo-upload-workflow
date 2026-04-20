@@ -3582,45 +3582,23 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    # Search Facebook Places for an Instagram location_id
+    # Help user find a Facebook Place ID for Instagram location tagging
     if args.search_ig_location:
-        config = load_config(args.config)
-        token = config.get("accounts", {}).get("instagram", {}).get("access_token", "").strip()
-        if not token:
-            print("ERROR: No access_token in config.json accounts.instagram")
-            sys.exit(1)
         query = args.search_ig_location.strip()
-        print(f"Searching Facebook Places for: {query!r}")
-        try:
-            resp = requests.get(
-                "https://graph.facebook.com/v21.0/search",
-                params={"type": "place", "q": query, "fields": "id,name,location", "access_token": token},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            results = [r for r in resp.json().get("data", []) if r.get("location")]
-            if not results:
-                print("No places found. Try a shorter or different query.")
-                sys.exit(0)
-            print(f"\nFound {len(results)} place(s):\n")
-            for r in results:
-                loc = r.get("location", {})
-                city    = loc.get("city", "")
-                country = loc.get("country", "")
-                street  = loc.get("street", "")
-                addr = ", ".join(filter(None, [street, city, country]))
-                print(f"  ID: {r['id']}")
-                print(f"  Name: {r['name']}")
-                if addr: print(f"  Address: {addr}")
-                print(f"  → Add to config.json location_lookup: {{\"name\": \"{query}\", \"ig_location_id\": \"{r['id']}\"}}")
-                print()
-        except Exception as e:
-            detail = ""
-            try: detail = e.response.json()
-            except Exception: pass
-            print(f"ERROR: {e}")
-            if detail: print(f"Detail: {detail}")
-            sys.exit(1)
+        encoded = requests.utils.quote(query)
+        print(f"Facebook's Place Search API is deprecated for third-party apps.")
+        print(f"To find the Place ID for '{query}', follow these steps:\n")
+        print(f"  1. Open this URL in your browser:")
+        print(f"     https://www.facebook.com/search/places/?q={encoded}")
+        print(f"  2. Click the correct place in the results.")
+        print(f"  3. On the place page, look at the URL — it contains the Page ID, e.g.:")
+        print(f"     https://www.facebook.com/pages/.../<PAGE_ID>")
+        print(f"     Or open the About section and look for the numeric ID.")
+        print(f"  4. Alternatively, open Graph API Explorer:")
+        print(f"     https://developers.facebook.com/tools/explorer/")
+        print(f"     and run:  GET /<PAGE_ID>?fields=id,name,location")
+        print(f"     to confirm it has location data.")
+        print(f"\n  5. Once you have the ID, add it in Settings → Locations in queue_manager.html.")
         sys.exit(0)
 
     # Refresh Instagram long-lived token
