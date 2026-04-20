@@ -3617,7 +3617,29 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('lab-lookup-form').style.display = 'none';
     }
     function applyLabLookup(contactName) {
-      // No-op — handles are resolved at upload time; this is a hook for future UI use
+      if (!contactName) return;
+      const arr = getLabLookup();
+      const m = arr.find(x => x.name.toLowerCase() === contactName.toLowerCase());
+      if (!m) return;
+      // Append lab handles to platform tag fields (only if not already present)
+      function appendHandle(elId, handle) {
+        if (!handle) return;
+        const el = document.getElementById(elId);
+        if (!el) return;
+        const current = el.value.split(',').map(s => s.trim()).filter(Boolean);
+        if (!current.includes(handle)) el.value = [...current, handle].join(', ');
+      }
+      appendHandle('m-ig-tag-people',  m.ig_handle);
+      appendHandle('m-x-tag-people',   m.x_handle);
+      appendHandle('m-bsky-tag-people', m.bsky_handle);
+      appendHandle('m-vk-tag-people',  m.vk_handle);
+      if (m.fb_tags) {
+        const fbEl = document.getElementById('m-fb-tag-people');
+        if (fbEl) {
+          const current = fbEl.value.split(',').map(s => s.trim()).filter(Boolean);
+          if (!current.includes(m.fb_tags)) fbEl.value = [...current, m.fb_tags].join(', ');
+        }
+      }
     }
     function seedDevContacts() {
       const dl = document.getElementById('film-dev-contact-list');

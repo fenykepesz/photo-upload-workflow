@@ -3696,8 +3696,6 @@ def main():
             except Exception as _e:
                 print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
 
-    lab_lookup = config.get("lab_lookup", [])
-
     # Load and filter CSV
     all_rows = load_queue(args.csv)
     target_rows = filter_rows(all_rows, args.row)
@@ -3893,14 +3891,7 @@ def main():
                             else:
                                 print("  WARNING: No stash_url_nsfw — cannot download image")
 
-                        # Resolve film developer contact handles
-                        _lab = {}
-                        if row.get("film_used", "").strip().upper() == "TRUE":
-                            _lab = get_lab_handles(row.get("film_dev_contact", "").strip(), lab_lookup)
-
                         vk_tag_people = row.get("vk_tag_people", "").strip()
-                        if _lab.get("vk_handle"):
-                            vk_tag_people = ",".join(filter(None, [vk_tag_people, _lab["vk_handle"].strip()]))
                         vk_groups = row.get("vk_groups", "").strip()
                         vk_group_caption = row.get("vk_group_caption", "").strip()
                         _vk_film_parts = []
@@ -3965,7 +3956,7 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts), dev_handle=_lab.get("x_handle", ""))
+                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -4013,7 +4004,7 @@ def main():
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip(), dev_bsky_handle=_lab.get("bsky_handle", ""))
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip())
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
 
@@ -4055,14 +4046,14 @@ def main():
                             get_effective_title(row),
                             row.get("keywords", ""),
                             model_name=row.get("model_name", "").strip(),
-                            ig_handle=row.get("ig_tag_people", "").strip(),
+                            ig_handle=row.get("ig_tag_people", "").split(",")[0].strip(),
                             film_info="\n".join(_film_parts),
                         )
                         print(f"    Caption ({len(ig_caption)} chars): {ig_caption[:80]}...")
 
                         ig_config = config.get("accounts", {}).get("instagram", {})
                         try:
-                            _ig_collab = [h for h in [row.get("ig_tag_people", "").strip(), _lab.get("ig_handle", "").strip()] if h]
+                            _ig_collab = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
                             result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
                         except Exception as e:
                             result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
@@ -4090,8 +4081,6 @@ def main():
                         location_fb = row.get("location_500px", "").strip()
                         feeling_fb = row.get("fb_feeling", "").strip()
                         tag_people_fb = row.get("fb_tag_people", "").strip()
-                        if _lab.get("fb_tags"):
-                            tag_people_fb = ",".join(filter(None, [tag_people_fb, _lab["fb_tags"].strip()]))
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
 
                         # NSFW safety: never upload NSFW image to Facebook
