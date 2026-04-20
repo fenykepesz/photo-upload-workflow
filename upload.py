@@ -3641,6 +3641,7 @@ def main():
         next_url = None
         params = {"fields": "id,timestamp,location", "limit": 50, "access_token": token}
         try:
+            page_num = 0
             while True:
                 resp = requests.get(
                     next_url or f"https://graph.facebook.com/v21.0/{user_id}/media",
@@ -3649,10 +3650,14 @@ def main():
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                for item in data.get("data", []):
+                items = data.get("data", [])
+                page_num += 1
+                print(f"  Page {page_num}: {len(items)} posts fetched")
+                for item in items:
                     loc = item.get("location")
                     if loc and loc.get("id") and loc["id"] not in seen:
                         seen[loc["id"]] = loc
+                        print(f"    Found location: {loc.get('name', '?')} (ID: {loc['id']})")
                 next_url = data.get("paging", {}).get("next")
                 params = None
                 if not next_url or len(seen) >= 100:
