@@ -1771,7 +1771,7 @@ def upload_image_to_imgbb(image_path, api_key):
     return resp.json()["data"]["url"]
 
 
-def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
+def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None):
     """
     Post a photo to Instagram via the Graph API.
     Requires: ig_config with access_token, user_id, imgbb_api_key.
@@ -1801,11 +1801,17 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
         return {"success": True, "url_ig": "NO_SUBMIT", "error": ""}
 
     # Step 2: create media container (Facebook Login flow uses graph.facebook.com)
-    print("  Creating Instagram media container...")
+    if collaborators:
+        print(f"  Creating Instagram media container (collab: {', '.join(collaborators)})...")
+    else:
+        print("  Creating Instagram media container...")
     try:
         resp = requests.post(
             f"https://graph.facebook.com/v21.0/{user_id}/media",
-            data={"image_url": image_url, "caption": caption, "access_token": access_token},
+            data={k: v for k, v in {
+            "image_url": image_url, "caption": caption, "access_token": access_token,
+            "collaborators": ",".join(h.lstrip("@") for h in collaborators) if collaborators else None,
+        }.items() if v is not None},
             timeout=30,
         )
         resp.raise_for_status()
@@ -4023,7 +4029,8 @@ def main():
 
                         ig_config = config.get("accounts", {}).get("instagram", {})
                         try:
-                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit)
+                            _ig_collab = [h for h in [row.get("ig_tag_people", "").strip()] if h]
+                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
                         except Exception as e:
                             result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
 
