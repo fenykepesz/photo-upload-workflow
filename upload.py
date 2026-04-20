@@ -14,6 +14,7 @@ Usage:
     python upload.py --csv path/to/queue.csv  # custom CSV path
     python upload.py --clear-image-cache      # delete all cached images in image_cache/
     python upload.py --import-x-cookies cookies.json  # import X.com cookies from Cookie-Editor export
+    python upload.py --fix-fb-location               # open Facebook profile to fix Current City
 """
 
 import argparse
@@ -87,6 +88,7 @@ COLS = [
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
     "fb_feeling", "fb_tag_people",
     "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
+    "x_tag_people", "bsky_tag_people",
     "film_used", "film_camera", "film_lens", "film_stock", "film_developed_by",
     "serial_title",
 ]
@@ -118,6 +120,8 @@ def parse_args():
     p.add_argument("--clear-image-cache", action="store_true", help="Delete all cached images in image_cache/ and exit")
     p.add_argument("--import-x-cookies", metavar="FILE",
                    help="Import X.com cookies from a Cookie-Editor JSON export into the browser profile")
+    p.add_argument("--fix-fb-location", action="store_true",
+                   help="Open browser to Facebook profile settings so you can set the Current City")
     return p.parse_args()
 
 
@@ -1648,12 +1652,13 @@ X_CHAR_LIMIT = 280
 BSKY_CHAR_LIMIT = 300
 
 
-def build_x_post_text(title, keywords_str, model_name="", film_info="", max_tags=5):
+def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info="", max_tags=5):
     """Build a tweet from title + hashtags, fitting within 280 characters.
     Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
     Limited to max_tags hashtags."""
     if model_name and model_name.strip():
-        text = f"Model: {model_name.strip()}\n\n" + title.strip()
+        handle_suffix = f" @{x_handle.strip().lstrip('@')}" if x_handle and x_handle.strip() else ""
+        text = f"Model: {model_name.strip()}{handle_suffix}\n\n" + title.strip()
     else:
         text = title.strip()
     if film_info:
@@ -1843,7 +1848,7 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
 
 
 # ── Bluesky Upload ──────────────────────────────────────────────
-def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
+def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, bsky_handle=""):
     """
     Post a photo with text to Bluesky via browser automation.
     Flow: home → New Post → write text → attach photo → (NSFW label) → Post.
@@ -1932,6 +1937,23 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False):
             page.keyboard.type(post_text, delay=10)
     except Exception as e:
         print(f"    WARNING: Could not write text: {e}")
+
+    # Type @handle via keyboard so Bluesky's autocomplete creates a proper mention facet
+    if bsky_handle and bsky_handle.strip():
+        handle = bsky_handle.strip().lstrip("@")
+        print(f"  Tagging @{handle} via autocomplete...")
+        try:
+            page.keyboard.press("End")
+            page.wait_for_timeout(200)
+            page.keyboard.type(f"\n@{handle}", delay=50)
+            page.wait_for_timeout(3000)
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(300)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(500)
+            print(f"    @{handle} mention selected")
+        except Exception as e:
+            print(f"    WARNING: @mention typing failed: {e}")
 
     page.wait_for_timeout(1000)
 
@@ -3318,6 +3340,28 @@ def main():
             ctx.close()
         sys.exit(0)
 
+    # Fix Facebook location (Current City in profile)
+    if args.fix_fb_location:
+        print(f"Opening Facebook profile settings (profile: {args.profile})")
+        print("Navigate to About → Living → Current city and set it to your city.")
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(args.profile),
+                headless=False,
+                executable_path=find_chrome(),
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
+            )
+            page = ctx.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            page.goto("https://www.facebook.com/profile.php?sk=about_living", wait_until="domcontentloaded", timeout=30000)
+            print("Press ENTER when done...")
+            input()
+            ctx.close()
+        sys.exit(0)
+
     # Clear VK drafts mode
     if args.clear_vk_drafts:
         print(f"Opening browser to clear VK drafts (profile: {args.profile})")
@@ -3415,6 +3459,8 @@ def main():
             slow_mo=100,
             timezone_id="Asia/Jerusalem",
             locale="en-IL",
+            geolocation={"latitude": 32.08, "longitude": 34.78},
+            permissions=["geolocation"],
         )
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -3635,7 +3681,7 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
+                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -3683,7 +3729,7 @@ def main():
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit)
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip())
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
 

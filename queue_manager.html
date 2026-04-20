@@ -1208,6 +1208,14 @@
             <div class="dp-label">VK Tagged</div>
             <div class="dp-value" id="dp-vktagpeople">—</div>
           </div>
+          <div class="dp-field" id="dp-xtagpeoplewrap" style="display:none">
+            <div class="dp-label">X Tagged</div>
+            <div class="dp-value" id="dp-xtagpeople">—</div>
+          </div>
+          <div class="dp-field" id="dp-bskytagpeoplewrap" style="display:none">
+            <div class="dp-label">BSKY Tagged</div>
+            <div class="dp-value" id="dp-bskytagpeople">—</div>
+          </div>
           <div class="dp-field" id="dp-vkgroupswrap" style="display:none">
             <div class="dp-label">VK Groups</div>
             <div class="dp-value" id="dp-vkgroups">—</div>
@@ -1512,6 +1520,18 @@
             <label>VK Group Caption <span style="font-weight:400;opacity:.6">(optional extra text — added below photographer &amp; model name)</span></label>
             <textarea id="m-vk-group-caption" rows="3" placeholder="Optional extra text for group posts..."></textarea>
           </div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">X (Twitter)</div>
+          <div class="fg form-full">
+            <label>X Tag People <span style="font-weight:400;opacity:.6">(X handle without @, e.g. janedoe)</span></label>
+            <input type="text" id="m-x-tag-people" placeholder="e.g. janedoe" list="x-tag-people-list" autocomplete="off">
+            <datalist id="x-tag-people-list"></datalist>
+          </div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">Bluesky</div>
+          <div class="fg form-full">
+            <label>Bluesky Tag People <span style="font-weight:400;opacity:.6">(Bluesky handle without @, e.g. jane.bsky.social)</span></label>
+            <input type="text" id="m-bsky-tag-people" placeholder="e.g. jane.bsky.social" list="bsky-tag-people-list" autocomplete="off">
+            <datalist id="bsky-tag-people-list"></datalist>
+          </div>
           <div class="form-section">DeviantArt Advanced</div>
           <div class="form-full">
             <div class="auto-row">
@@ -1702,13 +1722,13 @@
       <!-- ── Models panel ── -->
       <div class="s-panel" id="s-tab-models">
         <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
-          Map model names to auto-fill DA gallery, serial title prefix, FB tags, and VK tags.
+          Map model names to auto-fill DA gallery, serial title prefix, FB tags, VK tags, X handle, and Bluesky handle.
           When you type a known model name in the form, these defaults are applied automatically.
         </div>
         <div class="s-section-title">Model Lookup Table</div>
         <table class="s-data-table" id="model-lookup-table">
-          <thead><tr><th>Name</th><th>DA Gallery</th><th>FB Tags</th><th>VK Tags</th><th style="width:90px"></th></tr></thead>
-          <tbody id="model-lookup-tbody"><tr><td colspan="5" style="color:var(--muted);padding:8px">No models configured yet.</td></tr></tbody>
+          <thead><tr><th>Name</th><th>DA Gallery</th><th>FB Tags</th><th>VK Tags</th><th>X Handle</th><th>BSKY Handle</th><th style="width:90px"></th></tr></thead>
+          <tbody id="model-lookup-tbody"><tr><td colspan="7" style="color:var(--muted);padding:8px">No models configured yet.</td></tr></tbody>
         </table>
         <div style="margin-top:10px"><button class="btn btn-sm" onclick="mlAddNew()">+ Add Model</button></div>
 
@@ -1720,6 +1740,8 @@
           <div class="s-field"><span class="s-field-label">DA Gallery</span><input type="text" id="ml-da-gallery" placeholder="Gallery name (must match exactly)" autocomplete="off" list="ml-gallery-list"><datalist id="ml-gallery-list"></datalist></div>
           <div class="s-field"><span class="s-field-label">FB Tags</span><input type="text" id="ml-fb-tags" placeholder="e.g. jane.doe, john.smith" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">VK Tags</span><input type="text" id="ml-vk-tags" placeholder="e.g. @id123456789, some_user" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">X Handle</span><input type="text" id="ml-x-handle" placeholder="e.g. janedoe (without @)" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="ml-bsky-handle" placeholder="e.g. jane.bsky.social (without @)" autocomplete="off"></div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="btn btn-primary btn-sm" onclick="mlSave()">Save</button>
             <button class="btn btn-ghost btn-sm" onclick="mlCancel()">Cancel</button>
@@ -1755,6 +1777,7 @@
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
       'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result',
+      'x_tag_people', 'bsky_tag_people',
       'film_used', 'film_camera', 'film_lens', 'film_stock', 'film_developed_by',
       'serial_title'];
 
@@ -2108,6 +2131,10 @@
       document.getElementById('dp-ftagpeoplewrap').style.display = r.fb_tag_people ? '' : 'none';
       document.getElementById('dp-vktagpeople').textContent = r.vk_tag_people || '—';
       document.getElementById('dp-vktagpeoplewrap').style.display = r.vk_tag_people ? '' : 'none';
+      document.getElementById('dp-xtagpeople').textContent = r.x_tag_people || '—';
+      document.getElementById('dp-xtagpeoplewrap').style.display = r.x_tag_people ? '' : 'none';
+      document.getElementById('dp-bskytagpeople').textContent = r.bsky_tag_people || '—';
+      document.getElementById('dp-bskytagpeoplewrap').style.display = r.bsky_tag_people ? '' : 'none';
       document.getElementById('dp-vkgroups').textContent = r.vk_groups || '—';
       document.getElementById('dp-vkgroupswrap').style.display = r.vk_groups ? '' : 'none';
       document.getElementById('dp-vkgroupsresult').textContent = r.vk_groups_result || '—';
@@ -2277,6 +2304,8 @@
       document.getElementById('m-fb-feeling').value = 'happy';
       document.getElementById('m-fb-tag-people').value = '';
       document.getElementById('m-vk-tag-people').value = '';
+      document.getElementById('m-x-tag-people').value = '';
+      document.getElementById('m-bsky-tag-people').value = '';
       document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(c => c.checked = true);
       const _vkAcct = configData?.accounts?.vk?.trim();
       document.getElementById('m-vk-group-caption').value = _vkAcct ? `Photographer: [@${_vkAcct.replace(/^@/, '')}]` : '';
@@ -2335,6 +2364,8 @@
       document.getElementById('m-fb-feeling').value = r.fb_feeling || 'happy';
       document.getElementById('m-fb-tag-people').value = r.fb_tag_people || '';
       document.getElementById('m-vk-tag-people').value = r.vk_tag_people || '';
+      document.getElementById('m-x-tag-people').value = r.x_tag_people || '';
+      document.getElementById('m-bsky-tag-people').value = r.bsky_tag_people || '';
       // Restore VK group checkboxes
       const vkGroupSlugs = (r.vk_groups || '').split(',').map(s => s.trim()).filter(Boolean);
       document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(cb => {
@@ -2418,6 +2449,8 @@
         fb_feeling: document.getElementById('m-fb-feeling').value,
         fb_tag_people: document.getElementById('m-fb-tag-people').value.trim(),
         vk_tag_people: document.getElementById('m-vk-tag-people').value.trim(),
+        x_tag_people: document.getElementById('m-x-tag-people').value.trim(),
+        bsky_tag_people: document.getElementById('m-bsky-tag-people').value.trim(),
         vk_groups: getVkGroupsSelected(),
         vk_group_caption: document.getElementById('m-vk-group-caption').value.trim(),
         vk_groups_result: existing?.vk_groups_result || '',
@@ -3233,7 +3266,7 @@ Return ONLY valid JSON, no markdown fences:
     refreshModelNameList();
 
     // ── MODEL LOOKUP TABLE ────────────────────────────────────────────────────────
-    // Each entry: { name, da_gallery, serial_prefix, fb_tags, vk_tags }
+    // Each entry: { name, da_gallery, serial_prefix, fb_tags, vk_tags, x_handle, bsky_handle }
     function getModelLookup() {
       try { return JSON.parse(localStorage.getItem('model_lookup') || '[]'); } catch { return []; }
     }
@@ -3249,7 +3282,7 @@ Return ONLY valid JSON, no markdown fences:
       if (!tbody) return;
       const arr = getModelLookup();
       if (!arr.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No models configured yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No models configured yet.</td></tr>';
         return;
       }
       tbody.innerHTML = arr.map(m => `<tr>
@@ -3257,6 +3290,8 @@ Return ONLY valid JSON, no markdown fences:
         <td>${h(m.da_gallery || '—')}</td>
         <td style="font-size:11px">${h(m.fb_tags || '—')}</td>
         <td style="font-size:11px">${h(m.vk_tags || '—')}</td>
+        <td style="font-size:11px">${h(m.x_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
         <td>
           <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="mlEdit(this.dataset.name)">Edit</button>
           <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="mlDelete(this.dataset.name)">✕</button>
@@ -3275,6 +3310,8 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ml-da-gallery').value = '';
       document.getElementById('ml-fb-tags').value = '';
       document.getElementById('ml-vk-tags').value = '';
+      document.getElementById('ml-x-handle').value = '';
+      document.getElementById('ml-bsky-handle').value = '';
       mlRefreshGalleryList();
       document.getElementById('model-lookup-form').style.display = '';
       document.getElementById('ml-name').focus();
@@ -3289,6 +3326,8 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ml-da-gallery').value = m.da_gallery || '';
       document.getElementById('ml-fb-tags').value = m.fb_tags || '';
       document.getElementById('ml-vk-tags').value = m.vk_tags || '';
+      document.getElementById('ml-x-handle').value = m.x_handle || '';
+      document.getElementById('ml-bsky-handle').value = m.bsky_handle || '';
       mlRefreshGalleryList();
       document.getElementById('model-lookup-form').style.display = '';
       document.getElementById('ml-name').focus();
@@ -3307,6 +3346,8 @@ Return ONLY valid JSON, no markdown fences:
         da_gallery: document.getElementById('ml-da-gallery').value.trim(),
         fb_tags: document.getElementById('ml-fb-tags').value.trim(),
         vk_tags: document.getElementById('ml-vk-tags').value.trim(),
+        x_handle: document.getElementById('ml-x-handle').value.trim(),
+        bsky_handle: document.getElementById('ml-bsky-handle').value.trim(),
       };
       let arr = getModelLookup();
       if (editName) arr = arr.filter(x => x.name !== editName);
@@ -3372,6 +3413,18 @@ Return ONLY valid JSON, no markdown fences:
       if (m.vk_tags) {
         const vkEl = document.getElementById('m-vk-tag-people');
         if (vkEl && !vkEl.value.trim()) vkEl.value = m.vk_tags;
+      }
+
+      // X handle — set if empty
+      if (m.x_handle) {
+        const xEl = document.getElementById('m-x-tag-people');
+        if (xEl && !xEl.value.trim()) xEl.value = m.x_handle;
+      }
+
+      // Bluesky handle — set if empty
+      if (m.bsky_handle) {
+        const bskyEl = document.getElementById('m-bsky-tag-people');
+        if (bskyEl && !bskyEl.value.trim()) bskyEl.value = m.bsky_handle;
       }
     }
 
