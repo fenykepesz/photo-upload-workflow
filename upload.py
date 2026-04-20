@@ -130,12 +130,6 @@ def parse_args():
                    help="Refresh the Instagram long-lived access token and update config.json")
     p.add_argument("--setup-ig", action="store_true",
                    help="Find your Instagram Business Account ID and print it for config.json")
-    p.add_argument("--ig-location-id", metavar="PAGE",
-                   help="Look up a Facebook page username or URL and return its Place ID for config.json")
-    p.add_argument("--list-ig-locations", action="store_true",
-                   help="List all location IDs found in your recent Instagram posts")
-    p.add_argument("--test-ig-location", metavar="ID",
-                   help="Test whether a numeric ID is a valid Instagram location_id")
     return p.parse_args()
 
 
@@ -1766,17 +1760,6 @@ def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info
     return text
 
 
-def get_ig_location_id(location_name, location_lookup):
-    """Look up a location name in location_lookup, return its Instagram location_id."""
-    if not location_name or not location_lookup:
-        return ""
-    name_lower = location_name.strip().lower()
-    for entry in location_lookup:
-        if entry.get("name", "").strip().lower() == name_lower:
-            return entry.get("ig_location_id", "")
-    return ""
-
-
 def get_lab_handles(contact_name, lab_lookup):
     """Look up a developer/lab contact by name, return their platform handles dict."""
     if not contact_name or not lab_lookup:
@@ -1801,7 +1784,7 @@ def upload_image_to_imgbb(image_path, api_key):
     return resp.json()["data"]["url"]
 
 
-def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None, location_id=""):
+def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None):
     """
     Post a photo to Instagram via the Graph API.
     Requires: ig_config with access_token, user_id, imgbb_api_key.
@@ -1835,8 +1818,6 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
         payload = {"image_url": image_url, "caption": cap, "access_token": access_token}
         if with_collab:
             payload["collaborators"] = ",".join(h.lstrip("@") for h in with_collab)
-        if location_id:
-            payload["location_id"] = location_id
         return requests.post(
             f"https://graph.facebook.com/v21.0/{user_id}/media",
             data=payload, timeout=30,
@@ -3586,109 +3567,6 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    # Look up a Facebook page by username/URL to get its Place ID for Instagram
-    if args.ig_location_id:
-        config = load_config(args.config)
-        token = config.get("accounts", {}).get("instagram", {}).get("access_token", "").strip()
-        if not token:
-            print("ERROR: No access_token in config.json accounts.instagram")
-            sys.exit(1)
-        # Accept full URL or just the username/slug
-        page_ref = args.ig_location_id.strip().rstrip("/")
-        if "facebook.com/" in page_ref:
-            page_ref = page_ref.split("facebook.com/")[-1].split("/")[0].split("?")[0]
-        print(f"Looking up Facebook page: {page_ref!r}")
-        print(f"  Tip: find the right page by searching on https://www.facebook.com/search/places/")
-        print(f"       then copy the page username from the URL (e.g. facebook.com/TelAvivCityHall → TelAvivCityHall)\n")
-        try:
-            resp = requests.get(
-                f"https://graph.facebook.com/v21.0/{page_ref}",
-                params={"fields": "id,name,location", "access_token": token},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            loc = data.get("location", {})
-            if not loc:
-                print(f"  WARNING: This page has no location data — it may not work as an Instagram location tag.")
-            city    = loc.get("city", "")
-            country = loc.get("country", "")
-            addr = ", ".join(filter(None, [city, country]))
-            print(f"  Name:    {data.get('name', '—')}")
-            print(f"  ID:      {data['id']}")
-            if addr: print(f"  Address: {addr}")
-            print(f"\n  → In Settings → Locations, add:")
-            print(f"    Location Name: <your location_500px value>")
-            print(f"    Place ID:      {data['id']}")
-        except Exception as e:
-            detail = ""
-            try: detail = e.response.json().get("error", {}).get("message", "")
-            except Exception: pass
-            print(f"ERROR: {e}")
-            if detail: print(f"Detail: {detail}")
-            sys.exit(1)
-        sys.exit(0)
-
-    # Test whether a numeric ID works as an Instagram location_id
-    if args.test_ig_location:
-        config = load_config(args.config)
-        ig_cfg = config.get("accounts", {}).get("instagram", {})
-        token   = ig_cfg.get("access_token", "").strip()
-        user_id = ig_cfg.get("user_id", "").strip()
-        loc_id  = args.test_ig_location.strip()
-        if not token or not user_id:
-            print("ERROR: access_token and user_id required in config.json accounts.instagram")
-            sys.exit(1)
-        print(f"Testing location ID: {loc_id}\n")
-
-        # 1. Try Graph API object lookup
-        print("1. Graph API object lookup...")
-        r = requests.get(f"https://graph.facebook.com/v21.0/{loc_id}",
-                         params={"fields": "id,name,location", "access_token": token}, timeout=15)
-        print(f"   Status: {r.status_code}")
-        print(f"   Response: {r.json()}\n")
-
-        # 2. Try creating a test media container (image won't be published — just checks location validity)
-        print("2. Test media container creation with this location_id...")
-        test_img = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png"
-        r2 = requests.post(
-            f"https://graph.facebook.com/v21.0/{user_id}/media",
-            data={"image_url": test_img, "caption": "test", "location_id": loc_id, "access_token": token},
-            timeout=15,
-        )
-        print(f"   Status: {r2.status_code}")
-        print(f"   Response: {r2.json()}")
-        if r2.ok:
-            container_id = r2.json().get("id")
-            print(f"\n   ✓ Location ID is VALID — container created ({container_id})")
-            print(f"   (Container not published — safe to use this ID)")
-            # Clean up: delete the test container
-            requests.delete(f"https://graph.facebook.com/v21.0/{container_id}",
-                            params={"access_token": token}, timeout=10)
-        else:
-            err = r2.json().get("error", {}).get("message", "unknown")
-            print(f"\n   ✗ Location ID INVALID or rejected: {err}")
-        sys.exit(0)
-
-    # List location IDs from existing Instagram posts
-    if args.list_ig_locations:
-        config = load_config(args.config)
-        ig_cfg = config.get("accounts", {}).get("instagram", {})
-        token   = ig_cfg.get("access_token", "").strip()
-        user_id = ig_cfg.get("user_id", "").strip()
-        if not token or not user_id:
-            print("ERROR: access_token and user_id required in config.json accounts.instagram")
-            sys.exit(1)
-        print("\nNote: The Instagram Graph API does not return location data without")
-        print("'instagram_manage_insights' permission, which requires Meta app review.")
-        print("\nTo find a Place ID manually:")
-        print("  1. Open the Instagram app and find any post with the location tagged.")
-        print("  2. Tap the location name — it opens:")
-        print("     https://www.instagram.com/explore/locations/{ID}/")
-        print("  3. That number is the Place ID.")
-        print("  4. Add it in Settings → Locations in queue_manager.html.")
-        sys.exit(0)
-
     # Refresh Instagram long-lived token
     if args.refresh_ig_token:
         config = load_config(args.config)
@@ -3817,8 +3695,6 @@ def main():
                 print("  Instagram token refreshed and saved.")
             except Exception as _e:
                 print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
-
-    location_lookup = config.get("location_lookup", [])
 
     # Load and filter CSV
     all_rows = load_queue(args.csv)
@@ -4178,8 +4054,7 @@ def main():
                         ig_config = config.get("accounts", {}).get("instagram", {})
                         try:
                             _ig_collab = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
-                            _ig_location_id = get_ig_location_id(row.get("location_500px", "").strip(), location_lookup)
-                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None, location_id=_ig_location_id)
+                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
                         except Exception as e:
                             result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
 
