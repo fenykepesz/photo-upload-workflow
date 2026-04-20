@@ -1447,6 +1447,11 @@
             <input type="text" id="m-film-developed-by" placeholder="e.g. Lab name or Self" list="film-developed-by-list" autocomplete="off">
             <datalist id="film-developed-by-list"></datalist>
           </div>
+          <div class="fg" id="film-dev-contact-row" style="display:none">
+            <label>Dev Contact <span style="color:var(--muted);font-weight:400;font-size:11px">— for platform tagging</span></label>
+            <input type="text" id="m-film-dev-contact" placeholder="e.g. Tammy Miller" list="film-dev-contact-list" autocomplete="off" onchange="applyLabLookup(this.value)">
+            <datalist id="film-dev-contact-list"></datalist>
+          </div>
           <div class="fg form-full">
             <label>Mature Content</label>
             <div class="chk-row"><input type="checkbox" id="m-nsfw-flag"><span>Mark as Mature / NSFW</span></div>
@@ -1601,6 +1606,7 @@
         <button class="s-tab"        id="stab-da"      onclick="showSettingsTab('da')">DeviantArt</button>
         <button class="s-tab"        id="stab-vk"      onclick="showSettingsTab('vk')">VK Data</button>
         <button class="s-tab"        id="stab-models"  onclick="showSettingsTab('models')">Models</button>
+        <button class="s-tab"        id="stab-labs"    onclick="showSettingsTab('labs')">Labs</button>
       </div>
 
       <!-- ── AI panel ── -->
@@ -1772,6 +1778,34 @@
         </div>
       </div>
 
+      <!-- ── Labs panel ── -->
+      <div class="s-panel" id="s-tab-labs">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+          Map developer/lab contact names to platform handles for tagging when film is used.
+          Set <strong>Dev Contact</strong> in the photo form to auto-tag them on upload.
+        </div>
+        <div class="s-section-title">Lab Lookup Table</div>
+        <table class="s-data-table" id="lab-lookup-table">
+          <thead><tr><th>Name</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th style="width:90px"></th></tr></thead>
+          <tbody id="lab-lookup-tbody"><tr><td colspan="6" style="color:var(--muted);padding:8px">No labs configured yet.</td></tr></tbody>
+        </table>
+        <div style="margin-top:10px"><button class="btn btn-sm" onclick="llAddNew()">+ Add Lab Contact</button></div>
+
+        <div id="lab-lookup-form" style="display:none;margin-top:14px;background:var(--surface3);padding:12px;border-radius:var(--radius);border:1px solid var(--border)">
+          <div class="s-section-title" style="margin-bottom:8px" id="ll-form-title">Add Lab Contact</div>
+          <input type="hidden" id="ll-edit-name">
+          <div class="s-field"><span class="s-field-label">Name</span><input type="text" id="ll-name" placeholder="e.g. Tammy Miller" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">X Handle</span><input type="text" id="ll-x-handle" placeholder="e.g. pandalabs (without @)" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="ll-bsky-handle" placeholder="e.g. pandalabs.bsky.social" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">IG Handle</span><input type="text" id="ll-ig-handle" placeholder="e.g. pandalabs (without @)" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">VK Handle</span><input type="text" id="ll-vk-handle" placeholder="e.g. @id123456 or username" autocomplete="off"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="llSave()">Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="llCancel()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Footer -->
       <div class="s-dialog-footer">
         <button class="btn btn-ghost btn-sm" onclick="closeAiKeyDialog()">Close</button>
@@ -1801,7 +1835,7 @@
       'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
       'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result',
       'x_tag_people', 'bsky_tag_people',
-      'film_used', 'film_camera', 'film_lens', 'film_stock', 'film_developed_by',
+      'film_used', 'film_camera', 'film_lens', 'film_stock', 'film_developed_by', 'film_dev_contact',
       'serial_title'];
 
     // ── CSV ────────────────────────────────────────────────────────────────────────
@@ -1991,13 +2025,14 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); seedSerialTitles(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); seedDevContacts(); seedSerialTitles(); }
     function toggleFilmFields() {
       const on = document.getElementById('m-film-used').checked;
       document.getElementById('film-camera-row').style.display = on ? '' : 'none';
       document.getElementById('film-lens-row').style.display = on ? '' : 'none';
       document.getElementById('film-stock-row').style.display = on ? '' : 'none';
       document.getElementById('film-developed-by-row').style.display = on ? '' : 'none';
+      document.getElementById('film-dev-contact-row').style.display = on ? '' : 'none';
       if (on) {
         // Default "Developed by" to Panda Labs if empty
         const devEl = document.getElementById('m-film-developed-by');
@@ -2323,6 +2358,7 @@
       document.getElementById('m-film-lens').value = '';
       document.getElementById('m-film-stock').value = '';
       document.getElementById('m-film-developed-by').value = '';
+      document.getElementById('m-film-dev-contact').value = '';
       toggleFilmFields();
       document.getElementById('m-status').value = 'Approved';
       document.getElementById('m-cat-500px').value = '';
@@ -2381,6 +2417,7 @@
       document.getElementById('m-film-lens').value = r.film_lens || '';
       document.getElementById('m-film-stock').value = r.film_stock || '';
       document.getElementById('m-film-developed-by').value = r.film_developed_by || '';
+      document.getElementById('m-film-dev-contact').value = r.film_dev_contact || '';
       toggleFilmFields();
       document.getElementById('m-cat-500px').value = r.category_500px || '';
       document.getElementById('m-cat-35p').value = r.category_35p || '';
@@ -2489,6 +2526,7 @@
         film_lens: document.getElementById('m-film-lens').value.trim(),
         film_stock: document.getElementById('m-film-stock').value.trim(),
         film_developed_by: document.getElementById('m-film-developed-by').value.trim(),
+        film_dev_contact: document.getElementById('m-film-dev-contact').value.trim(),
         serial_title: document.getElementById('m-serial-title').value.trim(),
         da_gallery: Array.from(document.querySelectorAll('#m-da-gallery-list input:checked')).map(c => c.value).join(',') || 'Featured',
         da_groups: Array.from(document.querySelectorAll('#m-da-groups-list input:checked')).map(c => {
@@ -2885,6 +2923,7 @@ Return ONLY valid JSON, no markdown fences:
       if (tab) tab.classList.add('active');
       localStorage.setItem('settings_tab', name);
       if (name === 'models') renderModelLookupTable();
+      if (name === 'labs') renderLabLookupTable();
     }
     function sUpdateFileStatus() {
       // DA
@@ -3027,6 +3066,11 @@ Return ONLY valid JSON, no markdown fences:
         localStorage.setItem('model_lookup', JSON.stringify(configData.model_lookup));
         renderModelLookupTable();
       }
+      if (Array.isArray(configData.lab_lookup)) {
+        localStorage.setItem('lab_lookup', JSON.stringify(configData.lab_lookup));
+        renderLabLookupTable();
+        seedDevContacts();
+      }
     }
 
     async function saveConfigFile(silent = false) {
@@ -3070,6 +3114,7 @@ Return ONLY valid JSON, no markdown fences:
       };
       // Always persist the current model lookup into config.json
       obj.model_lookup = getModelLookup();
+      obj.lab_lookup = getLabLookup();
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
         if (silent) { toast('config.json not linked — open it in Settings → Config to enable auto-save', 'warning'); return; }
@@ -3480,6 +3525,100 @@ Return ONLY valid JSON, no markdown fences:
         const igEl = document.getElementById('m-ig-tag-people');
         if (igEl && !igEl.value.trim()) igEl.value = m.ig_handle;
       }
+    }
+
+    // ── LAB LOOKUP ────────────────────────────────────────────────────────────────
+    function getLabLookup() {
+      try { return JSON.parse(localStorage.getItem('lab_lookup') || '[]'); } catch { return []; }
+    }
+    function saveLabLookupData(arr) {
+      localStorage.setItem('lab_lookup', JSON.stringify(arr));
+      if (configData) configData.lab_lookup = arr;
+      saveConfigFile(true);
+    }
+    function renderLabLookupTable() {
+      const tbody = document.getElementById('lab-lookup-tbody');
+      if (!tbody) return;
+      const arr = getLabLookup();
+      if (!arr.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:8px">No labs configured yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = arr.map(m => `<tr>
+        <td>${h(m.name)}</td>
+        <td style="font-size:11px">${h(m.x_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.vk_handle || '—')}</td>
+        <td>
+          <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="llEdit(this.dataset.name)">Edit</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="llDelete(this.dataset.name)">✕</button>
+        </td>
+      </tr>`).join('');
+    }
+    function llAddNew() {
+      document.getElementById('ll-form-title').textContent = 'Add Lab Contact';
+      document.getElementById('ll-edit-name').value = '';
+      document.getElementById('ll-name').value = '';
+      document.getElementById('ll-x-handle').value = '';
+      document.getElementById('ll-bsky-handle').value = '';
+      document.getElementById('ll-ig-handle').value = '';
+      document.getElementById('ll-vk-handle').value = '';
+      document.getElementById('lab-lookup-form').style.display = '';
+      document.getElementById('ll-name').focus();
+    }
+    function llEdit(name) {
+      const arr = getLabLookup();
+      const m = arr.find(x => x.name === name);
+      if (!m) return;
+      document.getElementById('ll-form-title').textContent = 'Edit Lab Contact';
+      document.getElementById('ll-edit-name').value = m.name;
+      document.getElementById('ll-name').value = m.name;
+      document.getElementById('ll-x-handle').value = m.x_handle || '';
+      document.getElementById('ll-bsky-handle').value = m.bsky_handle || '';
+      document.getElementById('ll-ig-handle').value = m.ig_handle || '';
+      document.getElementById('ll-vk-handle').value = m.vk_handle || '';
+      document.getElementById('lab-lookup-form').style.display = '';
+      document.getElementById('ll-name').focus();
+    }
+    function llDelete(name) {
+      const arr = getLabLookup().filter(x => x.name !== name);
+      saveLabLookupData(arr);
+      renderLabLookupTable();
+    }
+    function llSave() {
+      const editName = document.getElementById('ll-edit-name').value;
+      const name = document.getElementById('ll-name').value.trim();
+      if (!name) { toast('Name is required', 'error'); return; }
+      const entry = {
+        name,
+        x_handle:    document.getElementById('ll-x-handle').value.trim(),
+        bsky_handle: document.getElementById('ll-bsky-handle').value.trim(),
+        ig_handle:   document.getElementById('ll-ig-handle').value.trim(),
+        vk_handle:   document.getElementById('ll-vk-handle').value.trim(),
+      };
+      let arr = getLabLookup();
+      if (editName) arr = arr.filter(x => x.name !== editName);
+      const idx = arr.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
+      if (idx >= 0) arr[idx] = entry; else arr.push(entry);
+      arr.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      saveLabLookupData(arr);
+      renderLabLookupTable();
+      seedDevContacts();
+      document.getElementById('lab-lookup-form').style.display = 'none';
+      toast('Lab contact saved', 'success');
+    }
+    function llCancel() {
+      document.getElementById('lab-lookup-form').style.display = 'none';
+    }
+    function applyLabLookup(contactName) {
+      // No-op — handles are resolved at upload time; this is a hook for future UI use
+    }
+    function seedDevContacts() {
+      const dl = document.getElementById('film-dev-contact-list');
+      if (!dl) return;
+      const names = getLabLookup().map(m => m.name);
+      dl.innerHTML = names.map(n => `<option value="${h(n)}">`).join('');
     }
 
     // ── LOCATION AUTOCOMPLETE ─────────────────────────────────────────────────────

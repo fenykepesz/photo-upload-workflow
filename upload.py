@@ -93,7 +93,7 @@ COLS = [
     "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
     "x_tag_people", "bsky_tag_people", "ig_tag_people",
     "url_ig",
-    "film_used", "film_camera", "film_lens", "film_stock", "film_developed_by",
+    "film_used", "film_camera", "film_lens", "film_stock", "film_developed_by", "film_dev_contact",
     "serial_title",
 ]
 
@@ -1660,7 +1660,7 @@ X_CHAR_LIMIT = 280
 BSKY_CHAR_LIMIT = 300
 
 
-def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info="", max_tags=5):
+def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info="", dev_handle="", max_tags=5):
     """Build a tweet from title + hashtags, fitting within 280 characters.
     Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
     Limited to max_tags hashtags."""
@@ -1671,6 +1671,8 @@ def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info
         text = title.strip()
     if film_info:
         text = text + "\n\n" + film_info
+    if dev_handle and dev_handle.strip():
+        text = text + f"\nDev: @{dev_handle.strip().lstrip('@')}"
     if not keywords_str:
         return text[:X_CHAR_LIMIT]
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
@@ -1756,6 +1758,17 @@ def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info
     if hashtags:
         text = text + "\n\n" + hashtags
     return text
+
+
+def get_lab_handles(contact_name, lab_lookup):
+    """Look up a developer/lab contact by name, return their platform handles dict."""
+    if not contact_name or not lab_lookup:
+        return {}
+    contact_lower = contact_name.strip().lower()
+    for entry in lab_lookup:
+        if entry.get("name", "").strip().lower() == contact_lower:
+            return entry
+    return {}
 
 
 def upload_image_to_imgbb(image_path, api_key):
@@ -1998,7 +2011,7 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
 
 
 # ── Bluesky Upload ──────────────────────────────────────────────
-def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, bsky_handle=""):
+def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, bsky_handle="", dev_bsky_handle=""):
     """
     Post a photo with text to Bluesky via browser automation.
     Flow: home → New Post → write text → attach photo → (NSFW label) → Post.
@@ -2089,21 +2102,22 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, 
         print(f"    WARNING: Could not write text: {e}")
 
     # Type @handle via keyboard so Bluesky's autocomplete creates a proper mention facet
-    if bsky_handle and bsky_handle.strip():
-        handle = bsky_handle.strip().lstrip("@")
-        print(f"  Tagging @{handle} via autocomplete...")
-        try:
-            page.keyboard.press("End")
-            page.wait_for_timeout(200)
-            page.keyboard.type(f"\n@{handle}", delay=50)
-            page.wait_for_timeout(3000)
-            page.keyboard.press("ArrowDown")
-            page.wait_for_timeout(300)
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(500)
-            print(f"    @{handle} mention selected")
-        except Exception as e:
-            print(f"    WARNING: @mention typing failed: {e}")
+    for _bsky_tag, _label in [(bsky_handle, "model"), (dev_bsky_handle, "dev")]:
+        if _bsky_tag and _bsky_tag.strip():
+            handle = _bsky_tag.strip().lstrip("@")
+            print(f"  Tagging @{handle} ({_label}) via autocomplete...")
+            try:
+                page.keyboard.press("End")
+                page.wait_for_timeout(200)
+                page.keyboard.type(f"\n@{handle}", delay=50)
+                page.wait_for_timeout(3000)
+                page.keyboard.press("ArrowDown")
+                page.wait_for_timeout(300)
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(500)
+                print(f"    @{handle} mention selected")
+            except Exception as e:
+                print(f"    WARNING: @mention typing failed: {e}")
 
     page.wait_for_timeout(1000)
 
@@ -3680,6 +3694,8 @@ def main():
             except Exception as _e:
                 print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
 
+    lab_lookup = config.get("lab_lookup", [])
+
     # Load and filter CSV
     all_rows = load_queue(args.csv)
     target_rows = filter_rows(all_rows, args.row)
@@ -3875,7 +3891,14 @@ def main():
                             else:
                                 print("  WARNING: No stash_url_nsfw — cannot download image")
 
+                        # Resolve film developer contact handles
+                        _lab = {}
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            _lab = get_lab_handles(row.get("film_dev_contact", "").strip(), lab_lookup)
+
                         vk_tag_people = row.get("vk_tag_people", "").strip()
+                        if _lab.get("vk_handle"):
+                            vk_tag_people = ",".join(filter(None, [vk_tag_people, _lab["vk_handle"].strip()]))
                         vk_groups = row.get("vk_groups", "").strip()
                         vk_group_caption = row.get("vk_group_caption", "").strip()
                         _vk_film_parts = []
@@ -3940,7 +3963,7 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts))
+                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts), dev_handle=_lab.get("x_handle", ""))
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -3988,7 +4011,7 @@ def main():
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip())
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip(), dev_bsky_handle=_lab.get("bsky_handle", ""))
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
 
@@ -4037,7 +4060,7 @@ def main():
 
                         ig_config = config.get("accounts", {}).get("instagram", {})
                         try:
-                            _ig_collab = [h for h in [row.get("ig_tag_people", "").strip()] if h]
+                            _ig_collab = [h for h in [row.get("ig_tag_people", "").strip(), _lab.get("ig_handle", "").strip()] if h]
                             result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
                         except Exception as e:
                             result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
