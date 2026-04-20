@@ -18,12 +18,15 @@ Usage:
 """
 
 import argparse
+import base64
 import csv
 import json
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+import requests
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 try:
@@ -64,7 +67,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY", "IG"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 IMAGE_CACHE_DIR = SCRIPT_DIR / "image_cache"  # persistent — survives re-runs, never auto-deleted
 
@@ -88,7 +91,8 @@ COLS = [
     "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
     "fb_feeling", "fb_tag_people",
     "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
-    "x_tag_people", "bsky_tag_people",
+    "x_tag_people", "bsky_tag_people", "ig_tag_people",
+    "url_ig",
     "film_used", "film_camera", "film_lens", "film_stock", "film_developed_by",
     "serial_title",
 ]
@@ -122,6 +126,8 @@ def parse_args():
                    help="Import X.com cookies from a Cookie-Editor JSON export into the browser profile")
     p.add_argument("--fix-fb-location", action="store_true",
                    help="Open browser to Facebook profile settings so you can set the Current City")
+    p.add_argument("--refresh-ig-token", action="store_true",
+                   help="Refresh the Instagram long-lived access token and update config.json")
     return p.parse_args()
 
 
@@ -1715,6 +1721,128 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", max_t
     if hashtags:
         text = text + "\n\n" + hashtags
     return text
+
+
+IG_CHAR_LIMIT = 2200
+IG_TAG_LIMIT  = 30
+
+
+def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info="", max_tags=IG_TAG_LIMIT):
+    """Build an Instagram caption: model @handle, title, film info, hashtags (2200 char limit)."""
+    if model_name and model_name.strip():
+        handle_suffix = f" @{ig_handle.strip().lstrip('@')}" if ig_handle and ig_handle.strip() else ""
+        text = f"Model: {model_name.strip()}{handle_suffix}\n\n" + title.strip()
+    else:
+        text = title.strip()
+    if film_info:
+        text = text + "\n\n" + film_info
+    if not keywords_str:
+        return text[:IG_CHAR_LIMIT]
+    tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    hashtags = ""
+    tag_count = 0
+    for tag in tags:
+        if tag_count >= max_tags:
+            break
+        hashtag = "#" + tag.replace(" ", "").replace("-", "")
+        candidate = (hashtags + " " + hashtag).strip()
+        if len(text + "\n\n" + candidate) <= IG_CHAR_LIMIT:
+            hashtags = candidate
+            tag_count += 1
+        else:
+            break
+    if hashtags:
+        text = text + "\n\n" + hashtags
+    return text
+
+
+def upload_image_to_imgbb(image_path, api_key):
+    """Upload a local image to imgbb and return a public URL."""
+    with open(image_path, "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode("utf-8")
+    resp = requests.post(
+        "https://api.imgbb.com/1/upload",
+        data={"key": api_key, "image": img_b64},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.json()["data"]["url"]
+
+
+def upload_to_instagram(caption, image_path, ig_config, no_submit=False):
+    """
+    Post a photo to Instagram via the Graph API.
+    Requires: ig_config with access_token, user_id, imgbb_api_key.
+    Returns {"success": bool, "url_ig": str, "error": str}
+    """
+    access_token = ig_config.get("access_token", "").strip()
+    user_id      = ig_config.get("user_id", "").strip()
+    imgbb_key    = ig_config.get("imgbb_api_key", "").strip()
+
+    if not access_token or not user_id:
+        return {"success": False, "url_ig": "", "error": "Instagram not configured — add access_token and user_id to config.json accounts.instagram"}
+    if not imgbb_key:
+        return {"success": False, "url_ig": "", "error": "Instagram imgbb_api_key missing in config.json accounts.instagram"}
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_ig": "", "error": "No image file available"}
+
+    # Step 1: host image publicly via imgbb
+    print("  Uploading image to imgbb...")
+    try:
+        image_url = upload_image_to_imgbb(image_path, imgbb_key)
+        print(f"    Hosted at: {image_url}")
+    except Exception as e:
+        return {"success": False, "url_ig": "", "error": f"imgbb upload failed: {e}"}
+
+    if no_submit:
+        print("  --no-submit: skipping Instagram post")
+        return {"success": True, "url_ig": "NO_SUBMIT", "error": ""}
+
+    # Step 2: create media container
+    print("  Creating Instagram media container...")
+    try:
+        resp = requests.post(
+            f"https://graph.instagram.com/v21.0/{user_id}/media",
+            data={"image_url": image_url, "caption": caption, "access_token": access_token},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        creation_id = resp.json()["id"]
+        print(f"    Container: {creation_id}")
+    except Exception as e:
+        return {"success": False, "url_ig": "", "error": f"Container creation failed: {e}"}
+
+    # Step 3: wait for Instagram to process the image
+    print("  Waiting for media to be ready...")
+    time.sleep(8)
+
+    # Step 4: publish
+    print("  Publishing...")
+    try:
+        resp = requests.post(
+            f"https://graph.instagram.com/v21.0/{user_id}/media_publish",
+            data={"creation_id": creation_id, "access_token": access_token},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        media_id = resp.json()["id"]
+        print(f"    Published: {media_id}")
+    except Exception as e:
+        return {"success": False, "url_ig": "", "error": f"Publish failed: {e}"}
+
+    # Step 5: get permalink
+    try:
+        resp = requests.get(
+            f"https://graph.instagram.com/v21.0/{media_id}",
+            params={"fields": "permalink", "access_token": access_token},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        permalink = resp.json().get("permalink", "https://www.instagram.com/")
+    except Exception:
+        permalink = "https://www.instagram.com/"
+
+    return {"success": True, "url_ig": permalink, "error": ""}
 
 
 def upload_to_x(page, post_text, image_path, no_submit=False):
@@ -3362,6 +3490,35 @@ def main():
             ctx.close()
         sys.exit(0)
 
+    # Refresh Instagram long-lived token
+    if args.refresh_ig_token:
+        config = load_config(args.config)
+        ig_cfg = config.get("accounts", {}).get("instagram", {})
+        token = ig_cfg.get("access_token", "").strip()
+        if not token:
+            print("ERROR: No access_token in config.json accounts.instagram")
+            sys.exit(1)
+        try:
+            resp = requests.get(
+                "https://graph.instagram.com/refresh_access_token",
+                params={"grant_type": "ig_refresh_token", "access_token": token},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            new_token = data["access_token"]
+            expires_in = data.get("expires_in", 0)
+            print(f"Token refreshed! Valid for {expires_in // 86400} more days.")
+            ig_cfg["access_token"] = new_token
+            config.setdefault("accounts", {})["instagram"] = ig_cfg
+            with open(args.config, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            print(f"config.json updated.")
+        except Exception as e:
+            print(f"ERROR: Token refresh failed: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
     # Clear VK drafts mode
     if args.clear_vk_drafts:
         print(f"Opening browser to clear VK drafts (profile: {args.profile})")
@@ -3503,6 +3660,7 @@ def main():
                 ok_vk = False
                 ok_x = False
                 ok_bsky = False
+                ok_ig = False
                 ok_fb = False
                 ok_da = False
 
@@ -3745,6 +3903,54 @@ def main():
                         url_bsky = result_bsky.get("url_bsky", "")
                         if url_bsky and url_bsky not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_bsky": url_bsky})
+
+                # ── IG (between BSKY and FB) ──────────────────────
+                if "IG" in platforms:
+                    already = row.get("url_ig", "").strip()
+                    if already:
+                        print(f"\n  IG: already uploaded ({already}) — skipping")
+                    else:
+                        print(f"\n  ── Instagram Upload ──")
+                        t0_ig = time.time()
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip() or row.get("stash_url", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url — cannot download image")
+
+                        _film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
+                            if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        ig_caption = build_ig_caption(
+                            get_effective_title(row),
+                            row.get("keywords", ""),
+                            model_name=row.get("model_name", "").strip(),
+                            ig_handle=row.get("ig_tag_people", "").strip(),
+                            film_info="\n".join(_film_parts),
+                        )
+                        print(f"    Caption ({len(ig_caption)} chars): {ig_caption[:80]}...")
+
+                        ig_config = config.get("accounts", {}).get("instagram", {})
+                        try:
+                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit)
+                        except Exception as e:
+                            result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
+
+                        if result_ig["success"]:
+                            ok_ig = True
+                            print(f"  IG: SUCCESS ({time.time()-t0_ig:.0f}s) — {result_ig.get('url_ig', '')}")
+                        else:
+                            err = result_ig.get("error", "unknown")
+                            print(f"  IG: FAILED ({time.time()-t0_ig:.0f}s) — {err}")
+                            errors.append(f"IG: {err}")
+
+                        url_ig = result_ig.get("url_ig", "")
+                        if url_ig and url_ig not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"url_ig": url_ig})
 
                 # ── FB (between BSKY and DA) ───────────────────────
                 if "FB" in platforms:
