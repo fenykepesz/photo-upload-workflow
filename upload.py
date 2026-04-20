@@ -1814,8 +1814,8 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
         return {"success": True, "url_ig": "NO_SUBMIT", "error": ""}
 
     # Step 2: create media container (Facebook Login flow uses graph.facebook.com)
-    def _make_container(with_collab):
-        payload = {"image_url": image_url, "caption": caption, "access_token": access_token}
+    def _make_container(cap, with_collab):
+        payload = {"image_url": image_url, "caption": cap, "access_token": access_token}
         if with_collab:
             payload["collaborators"] = ",".join(h.lstrip("@") for h in with_collab)
         return requests.post(
@@ -1828,13 +1828,15 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
     else:
         print("  Creating Instagram media container...")
     try:
-        resp = _make_container(collaborators)
+        resp = _make_container(caption, collaborators)
         if not resp.ok and collaborators:
             err_detail = ""
             try: err_detail = resp.json().get("error", {}).get("message", "")
             except Exception: pass
-            print(f"    WARNING: Collab invite failed ({err_detail}) — retrying without collab")
-            resp = _make_container(None)
+            print(f"    WARNING: Collab invite failed ({err_detail}) — falling back to @mention in caption")
+            mention_suffix = " ".join(f"@{h.lstrip('@')}" for h in collaborators)
+            fallback_caption = caption.rstrip() + "\n\n" + mention_suffix
+            resp = _make_container(fallback_caption, None)
         resp.raise_for_status()
         creation_id = resp.json()["id"]
         print(f"    Container: {creation_id}")
