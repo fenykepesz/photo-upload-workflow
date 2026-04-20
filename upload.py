@@ -134,6 +134,8 @@ def parse_args():
                    help="Look up a Facebook page username or URL and return its Place ID for config.json")
     p.add_argument("--list-ig-locations", action="store_true",
                    help="List all location IDs found in your recent Instagram posts")
+    p.add_argument("--test-ig-location", metavar="ID",
+                   help="Test whether a numeric ID is a valid Instagram location_id")
     return p.parse_args()
 
 
@@ -3625,6 +3627,47 @@ def main():
             print(f"ERROR: {e}")
             if detail: print(f"Detail: {detail}")
             sys.exit(1)
+        sys.exit(0)
+
+    # Test whether a numeric ID works as an Instagram location_id
+    if args.test_ig_location:
+        config = load_config(args.config)
+        ig_cfg = config.get("accounts", {}).get("instagram", {})
+        token   = ig_cfg.get("access_token", "").strip()
+        user_id = ig_cfg.get("user_id", "").strip()
+        loc_id  = args.test_ig_location.strip()
+        if not token or not user_id:
+            print("ERROR: access_token and user_id required in config.json accounts.instagram")
+            sys.exit(1)
+        print(f"Testing location ID: {loc_id}\n")
+
+        # 1. Try Graph API object lookup
+        print("1. Graph API object lookup...")
+        r = requests.get(f"https://graph.facebook.com/v21.0/{loc_id}",
+                         params={"fields": "id,name,location", "access_token": token}, timeout=15)
+        print(f"   Status: {r.status_code}")
+        print(f"   Response: {r.json()}\n")
+
+        # 2. Try creating a test media container (image won't be published — just checks location validity)
+        print("2. Test media container creation with this location_id...")
+        test_img = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png"
+        r2 = requests.post(
+            f"https://graph.facebook.com/v21.0/{user_id}/media",
+            data={"image_url": test_img, "caption": "test", "location_id": loc_id, "access_token": token},
+            timeout=15,
+        )
+        print(f"   Status: {r2.status_code}")
+        print(f"   Response: {r2.json()}")
+        if r2.ok:
+            container_id = r2.json().get("id")
+            print(f"\n   ✓ Location ID is VALID — container created ({container_id})")
+            print(f"   (Container not published — safe to use this ID)")
+            # Clean up: delete the test container
+            requests.delete(f"https://graph.facebook.com/v21.0/{container_id}",
+                            params={"access_token": token}, timeout=10)
+        else:
+            err = r2.json().get("error", {}).get("message", "unknown")
+            print(f"\n   ✗ Location ID INVALID or rejected: {err}")
         sys.exit(0)
 
     # List location IDs from existing Instagram posts
