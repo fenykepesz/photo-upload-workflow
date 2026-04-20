@@ -130,8 +130,8 @@ def parse_args():
                    help="Refresh the Instagram long-lived access token and update config.json")
     p.add_argument("--setup-ig", action="store_true",
                    help="Find your Instagram Business Account ID and print it for config.json")
-    p.add_argument("--search-ig-location", metavar="QUERY",
-                   help="Search Facebook Places for a location name and print IDs for config.json")
+    p.add_argument("--ig-location-id", metavar="PAGE",
+                   help="Look up a Facebook page username or URL and return its Place ID for config.json")
     return p.parse_args()
 
 
@@ -3582,23 +3582,47 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    # Help user find a Facebook Place ID for Instagram location tagging
-    if args.search_ig_location:
-        query = args.search_ig_location.strip()
-        encoded = requests.utils.quote(query)
-        print(f"Facebook's Place Search API is deprecated for third-party apps.")
-        print(f"To find the Place ID for '{query}', follow these steps:\n")
-        print(f"  1. Open this URL in your browser:")
-        print(f"     https://www.facebook.com/search/places/?q={encoded}")
-        print(f"  2. Click the correct place in the results.")
-        print(f"  3. On the place page, look at the URL — it contains the Page ID, e.g.:")
-        print(f"     https://www.facebook.com/pages/.../<PAGE_ID>")
-        print(f"     Or open the About section and look for the numeric ID.")
-        print(f"  4. Alternatively, open Graph API Explorer:")
-        print(f"     https://developers.facebook.com/tools/explorer/")
-        print(f"     and run:  GET /<PAGE_ID>?fields=id,name,location")
-        print(f"     to confirm it has location data.")
-        print(f"\n  5. Once you have the ID, add it in Settings → Locations in queue_manager.html.")
+    # Look up a Facebook page by username/URL to get its Place ID for Instagram
+    if args.ig_location_id:
+        config = load_config(args.config)
+        token = config.get("accounts", {}).get("instagram", {}).get("access_token", "").strip()
+        if not token:
+            print("ERROR: No access_token in config.json accounts.instagram")
+            sys.exit(1)
+        # Accept full URL or just the username/slug
+        page_ref = args.ig_location_id.strip().rstrip("/")
+        if "facebook.com/" in page_ref:
+            page_ref = page_ref.split("facebook.com/")[-1].split("/")[0].split("?")[0]
+        print(f"Looking up Facebook page: {page_ref!r}")
+        print(f"  Tip: find the right page by searching on https://www.facebook.com/search/places/")
+        print(f"       then copy the page username from the URL (e.g. facebook.com/TelAvivCityHall → TelAvivCityHall)\n")
+        try:
+            resp = requests.get(
+                f"https://graph.facebook.com/v21.0/{page_ref}",
+                params={"fields": "id,name,location", "access_token": token},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            loc = data.get("location", {})
+            if not loc:
+                print(f"  WARNING: This page has no location data — it may not work as an Instagram location tag.")
+            city    = loc.get("city", "")
+            country = loc.get("country", "")
+            addr = ", ".join(filter(None, [city, country]))
+            print(f"  Name:    {data.get('name', '—')}")
+            print(f"  ID:      {data['id']}")
+            if addr: print(f"  Address: {addr}")
+            print(f"\n  → In Settings → Locations, add:")
+            print(f"    Location Name: <your location_500px value>")
+            print(f"    Place ID:      {data['id']}")
+        except Exception as e:
+            detail = ""
+            try: detail = e.response.json().get("error", {}).get("message", "")
+            except Exception: pass
+            print(f"ERROR: {e}")
+            if detail: print(f"Detail: {detail}")
+            sys.exit(1)
         sys.exit(0)
 
     # Refresh Instagram long-lived token
