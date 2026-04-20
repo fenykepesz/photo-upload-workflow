@@ -132,6 +132,8 @@ def parse_args():
                    help="Find your Instagram Business Account ID and print it for config.json")
     p.add_argument("--ig-location-id", metavar="PAGE",
                    help="Look up a Facebook page username or URL and return its Place ID for config.json")
+    p.add_argument("--list-ig-locations", action="store_true",
+                   help="List all location IDs found in your recent Instagram posts")
     return p.parse_args()
 
 
@@ -3616,6 +3618,55 @@ def main():
             print(f"\n  → In Settings → Locations, add:")
             print(f"    Location Name: <your location_500px value>")
             print(f"    Place ID:      {data['id']}")
+        except Exception as e:
+            detail = ""
+            try: detail = e.response.json().get("error", {}).get("message", "")
+            except Exception: pass
+            print(f"ERROR: {e}")
+            if detail: print(f"Detail: {detail}")
+            sys.exit(1)
+        sys.exit(0)
+
+    # List location IDs from existing Instagram posts
+    if args.list_ig_locations:
+        config = load_config(args.config)
+        ig_cfg = config.get("accounts", {}).get("instagram", {})
+        token   = ig_cfg.get("access_token", "").strip()
+        user_id = ig_cfg.get("user_id", "").strip()
+        if not token or not user_id:
+            print("ERROR: access_token and user_id required in config.json accounts.instagram")
+            sys.exit(1)
+        print("Fetching recent Instagram posts to extract location IDs...")
+        seen = {}
+        next_url = None
+        params = {"fields": "id,timestamp,location", "limit": 50, "access_token": token}
+        try:
+            while True:
+                resp = requests.get(
+                    next_url or f"https://graph.facebook.com/v21.0/{user_id}/media",
+                    params=params if not next_url else None,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                for item in data.get("data", []):
+                    loc = item.get("location")
+                    if loc and loc.get("id") and loc["id"] not in seen:
+                        seen[loc["id"]] = loc
+                next_url = data.get("paging", {}).get("next")
+                params = None
+                if not next_url or len(seen) >= 100:
+                    break
+            if not seen:
+                print("\nNo location-tagged posts found.")
+                print("Tag a location on a post via the Instagram app first, then re-run.")
+            else:
+                print(f"\nFound {len(seen)} unique location(s):\n")
+                for loc in sorted(seen.values(), key=lambda x: x.get("name", "")):
+                    print(f"  ID:   {loc['id']}")
+                    print(f"  Name: {loc.get('name', '—')}")
+                    print(f"  → In Settings → Locations: name = your location_500px value, Place ID = {loc['id']}")
+                    print()
         except Exception as e:
             detail = ""
             try: detail = e.response.json().get("error", {}).get("message", "")
