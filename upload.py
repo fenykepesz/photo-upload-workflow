@@ -3653,6 +3653,9 @@ def main():
                 items = data.get("data", [])
                 page_num += 1
                 print(f"  Page {page_num}: {len(items)} posts fetched")
+                if page_num == 1 and items:
+                    print(f"  Sample item fields: {list(items[0].keys())}")
+                    print(f"  Sample item: {items[0]}")
                 for item in items:
                     loc = item.get("location")
                     if loc and loc.get("id") and loc["id"] not in seen:
@@ -3660,7 +3663,7 @@ def main():
                         print(f"    Found location: {loc.get('name', '?')} (ID: {loc['id']})")
                 next_url = data.get("paging", {}).get("next")
                 params = None
-                if not next_url or len(seen) >= 100:
+                if not next_url or page_num >= 2:
                     break
             if not seen:
                 print("\nNo location-tagged posts found.")
