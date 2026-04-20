@@ -3593,8 +3593,8 @@ def main():
         print(f"Searching Facebook Places for: {query!r}")
         try:
             resp = requests.get(
-                "https://graph.facebook.com/v21.0/pages/search",
-                params={"q": query, "fields": "id,name,location", "access_token": token},
+                "https://graph.facebook.com/v21.0/search",
+                params={"type": "place", "q": query, "fields": "id,name,location", "access_token": token},
                 timeout=15,
             )
             resp.raise_for_status()
