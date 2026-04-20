@@ -1110,6 +1110,7 @@
       <option value="VK">VK</option>
       <option value="X">X (Twitter)</option>
       <option value="BSKY">Bluesky</option>
+      <option value="IG">Instagram</option>
     </select>
     <input type="date" id="f-from" onchange="applyFilters()" title="From date">
     <span style="color:var(--muted)">→</span>
@@ -1216,6 +1217,10 @@
             <div class="dp-label">BSKY Tagged</div>
             <div class="dp-value" id="dp-bskytagpeople">—</div>
           </div>
+          <div class="dp-field" id="dp-igtagpeoplewrap" style="display:none">
+            <div class="dp-label">IG Tagged</div>
+            <div class="dp-value" id="dp-igtagpeople">—</div>
+          </div>
           <div class="dp-field" id="dp-vkgroupswrap" style="display:none">
             <div class="dp-label">VK Groups</div>
             <div class="dp-value" id="dp-vkgroups">—</div>
@@ -1260,6 +1265,10 @@
           <div class="dp-field" id="dp-bskywrap" style="display:none">
             <div class="dp-label">Bluesky URL</div>
             <div class="dp-value"><a class="dp-link" id="dp-bsky" href="#" target="_blank">View on Bluesky ↗</a></div>
+          </div>
+          <div class="dp-field" id="dp-igwrap" style="display:none">
+            <div class="dp-label">Instagram URL</div>
+            <div class="dp-value"><a class="dp-link" id="dp-ig" href="#" target="_blank">View on Instagram ↗</a></div>
           </div>
           <div class="dp-field" id="dp-fbwrap" style="display:none">
             <div class="dp-label">Facebook Post URL</div>
@@ -1457,6 +1466,7 @@
               <label><input type="checkbox" id="p-vk"> VK</label>
               <label><input type="checkbox" id="p-x"> X</label>
               <label><input type="checkbox" id="p-bsky"> Bluesky</label>
+              <label><input type="checkbox" id="p-ig"> Instagram</label>
             </div>
           </div>
           <div class="form-section">Per-Platform Metadata</div>
@@ -1531,6 +1541,12 @@
             <label>Bluesky Tag People <span style="font-weight:400;opacity:.6">(Bluesky handle without @, e.g. jane.bsky.social)</span></label>
             <input type="text" id="m-bsky-tag-people" placeholder="e.g. jane.bsky.social" list="bsky-tag-people-list" autocomplete="off">
             <datalist id="bsky-tag-people-list"></datalist>
+          </div>
+          <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">Instagram</div>
+          <div class="fg form-full">
+            <label>Instagram Tag People <span style="font-weight:400;opacity:.6">(handle without @, e.g. janedoe)</span></label>
+            <input type="text" id="m-ig-tag-people" placeholder="e.g. janedoe" list="ig-tag-people-list" autocomplete="off">
+            <datalist id="ig-tag-people-list"></datalist>
           </div>
           <div class="form-section">DeviantArt Advanced</div>
           <div class="form-full">
@@ -1727,8 +1743,8 @@
         </div>
         <div class="s-section-title">Model Lookup Table</div>
         <table class="s-data-table" id="model-lookup-table">
-          <thead><tr><th>Name</th><th>DA Gallery</th><th>FB Tags</th><th>VK Tags</th><th>X Handle</th><th>BSKY Handle</th><th style="width:90px"></th></tr></thead>
-          <tbody id="model-lookup-tbody"><tr><td colspan="7" style="color:var(--muted);padding:8px">No models configured yet.</td></tr></tbody>
+          <thead><tr><th>Name</th><th>DA Gallery</th><th>FB Tags</th><th>VK Tags</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th style="width:90px"></th></tr></thead>
+          <tbody id="model-lookup-tbody"><tr><td colspan="8" style="color:var(--muted);padding:8px">No models configured yet.</td></tr></tbody>
         </table>
         <div style="margin-top:10px"><button class="btn btn-sm" onclick="mlAddNew()">+ Add Model</button></div>
 
@@ -1742,6 +1758,7 @@
           <div class="s-field"><span class="s-field-label">VK Tags</span><input type="text" id="ml-vk-tags" placeholder="e.g. @id123456789, some_user" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">X Handle</span><input type="text" id="ml-x-handle" placeholder="e.g. janedoe (without @)" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="ml-bsky-handle" placeholder="e.g. jane.bsky.social (without @)" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">IG Handle</span><input type="text" id="ml-ig-handle" placeholder="e.g. janedoe (without @)" autocomplete="off"></div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="btn btn-primary btn-sm" onclick="mlSave()">Save</button>
             <button class="btn btn-ghost btn-sm" onclick="mlCancel()">Cancel</button>
@@ -2115,6 +2132,7 @@
       showPlatUrl('dp-vkwrap', 'dp-vk', r.url_vk, 'View on VK', 'VK');
       showPlatUrl('dp-xwrap', 'dp-x', r.url_x, 'View on X', 'X');
       showPlatUrl('dp-bskywrap', 'dp-bsky', r.url_bsky, 'View on Bluesky', 'BSKY');
+      showPlatUrl('dp-igwrap', 'dp-ig', r.url_ig, 'View on Instagram', 'IG');
       showPlatUrl('dp-fbwrap', 'dp-fb', r.url_fb, 'View on Facebook', 'FB');
 
       const errs = document.getElementById('dp-errsec');
@@ -2135,6 +2153,8 @@
       document.getElementById('dp-xtagpeoplewrap').style.display = r.x_tag_people ? '' : 'none';
       document.getElementById('dp-bskytagpeople').textContent = r.bsky_tag_people || '—';
       document.getElementById('dp-bskytagpeoplewrap').style.display = r.bsky_tag_people ? '' : 'none';
+      document.getElementById('dp-igtagpeople').textContent = r.ig_tag_people || '—';
+      document.getElementById('dp-igtagpeoplewrap').style.display = r.ig_tag_people ? '' : 'none';
       document.getElementById('dp-vkgroups').textContent = r.vk_groups || '—';
       document.getElementById('dp-vkgroupswrap').style.display = r.vk_groups ? '' : 'none';
       document.getElementById('dp-vkgroupsresult').textContent = r.vk_groups_result || '—';
@@ -2306,10 +2326,11 @@
       document.getElementById('m-vk-tag-people').value = '';
       document.getElementById('m-x-tag-people').value = '';
       document.getElementById('m-bsky-tag-people').value = '';
+      document.getElementById('m-ig-tag-people').value = '';
       document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(c => c.checked = true);
       const _vkAcct = configData?.accounts?.vk?.trim();
       document.getElementById('m-vk-group-caption').value = _vkAcct ? `Photographer: [@${_vkAcct.replace(/^@/, '')}]` : '';
-      ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'].forEach(id => document.getElementById(id).checked = true);
+      ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky', 'p-ig'].forEach(id => document.getElementById(id).checked = true);
     }
     function openAddModal() {
       editId = null;
@@ -2366,6 +2387,7 @@
       document.getElementById('m-vk-tag-people').value = r.vk_tag_people || '';
       document.getElementById('m-x-tag-people').value = r.x_tag_people || '';
       document.getElementById('m-bsky-tag-people').value = r.bsky_tag_people || '';
+      document.getElementById('m-ig-tag-people').value = r.ig_tag_people || '';
       // Restore VK group checkboxes
       const vkGroupSlugs = (r.vk_groups || '').split(',').map(s => s.trim()).filter(Boolean);
       document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(cb => {
@@ -2407,6 +2429,7 @@
       document.getElementById('p-vk').checked = pls.includes('VK');
       document.getElementById('p-x').checked = pls.includes('X');
       document.getElementById('p-bsky').checked = pls.includes('BSKY');
+      document.getElementById('p-ig').checked = pls.includes('IG');
       updateRequiredFields();
       document.getElementById('overlay').classList.add('open');
     }
@@ -2416,7 +2439,7 @@
       const nsfw = document.getElementById('m-nsfw').value.trim();
       if (!date) { toast('Please set a scheduled date', 'error'); return; }
       if (!nsfw) { toast('Please enter the Sta.sh NSFW URL', 'error'); return; }
-      const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky'][i]).checked).join(',');
+      const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY', 'IG'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky', 'p-ig'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
       if (!document.getElementById('m-title').value.trim()) { toast('Title is required', 'error'); return; }
       if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
@@ -2451,6 +2474,7 @@
         vk_tag_people: document.getElementById('m-vk-tag-people').value.trim(),
         x_tag_people: document.getElementById('m-x-tag-people').value.trim(),
         bsky_tag_people: document.getElementById('m-bsky-tag-people').value.trim(),
+        ig_tag_people: document.getElementById('m-ig-tag-people').value.trim(),
         vk_groups: getVkGroupsSelected(),
         vk_group_caption: document.getElementById('m-vk-group-caption').value.trim(),
         vk_groups_result: existing?.vk_groups_result || '',
@@ -2529,7 +2553,7 @@
       return model500.includes(cat500) || model35.includes(cat35);
     }
     function updateRequiredFields() {
-      const any = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky']
+      const any = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky','p-ig']
         .some(id => document.getElementById(id)?.checked);
       const need500 = document.getElementById('p-500')?.checked;
       const need35 = document.getElementById('p-35')?.checked;
@@ -2544,12 +2568,12 @@
       if (label) label.classList.toggle('required-star', !!required);
     }
     function toggleAllPlatforms() {
-      const ids = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'];
+      const ids = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky','p-ig'];
       const allChecked = ids.every(id => document.getElementById(id)?.checked);
       ids.forEach(id => { const el = document.getElementById(id); if (el) el.checked = !allChecked; });
       updateRequiredFields();
     }
-    ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky'].forEach(id => {
+    ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky','p-ig'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', updateRequiredFields);
     });
@@ -3282,7 +3306,7 @@ Return ONLY valid JSON, no markdown fences:
       if (!tbody) return;
       const arr = getModelLookup();
       if (!arr.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No models configured yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:8px">No models configured yet.</td></tr>';
         return;
       }
       tbody.innerHTML = arr.map(m => `<tr>
@@ -3292,6 +3316,7 @@ Return ONLY valid JSON, no markdown fences:
         <td style="font-size:11px">${h(m.vk_tags || '—')}</td>
         <td style="font-size:11px">${h(m.x_handle || '—')}</td>
         <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
         <td>
           <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="mlEdit(this.dataset.name)">Edit</button>
           <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="mlDelete(this.dataset.name)">✕</button>
@@ -3312,6 +3337,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ml-vk-tags').value = '';
       document.getElementById('ml-x-handle').value = '';
       document.getElementById('ml-bsky-handle').value = '';
+      document.getElementById('ml-ig-handle').value = '';
       mlRefreshGalleryList();
       document.getElementById('model-lookup-form').style.display = '';
       document.getElementById('ml-name').focus();
@@ -3328,6 +3354,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('ml-vk-tags').value = m.vk_tags || '';
       document.getElementById('ml-x-handle').value = m.x_handle || '';
       document.getElementById('ml-bsky-handle').value = m.bsky_handle || '';
+      document.getElementById('ml-ig-handle').value = m.ig_handle || '';
       mlRefreshGalleryList();
       document.getElementById('model-lookup-form').style.display = '';
       document.getElementById('ml-name').focus();
@@ -3348,6 +3375,7 @@ Return ONLY valid JSON, no markdown fences:
         vk_tags: document.getElementById('ml-vk-tags').value.trim(),
         x_handle: document.getElementById('ml-x-handle').value.trim(),
         bsky_handle: document.getElementById('ml-bsky-handle').value.trim(),
+        ig_handle: document.getElementById('ml-ig-handle').value.trim(),
       };
       let arr = getModelLookup();
       if (editName) arr = arr.filter(x => x.name !== editName);
@@ -3425,6 +3453,12 @@ Return ONLY valid JSON, no markdown fences:
       if (m.bsky_handle) {
         const bskyEl = document.getElementById('m-bsky-tag-people');
         if (bskyEl && !bskyEl.value.trim()) bskyEl.value = m.bsky_handle;
+      }
+
+      // Instagram handle — set if empty
+      if (m.ig_handle) {
+        const igEl = document.getElementById('m-ig-tag-people');
+        if (igEl && !igEl.value.trim()) igEl.value = m.ig_handle;
       }
     }
 
