@@ -1,7 +1,65 @@
 {
   "groups": [
-    { "slug": "nuart.photo", "name": "NuArt Photo" },
-    { "slug": "oniyyou", "name": "Only You" }
+    {
+      "slug": "top_portraits",
+      "name": "Portraits"
+    },
+    {
+      "slug": "POLGUAR",
+      "name": "POLGUAR"
+    },
+    {
+      "slug": "polguarsensual",
+      "name": "POLGUAR Sensual"
+    },
+    {
+      "slug": "ph_analog",
+      "name": "Analog Photo"
+    },
+    {
+      "slug": "35film",
+      "name": "35mm | плёнка"
+    },
+    {
+      "slug": "erotikum",
+      "name": "Эротикум (erotikum - B&W community)"
+    },
+    {
+      "slug": "nuart.photo",
+      "name": "NuArt Photo NSFW"
+    },
+    {
+      "slug": "oniyyou",
+      "name": "Only You NSFW"
+    },
+    {
+      "slug": "polguarerotic",
+      "name": "POLGUAR Erotic NSFW"
+    },
+    {
+      "slug": "club101580879",
+      "name": "Нецветные сны (colorless dreams) NSFW"
+    },
+    {
+      "slug": "artnude",
+      "name": "ART ∞ NUDE NSFW"
+    },
+    {
+      "slug": "vtope_photo",
+      "name": "ТОПОВЫЕ ФОТО - Best Photo NSFW"
+    },
+    {
+      "slug": "ecstasis",
+      "name": "Maxon NSFW"
+    },
+    {
+      "slug": "paprika_mag",
+      "name": "Paprika NSFW"
+    },
+    {
+      "slug": "phot0_art",
+      "name": "PHOTO ART NSFW"
+    }
   ],
   "last_sync": "2026-04-03"
 }
