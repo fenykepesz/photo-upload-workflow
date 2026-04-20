@@ -3615,7 +3615,11 @@ def main():
                 print(f"  → Add to config.json location_lookup: {{\"name\": \"{query}\", \"ig_location_id\": \"{r['id']}\"}}")
                 print()
         except Exception as e:
+            detail = ""
+            try: detail = e.response.json()
+            except Exception: pass
             print(f"ERROR: {e}")
+            if detail: print(f"Detail: {detail}")
             sys.exit(1)
         sys.exit(0)
 
