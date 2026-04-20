@@ -1724,7 +1724,7 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", max_t
 
 
 IG_CHAR_LIMIT = 2200
-IG_TAG_LIMIT  = 30
+IG_TAG_LIMIT  = 5
 
 
 def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info="", max_tags=IG_TAG_LIMIT):
@@ -4069,6 +4069,8 @@ def main():
                         done_platforms.add("X")
                     if "BSKY" in platforms and (ok_bsky or fresh_row.get("url_bsky", "").strip()):
                         done_platforms.add("BSKY")
+                    if "IG" in platforms and (ok_ig or fresh_row.get("url_ig", "").strip()):
+                        done_platforms.add("IG")
                     if "FB" in platforms and (ok_fb or fresh_row.get("url_fb", "").strip()):
                         done_platforms.add("FB")
                     if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
@@ -4108,6 +4110,9 @@ def main():
                 if "BSKY" in platforms:
                     s = "done" if ok_bsky or row.get("url_bsky", "").strip() else "failed"
                     summary_detail.append(f"BSKY:{s}")
+                if "IG" in platforms:
+                    s = "done" if ok_ig or row.get("url_ig", "").strip() else "failed"
+                    summary_detail.append(f"IG:{s}")
                 if "FB" in platforms:
                     s = "done" if ok_fb or row.get("url_fb", "").strip() else "failed"
                     summary_detail.append(f"FB:{s}")
