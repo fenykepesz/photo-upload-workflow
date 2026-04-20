@@ -1607,6 +1607,7 @@
         <button class="s-tab"        id="stab-vk"      onclick="showSettingsTab('vk')">VK Data</button>
         <button class="s-tab"        id="stab-models"  onclick="showSettingsTab('models')">Models</button>
         <button class="s-tab"        id="stab-labs"    onclick="showSettingsTab('labs')">Labs</button>
+        <button class="s-tab"        id="stab-locations" onclick="showSettingsTab('locations')">Locations</button>
       </div>
 
       <!-- ── AI panel ── -->
@@ -1803,6 +1804,31 @@
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="btn btn-primary btn-sm" onclick="llSave()">Save</button>
             <button class="btn btn-ghost btn-sm" onclick="llCancel()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Locations panel ── -->
+      <div class="s-panel" id="s-tab-locations">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+          Map location names (matching <strong>location_500px</strong> values) to Facebook Place IDs for Instagram.
+          Run <code style="font-family:monospace;background:var(--surface3);padding:1px 4px;border-radius:3px">python upload.py --search-ig-location "Tel Aviv"</code> to find IDs.
+        </div>
+        <div class="s-section-title">Location Lookup Table</div>
+        <table class="s-data-table" id="location-lookup-table">
+          <thead><tr><th>Location Name</th><th>Instagram Place ID</th><th style="width:90px"></th></tr></thead>
+          <tbody id="location-lookup-tbody"><tr><td colspan="3" style="color:var(--muted);padding:8px">No locations configured yet.</td></tr></tbody>
+        </table>
+        <div style="margin-top:10px"><button class="btn btn-sm" onclick="locAddNew()">+ Add Location</button></div>
+
+        <div id="location-lookup-form" style="display:none;margin-top:14px;background:var(--surface3);padding:12px;border-radius:var(--radius);border:1px solid var(--border)">
+          <div class="s-section-title" style="margin-bottom:8px" id="loc-form-title">Add Location</div>
+          <input type="hidden" id="loc-edit-name">
+          <div class="s-field"><span class="s-field-label">Location Name</span><input type="text" id="loc-name" placeholder="Must match location_500px exactly" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">Place ID</span><input type="text" id="loc-place-id" placeholder="Facebook Place ID (from --search-ig-location)" style="font-family:monospace" autocomplete="off"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="locSave()">Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="locCancel()">Cancel</button>
           </div>
         </div>
       </div>
@@ -2925,6 +2951,7 @@ Return ONLY valid JSON, no markdown fences:
       localStorage.setItem('settings_tab', name);
       if (name === 'models') renderModelLookupTable();
       if (name === 'labs') renderLabLookupTable();
+      if (name === 'locations') renderLocationLookupTable();
     }
     function sUpdateFileStatus() {
       // DA
@@ -3072,6 +3099,10 @@ Return ONLY valid JSON, no markdown fences:
         renderLabLookupTable();
         seedDevContacts();
       }
+      if (Array.isArray(configData.location_lookup)) {
+        localStorage.setItem('location_lookup', JSON.stringify(configData.location_lookup));
+        renderLocationLookupTable();
+      }
     }
 
     async function saveConfigFile(silent = false) {
@@ -3116,6 +3147,7 @@ Return ONLY valid JSON, no markdown fences:
       // Always persist the current model lookup into config.json
       obj.model_lookup = getModelLookup();
       obj.lab_lookup = getLabLookup();
+      obj.location_lookup = getLocationLookup();
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
         if (silent) { toast('config.json not linked — open it in Settings → Config to enable auto-save', 'warning'); return; }
@@ -3526,6 +3558,75 @@ Return ONLY valid JSON, no markdown fences:
         const igEl = document.getElementById('m-ig-tag-people');
         if (igEl && !igEl.value.trim()) igEl.value = m.ig_handle;
       }
+    }
+
+    // ── LOCATION LOOKUP ───────────────────────────────────────────────────────────
+    function getLocationLookup() {
+      try { return JSON.parse(localStorage.getItem('location_lookup') || '[]'); } catch { return []; }
+    }
+    function saveLocationLookupData(arr) {
+      localStorage.setItem('location_lookup', JSON.stringify(arr));
+      if (configData) configData.location_lookup = arr;
+      saveConfigFile(true);
+    }
+    function renderLocationLookupTable() {
+      const tbody = document.getElementById('location-lookup-tbody');
+      if (!tbody) return;
+      const arr = getLocationLookup();
+      if (!arr.length) {
+        tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted);padding:8px">No locations configured yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = arr.map(m => `<tr>
+        <td>${h(m.name)}</td>
+        <td style="font-family:monospace;font-size:11px">${h(m.ig_location_id || '—')}</td>
+        <td>
+          <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="locEdit(this.dataset.name)">Edit</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="locDelete(this.dataset.name)">✕</button>
+        </td>
+      </tr>`).join('');
+    }
+    function locAddNew() {
+      document.getElementById('loc-form-title').textContent = 'Add Location';
+      document.getElementById('loc-edit-name').value = '';
+      document.getElementById('loc-name').value = '';
+      document.getElementById('loc-place-id').value = '';
+      document.getElementById('location-lookup-form').style.display = '';
+      document.getElementById('loc-name').focus();
+    }
+    function locEdit(name) {
+      const m = getLocationLookup().find(x => x.name === name);
+      if (!m) return;
+      document.getElementById('loc-form-title').textContent = 'Edit Location';
+      document.getElementById('loc-edit-name').value = m.name;
+      document.getElementById('loc-name').value = m.name;
+      document.getElementById('loc-place-id').value = m.ig_location_id || '';
+      document.getElementById('location-lookup-form').style.display = '';
+      document.getElementById('loc-name').focus();
+    }
+    function locDelete(name) {
+      saveLocationLookupData(getLocationLookup().filter(x => x.name !== name));
+      renderLocationLookupTable();
+    }
+    function locSave() {
+      const editName = document.getElementById('loc-edit-name').value;
+      const name = document.getElementById('loc-name').value.trim();
+      const placeId = document.getElementById('loc-place-id').value.trim();
+      if (!name) { toast('Location name is required', 'error'); return; }
+      if (!placeId) { toast('Place ID is required', 'error'); return; }
+      const entry = { name, ig_location_id: placeId };
+      let arr = getLocationLookup();
+      if (editName) arr = arr.filter(x => x.name !== editName);
+      const idx = arr.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
+      if (idx >= 0) arr[idx] = entry; else arr.push(entry);
+      arr.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      saveLocationLookupData(arr);
+      renderLocationLookupTable();
+      document.getElementById('location-lookup-form').style.display = 'none';
+      toast('Location saved', 'success');
+    }
+    function locCancel() {
+      document.getElementById('location-lookup-form').style.display = 'none';
     }
 
     // ── LAB LOOKUP ────────────────────────────────────────────────────────────────

@@ -130,6 +130,8 @@ def parse_args():
                    help="Refresh the Instagram long-lived access token and update config.json")
     p.add_argument("--setup-ig", action="store_true",
                    help="Find your Instagram Business Account ID and print it for config.json")
+    p.add_argument("--search-ig-location", metavar="QUERY",
+                   help="Search Facebook Places for a location name and print IDs for config.json")
     return p.parse_args()
 
 
@@ -1760,6 +1762,17 @@ def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info
     return text
 
 
+def get_ig_location_id(location_name, location_lookup):
+    """Look up a location name in location_lookup, return its Instagram location_id."""
+    if not location_name or not location_lookup:
+        return ""
+    name_lower = location_name.strip().lower()
+    for entry in location_lookup:
+        if entry.get("name", "").strip().lower() == name_lower:
+            return entry.get("ig_location_id", "")
+    return ""
+
+
 def get_lab_handles(contact_name, lab_lookup):
     """Look up a developer/lab contact by name, return their platform handles dict."""
     if not contact_name or not lab_lookup:
@@ -1784,7 +1797,7 @@ def upload_image_to_imgbb(image_path, api_key):
     return resp.json()["data"]["url"]
 
 
-def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None):
+def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None, location_id=""):
     """
     Post a photo to Instagram via the Graph API.
     Requires: ig_config with access_token, user_id, imgbb_api_key.
@@ -1818,6 +1831,8 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
         payload = {"image_url": image_url, "caption": cap, "access_token": access_token}
         if with_collab:
             payload["collaborators"] = ",".join(h.lstrip("@") for h in with_collab)
+        if location_id:
+            payload["location_id"] = location_id
         return requests.post(
             f"https://graph.facebook.com/v21.0/{user_id}/media",
             data=payload, timeout=30,
@@ -3567,6 +3582,43 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
+    # Search Facebook Places for an Instagram location_id
+    if args.search_ig_location:
+        config = load_config(args.config)
+        token = config.get("accounts", {}).get("instagram", {}).get("access_token", "").strip()
+        if not token:
+            print("ERROR: No access_token in config.json accounts.instagram")
+            sys.exit(1)
+        query = args.search_ig_location.strip()
+        print(f"Searching Facebook Places for: {query!r}")
+        try:
+            resp = requests.get(
+                "https://graph.facebook.com/v21.0/pages/search",
+                params={"q": query, "fields": "id,name,location", "access_token": token},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            results = [r for r in resp.json().get("data", []) if r.get("location")]
+            if not results:
+                print("No places found. Try a shorter or different query.")
+                sys.exit(0)
+            print(f"\nFound {len(results)} place(s):\n")
+            for r in results:
+                loc = r.get("location", {})
+                city    = loc.get("city", "")
+                country = loc.get("country", "")
+                street  = loc.get("street", "")
+                addr = ", ".join(filter(None, [street, city, country]))
+                print(f"  ID: {r['id']}")
+                print(f"  Name: {r['name']}")
+                if addr: print(f"  Address: {addr}")
+                print(f"  → Add to config.json location_lookup: {{\"name\": \"{query}\", \"ig_location_id\": \"{r['id']}\"}}")
+                print()
+        except Exception as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
     # Refresh Instagram long-lived token
     if args.refresh_ig_token:
         config = load_config(args.config)
@@ -3695,6 +3747,8 @@ def main():
                 print("  Instagram token refreshed and saved.")
             except Exception as _e:
                 print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
+
+    location_lookup = config.get("location_lookup", [])
 
     # Load and filter CSV
     all_rows = load_queue(args.csv)
@@ -4054,7 +4108,8 @@ def main():
                         ig_config = config.get("accounts", {}).get("instagram", {})
                         try:
                             _ig_collab = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
-                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
+                            _ig_location_id = get_ig_location_id(row.get("location_500px", "").strip(), location_lookup)
+                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None, location_id=_ig_location_id)
                         except Exception as e:
                             result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
 
