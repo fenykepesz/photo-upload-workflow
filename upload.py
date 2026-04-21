@@ -4029,34 +4029,50 @@ def main():
                     else:
                         print(f"\n  ── Instagram Upload ──")
                         t0_ig = time.time()
-                        if not image_path:
-                            stash_url = row.get("stash_url_nsfw", "").strip() or row.get("stash_url", "").strip()
-                            if stash_url:
-                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                        result_ig = None
+                        is_nsfw_ig = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+
+                        # NSFW safety: Instagram is very strict — never upload NSFW image
+                        # If NSFW flag set, require stash_url_safe; if missing, fail hard
+                        ig_image_path = image_path
+                        if not ig_image_path:
+                            if is_nsfw_ig:
+                                safe_url = row.get("stash_url_safe", "").strip()
+                                if not safe_url:
+                                    result_ig = {"success": False, "url_ig": "",
+                                                 "error": "NSFW photo has no stash_url_safe — refusing to upload to Instagram"}
+                                else:
+                                    ig_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
+                                    print(f"    Using safe image (NSFW flag set)")
                             else:
-                                print("  WARNING: No stash_url — cannot download image")
+                                stash_url = row.get("stash_url_nsfw", "").strip() or row.get("stash_url", "").strip()
+                                if stash_url:
+                                    ig_image_path = download_stash_image(page, stash_url, row["upload_id"])
+                                else:
+                                    result_ig = {"success": False, "url_ig": "", "error": "No Sta.sh URL — cannot download image"}
 
-                        _film_parts = []
-                        if row.get("film_used", "").strip().upper() == "TRUE":
-                            if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
-                            if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
-                            if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
-                            if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        ig_caption = build_ig_caption(
-                            get_effective_title(row),
-                            row.get("keywords", ""),
-                            model_name=row.get("model_name", "").strip(),
-                            ig_handle=row.get("ig_tag_people", "").split(",")[0].strip(),
-                            film_info="\n".join(_film_parts),
-                        )
-                        print(f"    Caption ({len(ig_caption)} chars): {ig_caption[:80]}...")
+                        if result_ig is None:
+                            _film_parts = []
+                            if row.get("film_used", "").strip().upper() == "TRUE":
+                                if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                                if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
+                                if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                                if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                            ig_caption = build_ig_caption(
+                                get_effective_title(row),
+                                row.get("keywords", ""),
+                                model_name=row.get("model_name", "").strip(),
+                                ig_handle=row.get("ig_tag_people", "").split(",")[0].strip(),
+                                film_info="\n".join(_film_parts),
+                            )
+                            print(f"    Caption ({len(ig_caption)} chars): {ig_caption[:80]}...")
 
-                        ig_config = config.get("accounts", {}).get("instagram", {})
-                        try:
-                            _ig_collab = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
-                            result_ig = upload_to_instagram(ig_caption, image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
-                        except Exception as e:
-                            result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
+                            ig_config = config.get("accounts", {}).get("instagram", {})
+                            try:
+                                _ig_collab = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
+                                result_ig = upload_to_instagram(ig_caption, ig_image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
+                            except Exception as e:
+                                result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
 
                         if result_ig["success"]:
                             ok_ig = True
