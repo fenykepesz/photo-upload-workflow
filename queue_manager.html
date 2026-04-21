@@ -867,7 +867,7 @@
     .ai-key-overlay.open { display: flex; }
     .ai-key-dialog {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-      padding: 24px; width: 700px; max-width: 95vw; max-height: 90vh;
+      padding: 24px; width: 960px; max-width: 95vw; max-height: 90vh;
       display: flex; flex-direction: column;
     }
     .ai-key-dialog input {
@@ -2478,6 +2478,9 @@
       document.getElementById('p-bsky').checked = pls.includes('BSKY');
       document.getElementById('p-ig').checked = pls.includes('IG');
       updateRequiredFields();
+      // Fill any empty tag/handle fields from lookups (safe — both functions skip non-empty fields)
+      if (r.model_name) applyModelLookup(r.model_name);
+      if (r.film_dev_contact) applyLabLookup(r.film_dev_contact);
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
@@ -3387,8 +3390,8 @@ Return ONLY valid JSON, no markdown fences:
         <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
         <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="mlEdit(this.dataset.name)">Edit</button>
-          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="mlDelete(this.dataset.name)">✕</button>
+          <button class="btn btn-sm" style="color:var(--accent);border-color:var(--accent)" data-name="${h(m.name)}" onclick="mlEdit(this.dataset.name)" title="Edit">✎</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="mlDelete(this.dataset.name)" title="Delete">✕</button>
         </td>
       </tr>`).join('');
     }
@@ -3557,8 +3560,8 @@ Return ONLY valid JSON, no markdown fences:
         <td style="font-size:11px">${h(m.vk_handle || '—')}</td>
         <td style="font-size:11px">${h(m.fb_tags || '—')}</td>
         <td>
-          <button class="btn btn-sm btn-ghost" data-name="${h(m.name)}" onclick="llEdit(this.dataset.name)">Edit</button>
-          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="llDelete(this.dataset.name)">✕</button>
+          <button class="btn btn-sm" style="color:var(--accent);border-color:var(--accent)" data-name="${h(m.name)}" onclick="llEdit(this.dataset.name)" title="Edit">✎</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="llDelete(this.dataset.name)" title="Delete">✕</button>
         </td>
       </tr>`).join('');
     }
