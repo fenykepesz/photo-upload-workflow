@@ -2090,7 +2090,7 @@
 
       tbody.innerHTML = filtered.map(r => {
         const short = r.stash_url_nsfw ? r.stash_url_nsfw.split('/').pop() : '—';
-        return `<tr class="${r.upload_id === selId ? 'selected' : ''}" onclick="selectRow('${h(r.upload_id)}')">
+        return `<tr class="${r.upload_id === selId ? 'selected' : ''}" onclick="selectRow('${h(r.upload_id)}')" ondblclick="openEditById('${h(r.upload_id)}')">
       <td style="color:var(--muted);font-size:11px">${h(r.upload_id)}</td>
       <td>${h(r.scheduled_date)} <span style="color:var(--muted);font-size:11px">${h(r.scheduled_time)}</span></td>
       <td><span class="truncate" style="max-width:170px;display:block">${h(r.title) || '<span style="color:var(--muted)">—</span>'}</span></td>
@@ -3081,9 +3081,14 @@ Return ONLY valid JSON, no markdown fences:
     }
 
     async function saveConfigFile(silent = false) {
+      // Never write if configData was never loaded — would overwrite file with empty values
+      if (!configData) {
+        if (!silent) toast('Load config.json first before saving', 'error');
+        return;
+      }
       // Start from existing configData so fields not visible in the UI are preserved.
       // Then overlay with current DOM values so edits are captured.
-      const obj = JSON.parse(JSON.stringify(configData || {}));
+      const obj = JSON.parse(JSON.stringify(configData));
       obj.social_links = {
         ...(obj.social_links || {}),
         web: document.getElementById('s-sl-web').value.trim(),
