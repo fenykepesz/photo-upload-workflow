@@ -1873,19 +1873,24 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
     else:
         print("  Creating Instagram media container...")
     try:
+        collab_sent = False
         resp = _make_container(caption, collaborators)
         if not resp.ok and collaborators:
             err_detail = ""
-            try: err_detail = resp.json().get("error", {}).get("message", "")
-            except Exception: pass
-            print(f"    WARNING: Collab invite failed ({err_detail}) — falling back to @mention in caption")
-            mention_suffix = " ".join(f"@{h.lstrip('@')}" for h in collaborators)
-            fallback_caption = caption.rstrip() + "\n\n" + mention_suffix
-            resp = _make_container(fallback_caption, None)
+            try:
+                err_json = resp.json()
+                err_detail = err_json.get("error", {}).get("message", "")
+            except Exception:
+                err_detail = f"HTTP {resp.status_code}"
+            print(f"    WARNING: Collab invite failed ({err_detail}) — posting without collab tag")
+            print(f"    HINT: Add collab manually in the Instagram app after posting")
+            resp = _make_container(caption, None)
+        else:
+            collab_sent = bool(collaborators)
         resp.raise_for_status()
         creation_id = resp.json()["id"]
         print(f"    Container: {creation_id}")
-        if collaborators:
+        if collab_sent:
             print(f"    NOTE: Collab invite sent to {', '.join(collaborators)} — they must accept in the Instagram app")
     except Exception as e:
         detail = ""
