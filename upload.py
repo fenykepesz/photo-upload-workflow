@@ -1856,10 +1856,10 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
     def _make_container(cap, with_collab):
         payload = {"image_url": image_url, "caption": cap, "access_token": access_token}
         if with_collab:
-            payload["collaborators"] = ",".join(h.lstrip("@") for h in with_collab)
+            payload["collaborators"] = [h.lstrip("@") for h in with_collab]
         return requests.post(
             f"https://graph.facebook.com/v21.0/{user_id}/media",
-            data=payload, timeout=30,
+            json=payload, timeout=30,
         )
 
     if collaborators:
