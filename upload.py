@@ -1696,14 +1696,20 @@ def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info
     return text
 
 
-def build_bsky_post_text(title, keywords_str, model_name="", film_info="", max_tags=5):
-    """Build a Bluesky post from title + hashtags, fitting within 300 characters.
-    Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
-    Limited to max_tags hashtags."""
+def build_bsky_post_text(title, keywords_str, model_name="", film_info="", caption="", max_tags=5):
+    """Build a Bluesky post from title + caption + hashtags, fitting within 300 characters."""
     if model_name and model_name.strip():
         text = f"Model: {model_name.strip()}\n\n" + title.strip()
     else:
         text = title.strip()
+    if caption and caption.strip():
+        cap = caption.strip()
+        separator = "\n\n"
+        # Fit as much caption as possible, leaving room for film_info and at least one hashtag
+        reserve = (len("\n\n" + film_info) if film_info else 0) + 30
+        available = BSKY_CHAR_LIMIT - len(text) - len(separator) - reserve
+        if available >= 20:
+            text = text + separator + (cap if len(cap) <= available else cap[:available - 1] + "…")
     if film_info:
         text = text + "\n\n" + film_info
     if not keywords_str:
@@ -1732,13 +1738,15 @@ IG_CHAR_LIMIT = 2200
 IG_TAG_LIMIT  = 5
 
 
-def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info="", max_tags=IG_TAG_LIMIT):
-    """Build an Instagram caption: model @handle, title, film info, hashtags (2200 char limit)."""
+def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info="", caption="", max_tags=IG_TAG_LIMIT):
+    """Build an Instagram caption: model @handle, title, caption, film info, hashtags (2200 char limit)."""
     if model_name and model_name.strip():
         handle_suffix = f" @{ig_handle.strip().lstrip('@')}" if ig_handle and ig_handle.strip() else ""
         text = f"Model: {model_name.strip()}{handle_suffix}\n\n" + title.strip()
     else:
         text = title.strip()
+    if caption and caption.strip():
+        text = text + "\n\n" + caption.strip()
     if film_info:
         text = text + "\n\n" + film_info
     if not keywords_str:
@@ -1783,7 +1791,8 @@ def upload_image_to_cloudinary(image_path, cloud_name, api_key, api_secret):
             files={"file": f},
             timeout=60,
         )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise Exception(f"{resp.status_code}: {resp.text}")
     return resp.json()["secure_url"]
 
 
@@ -1870,6 +1879,8 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
         resp.raise_for_status()
         creation_id = resp.json()["id"]
         print(f"    Container: {creation_id}")
+        if collaborators:
+            print(f"    NOTE: Collab invite sent to {', '.join(collaborators)} — they must accept in the Instagram app")
     except Exception as e:
         detail = ""
         try: detail = e.response.json()
@@ -3725,6 +3736,11 @@ def main():
                 print("  Instagram token refreshed and saved.")
             except Exception as _e:
                 print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
+                # Mark as refreshed today so we don't retry on every run — token still works
+                _ig_cfg["token_last_refreshed"] = _date.today().isoformat()
+                config["accounts"]["instagram"] = _ig_cfg
+                with open(args.config, "w", encoding="utf-8") as _f:
+                    json.dump(config, _f, indent=2, ensure_ascii=False)
 
     # Load and filter CSV
     all_rows = load_queue(args.csv)
@@ -4030,7 +4046,7 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts))
+                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts), caption=row.get("caption", "").strip())
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -4094,6 +4110,7 @@ def main():
                                 model_name=row.get("model_name", "").strip(),
                                 ig_handle=row.get("ig_tag_people", "").split(",")[0].strip(),
                                 film_info="\n".join(_film_parts),
+                                caption=row.get("caption", "").strip(),
                             )
                             print(f"    Caption ({len(ig_caption)} chars): {ig_caption[:80]}...")
 
