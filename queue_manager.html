@@ -2484,6 +2484,8 @@
       document.getElementById('p-bsky').checked = pls.includes('BSKY');
       document.getElementById('p-ig').checked = pls.includes('IG');
       updateRequiredFields();
+      // Auto-set Travel gallery for street photos only when da_gallery was not explicitly saved
+      if (!r.da_gallery && isStreetPhoto()) applyStreetDefaults();
       // Fill any empty tag/handle fields from lookups (safe — both functions skip non-empty fields)
       if (r.model_name) applyModelLookup(r.model_name);
       if (r.film_dev_contact) applyLabLookup(r.film_dev_contact);
@@ -2609,6 +2611,26 @@
       const model35 = ['Portrait', 'Female portrait', 'Fine Nudes'];
       return model500.includes(cat500) || model35.includes(cat35);
     }
+    const STREET_CATS_500 = ['Street', 'City and Architecture'];
+    const STREET_CATS_35  = ['City/Architecture'];
+    function isStreetPhoto() {
+      const cat500 = document.getElementById('m-cat-500px').value;
+      const cat35  = document.getElementById('m-cat-35p').value;
+      return STREET_CATS_500.includes(cat500) || STREET_CATS_35.includes(cat35);
+    }
+    function applyStreetDefaults() {
+      const boxes = document.querySelectorAll('#m-da-gallery-list input');
+      let travelFound = false;
+      boxes.forEach(c => {
+        if (c.value === 'Travel') { c.checked = true; travelFound = true; }
+        else if (c.value !== 'Featured') c.checked = false;
+      });
+      if (!travelFound) toast('Travel gallery not found — add it in Settings → DA Galleries', 'warn');
+    }
+    function onCategoryChange() {
+      updateRequiredFields();
+      if (isStreetPhoto()) applyStreetDefaults();
+    }
     function updateRequiredFields() {
       const any = ['p-da','p-500','p-fb','p-35','p-vk','p-x','p-bsky','p-ig']
         .some(id => document.getElementById(id)?.checked);
@@ -2636,7 +2658,7 @@
     });
     ['m-cat-500px', 'm-cat-35p'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('change', updateRequiredFields);
+      if (el) el.addEventListener('change', onCategoryChange);
     });
 
     document.addEventListener('keydown', e => {
@@ -4170,6 +4192,7 @@ Return ONLY valid JSON, no markdown fences:
         const opt = Array.from(sel35.options).find(o => o.value === cat35 || o.text === cat35);
         if (opt) sel35.value = opt.value;
       }
+      onCategoryChange();
 
       closeAiPanel();
       toast('AI metadata applied', 'success');
