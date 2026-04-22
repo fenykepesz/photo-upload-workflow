@@ -20,6 +20,7 @@ Usage:
 import argparse
 import base64
 import csv
+import hashlib
 import json
 import sys
 import time
@@ -1771,6 +1772,21 @@ def get_lab_handles(contact_name, lab_lookup):
     return {}
 
 
+def upload_image_to_cloudinary(image_path, cloud_name, api_key, api_secret):
+    """Upload a local image to Cloudinary and return a public HTTPS URL."""
+    timestamp = int(time.time())
+    signature = hashlib.sha1(f"timestamp={timestamp}{api_secret}".encode()).hexdigest()
+    with open(image_path, "rb") as f:
+        resp = requests.post(
+            f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload",
+            data={"api_key": api_key, "timestamp": timestamp, "signature": signature},
+            files={"file": f},
+            timeout=60,
+        )
+    resp.raise_for_status()
+    return resp.json()["secure_url"]
+
+
 def upload_image_to_imgbb(image_path, api_key):
     """Upload a local image to imgbb and return a public URL."""
     with open(image_path, "rb") as f:
@@ -1787,27 +1803,41 @@ def upload_image_to_imgbb(image_path, api_key):
 def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None):
     """
     Post a photo to Instagram via the Graph API.
-    Requires: ig_config with access_token, user_id, imgbb_api_key.
+    Requires: ig_config with access_token, user_id, and either cloudinary or imgbb_api_key.
     Returns {"success": bool, "url_ig": str, "error": str}
     """
     access_token = ig_config.get("access_token", "").strip()
     user_id      = ig_config.get("user_id", "").strip()
+    cld          = ig_config.get("cloudinary", {})
+    cld_cloud    = cld.get("cloud_name", "").strip()
+    cld_key      = cld.get("api_key", "").strip()
+    cld_secret   = cld.get("api_secret", "").strip()
     imgbb_key    = ig_config.get("imgbb_api_key", "").strip()
 
     if not access_token or not user_id:
         return {"success": False, "url_ig": "", "error": "Instagram not configured — add access_token and user_id to config.json accounts.instagram"}
-    if not imgbb_key:
-        return {"success": False, "url_ig": "", "error": "Instagram imgbb_api_key missing in config.json accounts.instagram"}
     if not image_path or not Path(image_path).exists():
         return {"success": False, "url_ig": "", "error": "No image file available"}
 
-    # Step 1: host image publicly via imgbb
-    print("  Uploading image to imgbb...")
-    try:
-        image_url = upload_image_to_imgbb(image_path, imgbb_key)
-        print(f"    Hosted at: {image_url}")
-    except Exception as e:
-        return {"success": False, "url_ig": "", "error": f"imgbb upload failed: {e}"}
+    # Step 1: host image publicly — prefer Cloudinary, fall back to imgbb
+    use_cloudinary = bool(cld_cloud and cld_key and cld_secret)
+    if not use_cloudinary and not imgbb_key:
+        return {"success": False, "url_ig": "", "error": "No image hosting configured — add Cloudinary credentials (or imgbb_api_key) to config.json accounts.instagram"}
+
+    if use_cloudinary:
+        print("  Uploading image to Cloudinary...")
+        try:
+            image_url = upload_image_to_cloudinary(image_path, cld_cloud, cld_key, cld_secret)
+            print(f"    Hosted at: {image_url}")
+        except Exception as e:
+            return {"success": False, "url_ig": "", "error": f"Cloudinary upload failed: {e}"}
+    else:
+        print("  Uploading image to imgbb (fallback)...")
+        try:
+            image_url = upload_image_to_imgbb(image_path, imgbb_key)
+            print(f"    Hosted at: {image_url}")
+        except Exception as e:
+            return {"success": False, "url_ig": "", "error": f"imgbb upload failed: {e}"}
 
     if no_submit:
         print("  --no-submit: skipping Instagram post")
