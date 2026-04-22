@@ -1854,12 +1854,18 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
 
     # Step 2: create media container (Facebook Login flow uses graph.facebook.com)
     def _make_container(cap, with_collab):
-        payload = {"image_url": image_url, "caption": cap, "access_token": access_token}
+        payload = {"image_url": image_url, "caption": cap}
         if with_collab:
             payload["collaborators"] = [h.lstrip("@") for h in with_collab]
+            return requests.post(
+                f"https://graph.facebook.com/v21.0/{user_id}/media",
+                params={"access_token": access_token},
+                json=payload, timeout=30,
+            )
+        payload["access_token"] = access_token
         return requests.post(
             f"https://graph.facebook.com/v21.0/{user_id}/media",
-            json=payload, timeout=30,
+            data=payload, timeout=30,
         )
 
     if collaborators:
