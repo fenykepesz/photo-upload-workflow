@@ -1656,9 +1656,14 @@
         <div class="s-section-title">Instagram Credentials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px">— Facebook Graph API token (auto-refreshed every 30 days if App ID + Secret are set)</span></div>
         <div class="s-field"><span class="s-field-label">Access Token</span><input type="text" id="s-ig-token" placeholder="EAAUa8..." style="font-family:monospace;font-size:11px"></div>
         <div class="s-field"><span class="s-field-label">User ID</span><input type="text" id="s-ig-userid" placeholder="17841400396060390" style="font-family:monospace"></div>
-        <div class="s-field"><span class="s-field-label">imgbb API Key</span><input type="text" id="s-ig-imgbb" placeholder="219658..." style="font-family:monospace"></div>
         <div class="s-field"><span class="s-field-label">App ID</span><input type="text" id="s-ig-appid" placeholder="Meta app ID" style="font-family:monospace"></div>
         <div class="s-field"><span class="s-field-label">App Secret</span><input type="password" id="s-ig-appsecret" placeholder="Meta app secret" style="font-family:monospace"></div>
+        <div class="s-section-title" style="margin-top:14px">Cloudinary <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px">— image hosting for Instagram uploads (replaces imgbb)</span></div>
+        <div class="s-field"><span class="s-field-label">Cloud Name</span><input type="text" id="s-cld-cloud" placeholder="your-cloud-name" style="font-family:monospace"></div>
+        <div class="s-field"><span class="s-field-label">API Key</span><input type="text" id="s-cld-key" placeholder="123456789012345" style="font-family:monospace"></div>
+        <div class="s-field"><span class="s-field-label">API Secret</span><input type="password" id="s-cld-secret" placeholder="API secret from dashboard" style="font-family:monospace"></div>
+        <div class="s-section-title" style="margin-top:14px">imgbb <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px">— legacy fallback if Cloudinary not configured</span></div>
+        <div class="s-field"><span class="s-field-label">imgbb API Key</span><input type="text" id="s-ig-imgbb" placeholder="219658..." style="font-family:monospace"></div>
         <div class="s-save-bar">
           <div class="sep"></div>
           <button class="btn btn-primary btn-sm" onclick="saveConfigFile()">Save config.json</button>
@@ -3055,11 +3060,15 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('s-acc-bsky').value = ac.bluesky || '';
       document.getElementById('s-acc-facebook').value = ac.facebook || '';
       const ig = ac.instagram || {};
-      document.getElementById('s-ig-token').value     = ig.access_token  || '';
-      document.getElementById('s-ig-userid').value    = ig.user_id       || '';
-      document.getElementById('s-ig-imgbb').value     = ig.imgbb_api_key || '';
-      document.getElementById('s-ig-appid').value     = ig.app_id        || '';
-      document.getElementById('s-ig-appsecret').value = ig.app_secret    || '';
+      document.getElementById('s-ig-token').value     = ig.access_token        || '';
+      document.getElementById('s-ig-userid').value    = ig.user_id             || '';
+      document.getElementById('s-ig-imgbb').value     = ig.imgbb_api_key       || '';
+      document.getElementById('s-ig-appid').value     = ig.app_id              || '';
+      document.getElementById('s-ig-appsecret').value = ig.app_secret          || '';
+      const cld = ig.cloudinary || {};
+      document.getElementById('s-cld-cloud').value  = cld.cloud_name  || '';
+      document.getElementById('s-cld-key').value    = cld.api_key     || '';
+      document.getElementById('s-cld-secret').value = cld.api_secret  || '';
       const wt = configData.wait_times || {};
       document.getElementById('wt-500px').value    = wt['500px']    ?? 30;
       document.getElementById('wt-35photo').value  = wt['35photo']  ?? 30;
@@ -3112,6 +3121,11 @@ Return ONLY valid JSON, no markdown fences:
           imgbb_api_key: document.getElementById('s-ig-imgbb').value.trim(),
           app_id:        document.getElementById('s-ig-appid').value.trim(),
           app_secret:    document.getElementById('s-ig-appsecret').value.trim(),
+          cloudinary: {
+            cloud_name: document.getElementById('s-cld-cloud').value.trim(),
+            api_key:    document.getElementById('s-cld-key').value.trim(),
+            api_secret: document.getElementById('s-cld-secret').value.trim(),
+          },
         },
       };
       obj.wait_times = {
