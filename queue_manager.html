@@ -2301,13 +2301,13 @@
     function resetById(id) {
       const r = rows.find(x => x.upload_id === id);
       if (!r) return;
-      const urls = ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb']
+      const urls = ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb','url_ig']
         .filter(k => r[k]);
       const msg = urls.length
         ? `Reset ${id} for re-upload?\n\nThis will clear ${urls.length} upload URL(s):\n${urls.map(k => '  ' + k + ': ' + r[k]).join('\n')}\n\nStatus will be set back to Approved.`
         : `Reset ${id} for re-upload?\n\nNo upload URLs found — status will be set back to Approved.`;
       if (!confirm(msg)) return;
-      for (const k of ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb','upload_timestamp','error_log']) {
+      for (const k of ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb','url_ig','upload_timestamp','error_log']) {
         r[k] = '';
       }
       r.status = 'Approved';
@@ -2322,7 +2322,7 @@
         toast('Only Partial/Failed rows can be retried', 'error'); return;
       }
       const platMap = { DA:'da_deviation_url', '500PX':'url_500px', '35P':'url_35p',
-        VK:'url_vk', X:'url_x', BSKY:'url_bsky', FB:'url_fb' };
+        VK:'url_vk', X:'url_x', BSKY:'url_bsky', IG:'url_ig', FB:'url_fb' };
       const selected = (r.platforms || '').split(',').map(p => p.trim()).filter(Boolean);
       const willRetry = [], alreadyDone = [];
       for (const p of selected) {
@@ -2524,7 +2524,6 @@
         category_500px: document.getElementById('m-cat-500px').value,
         category_35p: document.getElementById('m-cat-35p').value,
         platforms,
-        status: document.getElementById('m-status').value || 'Approved',
         model_name: document.getElementById('m-model-name').value.trim(),
         location_500px: document.getElementById('m-loc-500px').value.trim(),
         fb_feeling: document.getElementById('m-fb-feeling').value,
@@ -2555,7 +2554,9 @@
         url_vk: existing?.url_vk || '',
         url_x: existing?.url_x || '',
         url_bsky: existing?.url_bsky || '',
+        url_ig: existing?.url_ig || '',
         url_fb: existing?.url_fb || '',
+        status: existing?.status === 'Uploaded' ? 'Uploaded' : document.getElementById('m-status').value || 'Approved',
         notes: document.getElementById('m-notes').value.trim(),
         error_log: existing?.error_log || '',
       };
