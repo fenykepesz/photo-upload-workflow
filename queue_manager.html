@@ -4221,6 +4221,24 @@ Return ONLY valid JSON, no markdown fences:
       } catch (e) { /* permission revoked or file gone */ }
     });
 
+    // Poll for CSV changes every 5s — catches updates while staying on this tab
+    let _lastModified = 0;
+    setInterval(async () => {
+      if (!fileHandle) return;
+      if (document.getElementById('overlay').classList.contains('open')) return;
+      try {
+        const file = await fileHandle.getFile();
+        if (file.lastModified === _lastModified) return;
+        if (_lastModified === 0) { _lastModified = file.lastModified; return; } // init pass
+        _lastModified = file.lastModified;
+        const txt = await file.text();
+        rows = parseCSV(txt);
+        cacheCSV(txt, fileHandle.name);
+        refresh();
+        toast('CSV reloaded', 'info');
+      } catch (e) { /* permission revoked or file gone */ }
+    }, 5000);
+
     // INIT
     autoLoadCSV();
     loadDAData(false).then(() => { sRenderGalleries(); sRenderGroups(); sUpdateFileStatus(); });
