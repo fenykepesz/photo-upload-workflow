@@ -1141,6 +1141,7 @@
             <th onclick="sortBy('upload_id')">ID <span class="sort-arrow">↕</span></th>
             <th onclick="sortBy('scheduled_date')">Date <span class="sort-arrow">↕</span></th>
             <th onclick="sortBy('title')">Title <span class="sort-arrow">↕</span></th>
+            <th onclick="sortBy('model_name')">Model <span class="sort-arrow">↕</span></th>
             <th>Platforms</th>
             <th onclick="sortBy('status')">Status <span class="sort-arrow">↕</span></th>
             <th>NSFW</th>
@@ -2090,7 +2091,7 @@
       empty.style.display = 'none'; tbl.style.display = 'table';
 
       if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">No entries match your filters.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--muted)">No entries match your filters.</td></tr>`;
         return;
       }
 
@@ -2100,6 +2101,7 @@
       <td style="color:var(--muted);font-size:11px">${h(r.upload_id)}</td>
       <td>${h(r.scheduled_date)} <span style="color:var(--muted);font-size:11px">${h(r.scheduled_time)}</span></td>
       <td><span class="truncate" style="max-width:170px;display:block">${h(r.title) || '<span style="color:var(--muted)">—</span>'}</span></td>
+      <td><span class="truncate" style="max-width:120px;display:block;color:var(--muted);font-size:12px">${h(r.model_name) || ''}</span></td>
       <td>${plats(r.platforms)}</td>
       <td>${statusBadge(r.status)}</td>
       <td style="text-align:center">${r.da_nsfw_flag === 'TRUE' ? '<span style="color:var(--warning)">●</span>' : '<span style="color:var(--border)">○</span>'}</td>
