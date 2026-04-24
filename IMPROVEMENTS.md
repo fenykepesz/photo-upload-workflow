@@ -70,7 +70,7 @@ Week 4 — hardening:
 ---
 
 ### #4 — Instagram: poll `status_code` before publishing · Week 3
-**Status:** [ ] Pending
+**Status:** [x] Done — `838632b`
 
 **Issue:** A fixed 8s sleep between container creation and publish. Meta requires polling `status_code` until `FINISHED`. Large images or slow Meta servers silently produce `MEDIA_NOT_READY` errors.
 
@@ -130,7 +130,7 @@ Week 4 — hardening:
 ---
 
 ### #8 — Image pre-validation before IG upload · Week 3
-**Status:** [ ] Pending
+**Status:** [x] Done — `838632b`
 
 **Issue:** Instagram rejects images that are too large (>8MB), wrong format, or wrong aspect ratio — but only after Cloudinary upload + container creation + 8s wait. Failure wastes ~30s and a Cloudinary credit.
 
