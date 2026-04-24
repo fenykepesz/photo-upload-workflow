@@ -22,6 +22,7 @@ import base64
 import csv
 import hashlib
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -170,10 +171,12 @@ def save_row_update(csv_path, upload_id, updates):
         if key not in fieldnames:
             fieldnames.append(key)
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+    tmp_path = Path(csv_path).with_suffix(".csv.tmp")
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
         writer.writeheader()
         writer.writerows(rows)
+    os.replace(tmp_path, csv_path)
 
 
 # ── Row filtering ─────────────────────────────────────────────
