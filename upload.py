@@ -3750,11 +3750,7 @@ def main():
                 print("  Instagram token refreshed and saved.")
             except Exception as _e:
                 print(f"  WARNING: Instagram token auto-refresh failed: {_e}")
-                # Mark as refreshed today so we don't retry on every run — token still works
-                _ig_cfg["token_last_refreshed"] = _date.today().isoformat()
-                config["accounts"]["instagram"] = _ig_cfg
-                with open(args.config, "w", encoding="utf-8") as _f:
-                    json.dump(config, _f, indent=2, ensure_ascii=False)
+                print(f"  Token unchanged — will retry on next run.")
 
     # Load and filter CSV
     all_rows = load_queue(args.csv)
@@ -3820,6 +3816,7 @@ def main():
                 print(f"{'=' * 60}")
 
                 platforms = get_row_platforms(row)
+                all_row_platforms = platforms  # full set — used for final status check
                 if args.platform:
                     requested = args.platform.strip().upper()
                     if requested not in platforms:
@@ -4254,24 +4251,24 @@ def main():
                     fresh_row = next((r for r in fresh_rows if r["upload_id"] == row["upload_id"]), row)
 
                     done_platforms = set()
-                    if "500PX" in platforms and (ok_500px or fresh_row.get("url_500px", "").strip()):
+                    if "500PX" in all_row_platforms and (ok_500px or fresh_row.get("url_500px", "").strip()):
                         done_platforms.add("500PX")
-                    if "35P" in platforms and (ok_35p or fresh_row.get("url_35p", "").strip()):
+                    if "35P" in all_row_platforms and (ok_35p or fresh_row.get("url_35p", "").strip()):
                         done_platforms.add("35P")
-                    if "VK" in platforms and (ok_vk or fresh_row.get("url_vk", "").strip()):
+                    if "VK" in all_row_platforms and (ok_vk or fresh_row.get("url_vk", "").strip()):
                         done_platforms.add("VK")
-                    if "X" in platforms and (ok_x or fresh_row.get("url_x", "").strip()):
+                    if "X" in all_row_platforms and (ok_x or fresh_row.get("url_x", "").strip()):
                         done_platforms.add("X")
-                    if "BSKY" in platforms and (ok_bsky or fresh_row.get("url_bsky", "").strip()):
+                    if "BSKY" in all_row_platforms and (ok_bsky or fresh_row.get("url_bsky", "").strip()):
                         done_platforms.add("BSKY")
-                    if "IG" in platforms and (ok_ig or fresh_row.get("url_ig", "").strip()):
+                    if "IG" in all_row_platforms and (ok_ig or fresh_row.get("url_ig", "").strip()):
                         done_platforms.add("IG")
-                    if "FB" in platforms and (ok_fb or fresh_row.get("url_fb", "").strip()):
+                    if "FB" in all_row_platforms and (ok_fb or fresh_row.get("url_fb", "").strip()):
                         done_platforms.add("FB")
-                    if "DA" in platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
+                    if "DA" in all_row_platforms and (ok_da or fresh_row.get("da_deviation_url", "").strip()):
                         done_platforms.add("DA")
 
-                    if done_platforms == platforms:
+                    if done_platforms == all_row_platforms:
                         status = "Uploaded"
                     elif done_platforms:
                         status = "Partial"

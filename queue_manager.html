@@ -2068,7 +2068,7 @@
       filtered = rows.filter(r => {
         if (s && ![r.title, r.caption, r.upload_id, r.notes, r.stash_url_nsfw].join(' ').toLowerCase().includes(s)) return false;
         if (st && r.status !== st) return false;
-        if (pl && !r.platforms.includes(pl)) return false;
+        if (pl && !r.platforms.split(',').map(p => p.trim()).includes(pl)) return false;
         if (fr && r.scheduled_date < fr) return false;
         if (to && r.scheduled_date > to) return false;
         return true;
