@@ -323,7 +323,19 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 12.5px;
+      table-layout: fixed;
     }
+    /* Column widths */
+    thead th:nth-child(1) { width: 108px; }  /* ID */
+    thead th:nth-child(2) { width: 130px; }  /* Date */
+    thead th:nth-child(3) { width: 200px; }  /* Title */
+    thead th:nth-child(4) { width: 120px; }  /* Model */
+    thead th:nth-child(5) { width: 230px; }  /* Platforms */
+    thead th:nth-child(6) { width: 90px;  }  /* Status */
+    thead th:nth-child(7) { width: 46px;  }  /* NSFW */
+    thead th:nth-child(8) { width: 90px;  }  /* Sta.sh */
+    /* Actions (9th) takes remaining space */
+    tbody td { overflow: hidden; }
 
     thead th {
       background: var(--surface2);
@@ -2100,8 +2112,8 @@
         return `<tr class="${r.upload_id === selId ? 'selected' : ''}" onclick="selectRow('${h(r.upload_id)}')" ondblclick="openEditById('${h(r.upload_id)}')">
       <td style="color:var(--muted);font-size:11px">${h(r.upload_id)}</td>
       <td>${h(r.scheduled_date)} <span style="color:var(--muted);font-size:11px">${h(r.scheduled_time)}</span></td>
-      <td><span class="truncate" style="max-width:170px;display:block">${h(r.title) || '<span style="color:var(--muted)">—</span>'}</span></td>
-      <td><span class="truncate" style="max-width:120px;display:block;color:var(--muted);font-size:12px">${h(r.model_name) || ''}</span></td>
+      <td><span class="truncate" style="display:block">${h(r.title) || '<span style="color:var(--muted)">—</span>'}</span></td>
+      <td><span class="truncate" style="display:block;color:var(--muted);font-size:12px">${h(r.model_name) || ''}</span></td>
       <td>${plats(r.platforms)}</td>
       <td>${statusBadge(r.status)}</td>
       <td style="text-align:center">${r.da_nsfw_flag === 'TRUE' ? '<span style="color:var(--warning)">●</span>' : '<span style="color:var(--border)">○</span>'}</td>
