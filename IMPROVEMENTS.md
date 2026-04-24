@@ -55,7 +55,7 @@ Week 4 — hardening:
 ---
 
 ### #3 — `--platform` flag fabricates "Uploaded" status · Week 2
-**Status:** [ ] Pending
+**Status:** [x] Done — `7198e00`
 
 **Issue:** Running `upload.py --row X --platform IG` narrows `platforms` to `{"IG"}`, so the done-check passes after only IG succeeds and the row is marked `Uploaded` — the other 7 platforms are silently abandoned.
 
@@ -85,7 +85,7 @@ Week 4 — hardening:
 ---
 
 ### #5 — Token refresh records success date on failure · Week 2
-**Status:** [ ] Pending
+**Status:** [x] Done — `7198e00`
 
 **Issue:** `token_last_refreshed = today` is written even when the refresh API returns a 400 error. The 30-day window restarts on a failed refresh — broken credentials go undetected.
 
@@ -100,7 +100,7 @@ Week 4 — hardening:
 ---
 
 ### #6 — Platform filter substring match for `"X"` · Week 2
-**Status:** [ ] Pending
+**Status:** [x] Done — `7198e00`
 
 **Issue:** `r.platforms.includes('X')` is a string `includes()` call — matches `"X"` inside `"FBX"`, `"XXX"`, or any future platform code containing X.
 
