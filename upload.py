@@ -1812,6 +1812,34 @@ def upload_image_to_imgbb(image_path, api_key):
     return resp.json()["data"]["url"]
 
 
+_IG_MAX_BYTES = 8 * 1024 * 1024          # Instagram hard limit
+_IG_VALID_EXTS = {".jpg", ".jpeg", ".png"}
+_IG_MIN_DIM = 320                        # shortest side minimum
+
+
+def validate_ig_image(image_path):
+    """Return (True, '') or (False, reason) before spending Cloudinary credits."""
+    p = Path(image_path)
+    if not p.exists():
+        return False, "image file not found"
+    size = p.stat().st_size
+    if size > _IG_MAX_BYTES:
+        return False, f"file too large ({size / (1024*1024):.1f} MB) — Instagram max is 8 MB"
+    if p.suffix.lower() not in _IG_VALID_EXTS:
+        return False, f"unsupported format '{p.suffix}' — Instagram requires JPG or PNG"
+    try:
+        from PIL import Image
+        with Image.open(p) as img:
+            w, h = img.size
+            if min(w, h) < _IG_MIN_DIM:
+                return False, f"image too small ({w}×{h}) — Instagram minimum is 320px on shortest side"
+    except ImportError:
+        pass  # Pillow not installed — skip dimension check
+    except Exception as exc:
+        return False, f"could not read image dimensions: {exc}"
+    return True, ""
+
+
 def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collaborators=None):
     """
     Post a photo to Instagram via the Graph API.
@@ -1901,9 +1929,26 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
         except Exception: pass
         return {"success": False, "url_ig": "", "error": f"Container creation failed: {e} {detail}"}
 
-    # Step 3: wait for Instagram to process the image
+    # Step 3: poll until Instagram has processed the image (up to 60s)
     print("  Waiting for media to be ready...")
-    time.sleep(8)
+    for _attempt in range(12):
+        time.sleep(5)
+        try:
+            _sr = requests.get(
+                f"https://graph.facebook.com/v21.0/{creation_id}",
+                params={"fields": "status_code", "access_token": access_token},
+                timeout=15,
+            )
+            _sr.raise_for_status()
+            _sc = _sr.json().get("status_code", "")
+            if _sc == "FINISHED":
+                break
+            if _sc == "ERROR":
+                return {"success": False, "url_ig": "", "error": "Instagram media processing failed (status=ERROR)"}
+        except Exception:
+            pass  # network blip — keep polling
+    else:
+        return {"success": False, "url_ig": "", "error": "Instagram media processing timed out after 60s"}
 
     # Step 4: publish
     print("  Publishing...")
@@ -4108,6 +4153,10 @@ def main():
                                 else:
                                     result_ig = {"success": False, "url_ig": "", "error": "No Sta.sh URL — cannot download image"}
 
+                        if result_ig is None:
+                            _ig_ok, _ig_err = validate_ig_image(ig_image_path)
+                            if not _ig_ok:
+                                result_ig = {"success": False, "url_ig": "", "error": f"Image validation failed: {_ig_err}"}
                         if result_ig is None:
                             _film_parts = []
                             if row.get("film_used", "").strip().upper() == "TRUE":
