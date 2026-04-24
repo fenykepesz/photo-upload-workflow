@@ -4164,11 +4164,22 @@ def main():
                                 if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                                 if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                                 if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+
+                            # Resolve IG handles: CSV field is authoritative; fall back to
+                            # model lookup so old entries work without needing a re-save
+                            _ig_handles = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
+                            if not _ig_handles and row.get("model_name", "").strip():
+                                _ml = next((m for m in config.get("model_lookup", [])
+                                            if m.get("name", "").lower() == row["model_name"].strip().lower()), None)
+                                if _ml and _ml.get("ig_handle", "").strip():
+                                    _ig_handles = [_ml["ig_handle"].strip()]
+                                    print(f"    IG handle from model lookup: {_ig_handles[0]}")
+
                             ig_caption = build_ig_caption(
                                 get_effective_title(row),
                                 row.get("keywords", ""),
                                 model_name=row.get("model_name", "").strip(),
-                                ig_handle=row.get("ig_tag_people", "").split(",")[0].strip(),
+                                ig_handle=_ig_handles[0] if _ig_handles else "",
                                 film_info="\n".join(_film_parts),
                                 caption=row.get("caption", "").strip(),
                             )
@@ -4176,8 +4187,7 @@ def main():
 
                             ig_config = config.get("accounts", {}).get("instagram", {})
                             try:
-                                _ig_collab = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
-                                result_ig = upload_to_instagram(ig_caption, ig_image_path, ig_config, args.no_submit, collaborators=_ig_collab or None)
+                                result_ig = upload_to_instagram(ig_caption, ig_image_path, ig_config, args.no_submit, collaborators=_ig_handles or None)
                             except Exception as e:
                                 result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
 
