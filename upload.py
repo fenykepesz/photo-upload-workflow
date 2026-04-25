@@ -90,7 +90,7 @@ COLS = [
     "da_nsfw_flag", "category_500px", "category_35p",
     "platforms", "status", "upload_timestamp",
     "da_deviation_url", "url_500px", "url_35p", "url_vk", "url_x", "url_bsky", "url_fb",
-    "notes", "error_log", "model_name", "da_gallery", "da_groups", "location_500px",
+    "notes", "error_log", "model_name", "mua_name", "da_gallery", "da_groups", "location_500px",
     "fb_feeling", "fb_tag_people",
     "vk_tag_people", "vk_groups", "vk_group_caption", "vk_groups_result",
     "x_tag_people", "bsky_tag_people", "ig_tag_people",
@@ -316,10 +316,18 @@ def build_description(row, config):
     """Assemble desc_full: model credit + caption + social links."""
     parts = []
 
-    # Model credit (before caption, on its own line)
+    # Model / MUA credit (before caption, on their own lines)
     model = row.get("model_name", "").strip()
-    if model:
-        parts.append(f"Model: {model}\n\nPlease respect the model.\n\n")
+    mua = row.get("mua_name", "").strip()
+    if model or mua:
+        credit = ""
+        if model:
+            credit += f"Model: {model}\n"
+        if mua:
+            credit += f"MUA: {mua}\n"
+        if model:
+            credit += "\nPlease respect the model.\n"
+        parts.append(credit + "\n")
 
     parts.append(row.get("caption", "").strip())
 
@@ -360,8 +368,16 @@ def build_description_fb(row):
     parts = []
 
     model = row.get("model_name", "").strip()
-    if model:
-        parts.append(f"Model: {model}\n\nPlease respect the model.\n\n")
+    mua = row.get("mua_name", "").strip()
+    if model or mua:
+        credit = ""
+        if model:
+            credit += f"Model: {model}\n"
+        if mua:
+            credit += f"MUA: {mua}\n"
+        if model:
+            credit += "\nPlease respect the model.\n"
+        parts.append(credit + "\n")
 
     parts.append(row.get("caption", "").strip())
 
@@ -1015,7 +1031,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
 
 
 # ── VK Upload (Playwright) ────────────────────────────────────
-def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", photographer="", model_name="", no_submit=False):
+def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", photographer="", model_name="", mua_name="", no_submit=False):
     """
     Post a photo to the VK wall via browser automation, then suggest to VK groups.
     Flow: feed → Create post → write caption → upload photo → Next → Publish → groups.
@@ -1231,6 +1247,8 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
         _grp_parts.append(f"Photographer: @{handle}")
     if model_name:
         _grp_parts.append(f"Model: {model_name.strip()}")
+    if mua_name:
+        _grp_parts.append(f"MUA: {mua_name.strip()}")
     if vk_group_caption.strip():
         _grp_parts.append(vk_group_caption.strip())
     if film_info:
@@ -1664,13 +1682,18 @@ X_CHAR_LIMIT = 280
 BSKY_CHAR_LIMIT = 300
 
 
-def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info="", dev_handle="", max_tags=5):
+def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info="", dev_handle="", mua_name="", max_tags=5):
     """Build a tweet from title + hashtags, fitting within 280 characters.
     Title and hashtags are separated by a blank line. Hyphens are stripped from tags.
     Limited to max_tags hashtags."""
     if model_name and model_name.strip():
         handle_suffix = f" @{x_handle.strip().lstrip('@')}" if x_handle and x_handle.strip() else ""
-        text = f"Model: {model_name.strip()}{handle_suffix}\n\n" + title.strip()
+        credit = f"Model: {model_name.strip()}{handle_suffix}\n"
+        if mua_name and mua_name.strip():
+            credit += f"MUA: {mua_name.strip()}\n"
+        text = credit + "\n" + title.strip()
+    elif mua_name and mua_name.strip():
+        text = f"MUA: {mua_name.strip()}\n\n" + title.strip()
     else:
         text = title.strip()
     if film_info:
@@ -1699,10 +1722,15 @@ def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info
     return text
 
 
-def build_bsky_post_text(title, keywords_str, model_name="", film_info="", caption="", max_tags=5):
+def build_bsky_post_text(title, keywords_str, model_name="", film_info="", caption="", mua_name="", max_tags=5):
     """Build a Bluesky post from title + caption + hashtags, fitting within 300 characters."""
     if model_name and model_name.strip():
-        text = f"Model: {model_name.strip()}\n\n" + title.strip()
+        credit = f"Model: {model_name.strip()}\n"
+        if mua_name and mua_name.strip():
+            credit += f"MUA: {mua_name.strip()}\n"
+        text = credit + "\n" + title.strip()
+    elif mua_name and mua_name.strip():
+        text = f"MUA: {mua_name.strip()}\n\n" + title.strip()
     else:
         text = title.strip()
     if caption and caption.strip():
@@ -1741,11 +1769,16 @@ IG_CHAR_LIMIT = 2200
 IG_TAG_LIMIT  = 5
 
 
-def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info="", caption="", max_tags=IG_TAG_LIMIT):
+def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info="", caption="", mua_name="", max_tags=IG_TAG_LIMIT):
     """Build an Instagram caption: model @handle, title, caption, film info, hashtags (2200 char limit)."""
     if model_name and model_name.strip():
         handle_suffix = f" @{ig_handle.strip().lstrip('@')}" if ig_handle and ig_handle.strip() else ""
-        text = f"Model: {model_name.strip()}{handle_suffix}\n\n" + title.strip()
+        credit = f"Model: {model_name.strip()}{handle_suffix}\n"
+        if mua_name and mua_name.strip():
+            credit += f"MUA: {mua_name.strip()}\n"
+        text = credit + "\n" + title.strip()
+    elif mua_name and mua_name.strip():
+        text = f"MUA: {mua_name.strip()}\n\n" + title.strip()
     else:
         text = title.strip()
     if caption and caption.strip():
@@ -4012,6 +4045,7 @@ def main():
                                 film_info="\n".join(_vk_film_parts),
                                 photographer=config.get("accounts", {}).get("vk", ""),
                                 model_name=row.get("model_name", "").strip(),
+                                mua_name=row.get("mua_name", "").strip(),
                                 no_submit=args.no_submit,
                             )
                         except Exception as e:
@@ -4058,7 +4092,7 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts))
+                        post_text = build_x_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), x_handle=row.get("x_tag_people", "").strip(), film_info="\n".join(_film_parts), mua_name=row.get("mua_name", "").strip())
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -4102,7 +4136,7 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts), caption=row.get("caption", "").strip())
+                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts), caption=row.get("caption", "").strip(), mua_name=row.get("mua_name", "").strip())
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
@@ -4182,6 +4216,7 @@ def main():
                                 ig_handle=_ig_handles[0] if _ig_handles else "",
                                 film_info="\n".join(_film_parts),
                                 caption=row.get("caption", "").strip(),
+                                mua_name=row.get("mua_name", "").strip(),
                             )
                             print(f"    Caption ({len(ig_caption)} chars): {ig_caption[:80]}...")
 

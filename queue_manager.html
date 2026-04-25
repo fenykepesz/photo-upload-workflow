@@ -1419,6 +1419,11 @@
             <datalist id="model-name-list"></datalist>
           </div>
           <div class="fg form-full">
+            <label>Makeup Artist <span style="font-weight:400;opacity:.6;font-size:11px">(MUA)</span></label>
+            <input type="text" id="m-mua-name" placeholder="e.g. Ofek" list="mua-name-list" autocomplete="off" onchange="applyMuaLookup(this.value)">
+            <datalist id="mua-name-list"></datalist>
+          </div>
+          <div class="fg form-full">
             <label>Serial Title <span style="color:var(--accent)">*</span> <span style="font-weight:400;opacity:.6;font-size:11px">Appended to title: "Title (Serial Title)"</span></label>
             <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off">
             <datalist id="serial-title-list"></datalist>
@@ -1629,6 +1634,7 @@
         <button class="s-tab"        id="stab-vk"      onclick="showSettingsTab('vk')">VK Data</button>
         <button class="s-tab"        id="stab-models"  onclick="showSettingsTab('models')">Models</button>
         <button class="s-tab"        id="stab-labs"    onclick="showSettingsTab('labs')">Labs</button>
+        <button class="s-tab"        id="stab-mua"     onclick="showSettingsTab('mua')">MUA</button>
       </div>
 
       <!-- ── AI panel ── -->
@@ -1834,6 +1840,34 @@
         </div>
       </div>
 
+      <!-- ── MUA panel ── -->
+      <div class="s-panel" id="s-tab-mua">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+          Map makeup artist names to platform handles for tagging. Set <strong>Makeup Artist</strong> in the photo form to include a MUA credit line and auto-tag them on upload.
+        </div>
+        <div class="s-section-title">MUA Lookup Table</div>
+        <table class="s-data-table" id="mua-lookup-table">
+          <thead><tr><th>Name</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th>FB Tags</th><th style="width:90px"></th></tr></thead>
+          <tbody id="mua-lookup-tbody"><tr><td colspan="7" style="color:var(--muted);padding:8px">No MUAs configured yet.</td></tr></tbody>
+        </table>
+        <div style="margin-top:10px"><button class="btn btn-sm" onclick="muaAddNew()">+ Add MUA</button></div>
+
+        <div id="mua-lookup-form" style="display:none;margin-top:14px;background:var(--surface3);padding:12px;border-radius:var(--radius);border:1px solid var(--border)">
+          <div class="s-section-title" style="margin-bottom:8px" id="mua-form-title">Add MUA</div>
+          <input type="hidden" id="mua-edit-name">
+          <div class="s-field"><span class="s-field-label">Name</span><input type="text" id="mua-name" placeholder="e.g. Ofek" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">X Handle</span><input type="text" id="mua-x-handle" placeholder="e.g. ofek_mua (without @)" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="mua-bsky-handle" placeholder="e.g. ofek.bsky.social" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">IG Handle</span><input type="text" id="mua-ig-handle" placeholder="e.g. ofek_mua (without @)" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">VK Handle</span><input type="text" id="mua-vk-handle" placeholder="e.g. @id123456 or username" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">FB Tags</span><input type="text" id="mua-fb-tags" placeholder="e.g. ofek.mua.123" autocomplete="off"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="muaSave()">Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="muaCancel()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ── Locations panel ── -->
 
 
@@ -1863,7 +1897,7 @@
       'da_nsfw_flag', 'category_500px', 'category_35p',
       'platforms', 'status', 'upload_timestamp',
       'da_deviation_url', 'url_500px', 'url_35p', 'url_vk', 'url_x', 'url_bsky', 'url_fb',
-      'notes', 'error_log', 'model_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
+      'notes', 'error_log', 'model_name', 'mua_name', 'da_gallery', 'da_groups', 'location_500px', 'fb_feeling', 'fb_tag_people',
       'vk_tag_people', 'vk_groups', 'vk_group_caption', 'vk_groups_result',
       'x_tag_people', 'bsky_tag_people', 'ig_tag_people',
       'url_ig',
@@ -2057,7 +2091,7 @@
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
-    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); seedDevContacts(); seedSerialTitles(); }
+    function refresh() { applyFilters(); updateStats(); seedModelNames(); seedMuaNames(); seedLocations(); seedTagPeople(); seedVkTagPeople(); seedFilmCameras(); seedFilmLenses(); seedFilmStocks(); seedFilmDevelopers(); seedDevContacts(); seedSerialTitles(); }
     function toggleFilmFields() {
       const on = document.getElementById('m-film-used').checked;
       document.getElementById('film-camera-row').style.display = on ? '' : 'none';
@@ -2375,7 +2409,7 @@
     }
     function clearForm() {
       ['m-date', 'm-time', 'm-nsfw', 'm-safe', 'm-title', 'm-serial-title', 'm-caption', 'm-keywords',
-        'm-notes', 'm-model-name', 'm-loc-500px'].forEach(id => {
+        'm-notes', 'm-model-name', 'm-mua-name', 'm-loc-500px'].forEach(id => {
           const el = document.getElementById(id); if (el) el.value = '';
         });
       // Clear DA Gallery checkboxes
@@ -2457,6 +2491,7 @@
       document.getElementById('m-status').value = r.status || 'Pending';
       document.getElementById('m-notes').value = r.notes || '';
       document.getElementById('m-model-name').value = r.model_name || '';
+      document.getElementById('m-mua-name').value = r.mua_name || '';
       document.getElementById('m-loc-500px').value = r.location_500px || '';
       document.getElementById('m-fb-feeling').value = r.fb_feeling || 'happy';
       document.getElementById('m-fb-tag-people').value = r.fb_tag_people || '';
@@ -2512,6 +2547,7 @@
       // Fill any empty tag/handle fields from lookups (safe — both functions skip non-empty fields)
       if (r.model_name) applyModelLookup(r.model_name);
       if (r.film_dev_contact) applyLabLookup(r.film_dev_contact);
+      if (r.mua_name) applyMuaLookup(r.mua_name);
       document.getElementById('overlay').classList.add('open');
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
@@ -2548,6 +2584,7 @@
         category_35p: document.getElementById('m-cat-35p').value,
         platforms,
         model_name: document.getElementById('m-model-name').value.trim(),
+        mua_name: document.getElementById('m-mua-name').value.trim(),
         location_500px: document.getElementById('m-loc-500px').value.trim(),
         fb_feeling: document.getElementById('m-fb-feeling').value,
         fb_tag_people: document.getElementById('m-fb-tag-people').value.trim(),
@@ -2983,6 +3020,7 @@ Return ONLY valid JSON, no markdown fences:
       localStorage.setItem('settings_tab', name);
       if (name === 'models') renderModelLookupTable();
       if (name === 'labs') renderLabLookupTable();
+      if (name === 'mua') renderMuaLookupTable();
     }
     function sUpdateFileStatus() {
       // DA
@@ -3134,6 +3172,11 @@ Return ONLY valid JSON, no markdown fences:
         renderLabLookupTable();
         seedDevContacts();
       }
+      if (Array.isArray(configData.mua_lookup)) {
+        localStorage.setItem('mua_lookup', JSON.stringify(configData.mua_lookup));
+        renderMuaLookupTable();
+        seedMuaNames();
+      }
     }
 
     async function saveConfigFile(silent = false) {
@@ -3188,6 +3231,7 @@ Return ONLY valid JSON, no markdown fences:
       // Always persist the current model lookup into config.json
       obj.model_lookup = getModelLookup();
       obj.lab_lookup = getLabLookup();
+      obj.mua_lookup = getMuaLookup();
       const text = JSON.stringify(obj, null, 2);
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
         if (silent) { toast('config.json not linked — open it in Settings → Config to enable auto-save', 'warning'); return; }
@@ -3718,6 +3762,118 @@ Return ONLY valid JSON, no markdown fences:
       const dl = document.getElementById('film-dev-contact-list');
       if (!dl) return;
       const names = getLabLookup().map(m => m.name);
+      dl.innerHTML = names.map(n => `<option value="${h(n)}">`).join('');
+    }
+
+    // ── MUA LOOKUP ────────────────────────────────────────────────────────────────
+    function getMuaLookup() {
+      try { return JSON.parse(localStorage.getItem('mua_lookup') || '[]'); } catch { return []; }
+    }
+    function saveMuaLookupData(arr) {
+      localStorage.setItem('mua_lookup', JSON.stringify(arr));
+      if (configData) configData.mua_lookup = arr;
+      saveConfigFile(true);
+    }
+    function renderMuaLookupTable() {
+      const tbody = document.getElementById('mua-lookup-tbody');
+      if (!tbody) return;
+      const arr = getMuaLookup();
+      if (!arr.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No MUAs configured yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = arr.map(m => `<tr>
+        <td>${h(m.name)}</td>
+        <td style="font-size:11px">${h(m.x_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.vk_handle || '—')}</td>
+        <td style="font-size:11px">${h(m.fb_tags || '—')}</td>
+        <td>
+          <button class="btn btn-sm" style="color:var(--accent);border-color:var(--accent)" data-name="${h(m.name)}" onclick="muaEdit(this.dataset.name)" title="Edit">✎</button>
+          <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" data-name="${h(m.name)}" onclick="muaDelete(this.dataset.name)" title="Delete">✕</button>
+        </td>
+      </tr>`).join('');
+    }
+    function muaAddNew() {
+      document.getElementById('mua-form-title').textContent = 'Add MUA';
+      document.getElementById('mua-edit-name').value = '';
+      ['mua-name','mua-x-handle','mua-bsky-handle','mua-ig-handle','mua-vk-handle','mua-fb-tags'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('mua-lookup-form').style.display = '';
+      document.getElementById('mua-name').focus();
+    }
+    function muaEdit(name) {
+      const m = getMuaLookup().find(x => x.name === name);
+      if (!m) return;
+      document.getElementById('mua-form-title').textContent = 'Edit MUA';
+      document.getElementById('mua-edit-name').value = m.name;
+      document.getElementById('mua-name').value = m.name;
+      document.getElementById('mua-x-handle').value = m.x_handle || '';
+      document.getElementById('mua-bsky-handle').value = m.bsky_handle || '';
+      document.getElementById('mua-ig-handle').value = m.ig_handle || '';
+      document.getElementById('mua-vk-handle').value = m.vk_handle || '';
+      document.getElementById('mua-fb-tags').value = m.fb_tags || '';
+      document.getElementById('mua-lookup-form').style.display = '';
+      document.getElementById('mua-name').focus();
+    }
+    function muaDelete(name) {
+      const arr = getMuaLookup().filter(x => x.name !== name);
+      saveMuaLookupData(arr);
+      renderMuaLookupTable();
+    }
+    function muaSave() {
+      const editName = document.getElementById('mua-edit-name').value;
+      const name = document.getElementById('mua-name').value.trim();
+      if (!name) { toast('Name is required', 'error'); return; }
+      const entry = {
+        name,
+        x_handle:    document.getElementById('mua-x-handle').value.trim(),
+        bsky_handle: document.getElementById('mua-bsky-handle').value.trim(),
+        ig_handle:   document.getElementById('mua-ig-handle').value.trim(),
+        vk_handle:   document.getElementById('mua-vk-handle').value.trim(),
+        fb_tags:     document.getElementById('mua-fb-tags').value.trim(),
+      };
+      let arr = getMuaLookup();
+      if (editName) arr = arr.filter(x => x.name !== editName);
+      const idx = arr.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
+      if (idx >= 0) arr[idx] = entry; else arr.push(entry);
+      arr.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      saveMuaLookupData(arr);
+      renderMuaLookupTable();
+      seedMuaNames();
+      document.getElementById('mua-lookup-form').style.display = 'none';
+      toast('MUA saved', 'success');
+    }
+    function muaCancel() {
+      document.getElementById('mua-lookup-form').style.display = 'none';
+    }
+    function applyMuaLookup(muaName) {
+      if (!muaName) return;
+      const m = getMuaLookup().find(x => x.name.toLowerCase() === muaName.toLowerCase());
+      if (!m) return;
+      function appendHandle(elId, handle) {
+        if (!handle) return;
+        const el = document.getElementById(elId);
+        if (!el) return;
+        const current = el.value.split(',').map(s => s.trim()).filter(Boolean);
+        if (!current.includes(handle)) el.value = [...current, handle].join(', ');
+      }
+      appendHandle('m-ig-tag-people',   m.ig_handle);
+      appendHandle('m-x-tag-people',    m.x_handle);
+      appendHandle('m-bsky-tag-people', m.bsky_handle);
+      appendHandle('m-vk-tag-people',   m.vk_handle);
+      if (m.fb_tags) {
+        const fbEl = document.getElementById('m-fb-tag-people');
+        if (fbEl) {
+          const current = fbEl.value.split(',').map(s => s.trim()).filter(Boolean);
+          if (!current.includes(m.fb_tags)) fbEl.value = [...current, m.fb_tags].join(', ');
+        }
+      }
+    }
+    function seedMuaNames() {
+      const dl = document.getElementById('mua-name-list');
+      if (!dl) return;
+      const names = getMuaLookup().map(m => m.name);
       dl.innerHTML = names.map(n => `<option value="${h(n)}">`).join('');
     }
 
