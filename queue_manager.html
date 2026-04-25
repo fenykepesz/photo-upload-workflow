@@ -2438,7 +2438,7 @@
       document.getElementById('m-ig-tag-people').value = '';
       document.querySelectorAll('#m-vk-groups-list input[type="checkbox"]').forEach(c => c.checked = true);
       const _vkAcct = configData?.accounts?.vk?.trim();
-      document.getElementById('m-vk-group-caption').value = _vkAcct ? `Photographer: [@${_vkAcct.replace(/^@/, '')}]` : '';
+      document.getElementById('m-vk-group-caption').value = _vkAcct ? `Photographer: @${_vkAcct.replace(/^@/, '')}` : '';
       ['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky', 'p-ig'].forEach(id => document.getElementById(id).checked = true);
     }
     function openAddModal() {
