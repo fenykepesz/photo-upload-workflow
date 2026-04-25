@@ -2605,6 +2605,12 @@
       }
       // film_developed_by is optional, no validation needed
 
+      // Apply lookups now in case onchange never fired (e.g. user scrolled without tabbing away)
+      applyModelLookup(document.getElementById('m-model-name').value.trim());
+      applyMuaLookup(document.getElementById('m-mua-name').value.trim());
+      applyStudioLookup(document.getElementById('m-studio-name').value.trim());
+      applyLabLookup(document.getElementById('m-film-dev-contact').value.trim());
+
       const existing = editId ? rows.find(r => r.upload_id === editId) : null;
       const entry = {
         upload_id: editId || genId(),
