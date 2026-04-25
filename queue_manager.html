@@ -325,19 +325,26 @@
       font-size: 12.5px;
       table-layout: fixed;
     }
-    /* Column widths — platforms sized to fit 8 badges on one line */
-    thead th:nth-child(1) { width: 95px;  }  /* ID */
-    thead th:nth-child(2) { width: 120px; }  /* Date */
-    thead th:nth-child(3) { width: 220px; }  /* Title */
-    thead th:nth-child(4) { width: 110px; }  /* Model */
-    thead th:nth-child(5) { width: 275px; }  /* Platforms */
-    thead th:nth-child(6) { width: 85px;  }  /* Status */
-    thead th:nth-child(7) { width: 44px;  }  /* NSFW */
-    thead th:nth-child(8) { width: 80px;  }  /* Sta.sh */
-    /* Actions (9th) takes remaining space */
+    /* Default column widths set by initColResizers() — overridden by localStorage */
+    table { min-width: 900px; }
     tbody td { overflow: hidden; white-space: nowrap; }
     tbody td:nth-child(3),
-    tbody td:nth-child(4) { white-space: normal; }  /* Title and Model can wrap if needed */
+    tbody td:nth-child(4) { white-space: normal; }
+
+    /* Column resize handle */
+    .col-resizer {
+      position: absolute;
+      right: -3px;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: col-resize;
+      z-index: 11;
+    }
+    .col-resizer:hover {
+      background: var(--accent);
+      opacity: 0.5;
+    }
 
     thead th {
       background: var(--surface2);
@@ -4254,6 +4261,66 @@ Return ONLY valid JSON, no markdown fences:
         toast('CSV reloaded', 'info');
       } catch (e) { /* permission revoked or file gone */ }
     }, 5000);
+
+    // ── COLUMN RESIZER ──────────────────────────────────────────────────────────
+    (function initColResizers() {
+      const table = document.getElementById('main-table');
+      const ths = Array.from(table.querySelectorAll('thead th'));
+      // Default column widths as percentages (must sum to 100)
+      // ID · Date · Title · Model · Platforms · Status · NSFW · Sta.sh · Actions
+      const DEFAULTS = [6, 8, 20, 10, 25, 7, 4, 7, 13];
+      const KEY = 'col_widths_v2';
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (_) {}
+
+      ths.forEach((th, i) => {
+        th.style.position = 'relative';
+        th.style.width = saved[i] || (DEFAULTS[i] + '%');
+        if (i === ths.length - 1) return; // no handle on last column
+
+        const handle = document.createElement('div');
+        handle.className = 'col-resizer';
+        handle.title = 'Drag to resize · Double-click to reset';
+        th.appendChild(handle);
+
+        handle.addEventListener('dblclick', e => {
+          e.stopPropagation();
+          th.style.width = DEFAULTS[i] + '%';
+          persist();
+        });
+
+        handle.addEventListener('mousedown', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          const startX = e.clientX;
+          const startW = th.offsetWidth;
+          const tableW = table.offsetWidth;
+
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+
+          function onMove(e) {
+            const newW = Math.max(40, startW + e.clientX - startX);
+            th.style.width = (newW / tableW * 100).toFixed(2) + '%';
+          }
+          function onUp() {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            persist();
+          }
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+      });
+
+      function persist() {
+        const w = {};
+        ths.forEach((t, i) => { w[i] = t.style.width; });
+        localStorage.setItem(KEY, JSON.stringify(w));
+      }
+    })();
 
     // INIT
     autoLoadCSV();
