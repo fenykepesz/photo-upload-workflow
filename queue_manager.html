@@ -4268,8 +4268,8 @@ Return ONLY valid JSON, no markdown fences:
       const ths = Array.from(table.querySelectorAll('thead th'));
       // Default column widths as percentages (must sum to 100)
       // ID · Date · Title · Model · Platforms · Status · NSFW · Sta.sh · Actions
-      const DEFAULTS = [6, 8, 20, 10, 25, 7, 4, 7, 13];
-      const KEY = 'col_widths_v2';
+      const DEFAULTS = [6, 8, 25, 10, 15, 7, 4, 7, 18];
+      const KEY = 'col_widths_v3';
       let saved = {};
       try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (_) {}
 
