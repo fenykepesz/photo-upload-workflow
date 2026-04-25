@@ -325,17 +325,19 @@
       font-size: 12.5px;
       table-layout: fixed;
     }
-    /* Column widths */
-    thead th:nth-child(1) { width: 108px; }  /* ID */
-    thead th:nth-child(2) { width: 130px; }  /* Date */
-    thead th:nth-child(3) { width: 200px; }  /* Title */
-    thead th:nth-child(4) { width: 120px; }  /* Model */
-    thead th:nth-child(5) { width: 230px; }  /* Platforms */
-    thead th:nth-child(6) { width: 90px;  }  /* Status */
-    thead th:nth-child(7) { width: 46px;  }  /* NSFW */
-    thead th:nth-child(8) { width: 90px;  }  /* Sta.sh */
+    /* Column widths — platforms sized to fit 8 badges on one line */
+    thead th:nth-child(1) { width: 95px;  }  /* ID */
+    thead th:nth-child(2) { width: 120px; }  /* Date */
+    thead th:nth-child(3) { width: 220px; }  /* Title */
+    thead th:nth-child(4) { width: 110px; }  /* Model */
+    thead th:nth-child(5) { width: 275px; }  /* Platforms */
+    thead th:nth-child(6) { width: 85px;  }  /* Status */
+    thead th:nth-child(7) { width: 44px;  }  /* NSFW */
+    thead th:nth-child(8) { width: 80px;  }  /* Sta.sh */
     /* Actions (9th) takes remaining space */
-    tbody td { overflow: hidden; }
+    tbody td { overflow: hidden; white-space: nowrap; }
+    tbody td:nth-child(3),
+    tbody td:nth-child(4) { white-space: normal; }  /* Title and Model can wrap if needed */
 
     thead th {
       background: var(--surface2);
