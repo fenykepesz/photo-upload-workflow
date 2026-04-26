@@ -4200,17 +4200,21 @@ def main():
 
                         # NSFW safety: Instagram is very strict — never upload NSFW image
                         # If NSFW flag set, require stash_url_safe; if missing, fail hard
-                        ig_image_path = image_path
-                        if not ig_image_path:
-                            if is_nsfw_ig:
-                                safe_url = row.get("stash_url_safe", "").strip()
-                                if not safe_url:
-                                    result_ig = {"success": False, "url_ig": "",
-                                                 "error": "NSFW photo has no stash_url_safe — refusing to upload to Instagram"}
-                                else:
-                                    ig_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
-                                    print(f"    Using safe image (NSFW flag set)")
+                        # NSFW guard: always fetch the safe image for IG when NSFW flag is set,
+                        # even if image_path was already downloaded (NSFW) for earlier platforms.
+                        ig_image_path = None
+                        if is_nsfw_ig:
+                            safe_url = row.get("stash_url_safe", "").strip()
+                            if not safe_url:
+                                result_ig = {"success": False, "url_ig": "",
+                                             "error": "NSFW photo has no stash_url_safe — refusing to upload to Instagram"}
                             else:
+                                ig_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
+                                print(f"    Using safe image (NSFW flag set)")
+                        else:
+                            # Not NSFW — reuse already-downloaded image or fetch now
+                            ig_image_path = image_path
+                            if not ig_image_path:
                                 stash_url = row.get("stash_url_nsfw", "").strip() or row.get("stash_url", "").strip()
                                 if stash_url:
                                     ig_image_path = download_stash_image(page, stash_url, row["upload_id"])
