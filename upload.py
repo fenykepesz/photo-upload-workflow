@@ -2891,7 +2891,9 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
         }""")
         if marked.get("found"):
             textbox = page.locator('[data-fb-caption="true"]')
-            textbox.fill(caption, timeout=5000)
+            # Trailing spaces prevent Facebook's page-autocomplete dropdown from
+            # appearing when the caption ends with a known page name (e.g. "Panda Labs").
+            textbox.fill(caption + "   ", timeout=5000)
             print(f"    Caption: '{caption[:60]}'")
         else:
             print(f"    WARNING: No visible textbox found")
@@ -2967,7 +2969,31 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
                 .filter(Boolean).slice(0, 20);
         }""")
 
+    def fb_dismiss_typeahead():
+        """Dismiss Facebook's page/profile autocomplete dropdown if visible.
+        FB shows suggestions when caption text matches a page name (e.g. 'Panda Labs').
+        The dropdown overlays the Next/Post button and must be closed first.
+        FB provides an 'Exit typeahead' button for exactly this purpose."""
+        info = page.evaluate("""() => {
+            const btn = Array.from(document.querySelectorAll('button,[role="button"]'))
+                .find(el => {
+                    const label = el.getAttribute('aria-label') || el.textContent?.trim();
+                    const r = el.getBoundingClientRect();
+                    return label === 'Exit typeahead' && r.width > 0 && r.height > 0;
+                });
+            if (!btn) return null;
+            const r = btn.getBoundingClientRect();
+            return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+        }""")
+        if info:
+            print("    Dismissing autocomplete dropdown (Exit typeahead)")
+            page.mouse.click(info["x"], info["y"])
+            page.wait_for_timeout(800)
+
     try:
+        # Dismiss any page/profile suggestion dropdown before touching submit buttons
+        fb_dismiss_typeahead()
+
         # Step 1 — Try direct submit first (no Next needed for simple posts).
         # Fall back to Next when FB requires a multi-step flow (photo + extras).
         first_clicked = None
@@ -2988,6 +3014,7 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
         # Step 2 — If we landed on Next, the dialog advances to the final publish screen.
         # Must click the actual Post/Share button now; failure here means the post was NOT sent.
         if first_clicked == "Next":
+            fb_dismiss_typeahead()  # dropdown may reappear in the new dialog state
             final_clicked = False
             for label in ["Post", "Share", "Share now", "Publish"]:
                 try:
