@@ -2908,14 +2908,23 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
     # Use elementsFromPoint() to find and disable ALL overlays above the button.
     print("  Posting...")
 
-    def fb_clear_and_click(aria_label):
-        """Find an enabled button by aria-label, disable overlays above it, then click."""
+    def fb_find_and_click_submit(label):
+        """
+        Find an enabled submit button by aria-label OR exact visible text,
+        clear overlays above it, then click. Returns True on success.
+        """
         info = page.evaluate("""(label) => {
-            const btns = document.querySelectorAll('[aria-label="' + label + '"]');
-            if (btns.length === 0) return {found: false, reason: 'no elements'};
-            // Find the first visible AND enabled button
+            // Search by aria-label first, then by exact text content
+            let candidates = Array.from(document.querySelectorAll('[aria-label="' + label + '"]'));
+            if (candidates.length === 0) {
+                // Fall back to buttons/[role=button] whose trimmed text matches
+                candidates = Array.from(document.querySelectorAll('button,[role="button"]'))
+                    .filter(el => el.textContent?.trim() === label);
+            }
+            if (candidates.length === 0) return {found: false, reason: 'no elements'};
+            // Pick the first visible + enabled candidate
             let target = null;
-            for (const btn of btns) {
+            for (const btn of candidates) {
                 const r = btn.getBoundingClientRect();
                 if (r.width > 0 && r.height > 0 &&
                     btn.getAttribute('aria-disabled') !== 'true') {
@@ -2927,7 +2936,6 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
             const rect = target.getBoundingClientRect();
             const cx = rect.left + rect.width / 2;
             const cy = rect.top + rect.height / 2;
-            // Get the full element stack at the click point (top to bottom)
             const stack = document.elementsFromPoint(cx, cy);
             let cleared = 0;
             for (const el of stack) {
@@ -2935,60 +2943,77 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
                 el.style.pointerEvents = 'none';
                 cleared++;
             }
-            return {found: true, top: rect.top, cleared: cleared};
-        }""", aria_label)
+            return {found: true, top: rect.top, label: target.getAttribute('aria-label') || target.textContent?.trim(), cleared: cleared};
+        }""", label)
         if not info.get("found"):
             return False
         page.wait_for_timeout(300)
-        # Click the enabled button (skip disabled ones)
-        btns = page.locator(f'[aria-label="{aria_label}"]')
-        for i in range(btns.count()):
-            btn = btns.nth(i)
-            if btn.is_visible() and btn.get_attribute("aria-disabled") != "true":
-                btn.click(timeout=5000)
-                return True
+        # Re-locate and click (aria-label first, then text)
+        for loc in [page.locator(f'[aria-label="{label}"]'),
+                    page.locator(f'button:text-is("{label}")'),
+                    page.locator(f'[role="button"]:text-is("{label}")')]:
+            try:
+                for i in range(loc.count()):
+                    btn = loc.nth(i)
+                    if btn.is_visible() and btn.get_attribute("aria-disabled") != "true":
+                        btn.click(timeout=5000)
+                        return True
+            except Exception:
+                continue
         return False
 
+    def fb_dump_buttons():
+        return page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('button,[role="button"]'))
+                .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+                .map(b => {
+                    const label = b.getAttribute('aria-label') || b.textContent?.trim().substring(0, 30);
+                    const disabled = b.getAttribute('aria-disabled') === 'true' ? ' (disabled)' : '';
+                    return label ? label + disabled : null;
+                })
+                .filter(Boolean).slice(0, 20);
+        }""")
+
     try:
-        # Try Post/Share first (standard post flow), then Next (multi-step flow)
-        submitted = False
+        # Step 1 — Try direct submit first (no Next needed for simple posts).
+        # Fall back to Next when FB requires a multi-step flow (photo + extras).
+        first_clicked = None
         for label in ["Post", "Share", "Share now", "Publish", "Next"]:
             try:
-                if fb_clear_and_click(label):
+                if fb_find_and_click_submit(label):
                     print(f"    Clicked '{label}'")
-                    submitted = True
-                    page.wait_for_timeout(3000)
+                    first_clicked = label
+                    page.wait_for_timeout(4000)
                     break
             except Exception:
                 continue
 
-        if submitted:
-            # If we clicked Next, check if there's a second step
-            # (look for Post/Share button after Next)
+        if first_clicked is None:
+            return {"success": False, "url_fb": "",
+                    "error": f"Could not find submit button. Buttons: {fb_dump_buttons()}"}
+
+        # Step 2 — If we landed on Next, the dialog advances to the final publish screen.
+        # Must click the actual Post/Share button now; failure here means the post was NOT sent.
+        if first_clicked == "Next":
+            final_clicked = False
             for label in ["Post", "Share", "Share now", "Publish"]:
                 try:
-                    if fb_clear_and_click(label):
+                    if fb_find_and_click_submit(label):
                         print(f"    Clicked '{label}'")
+                        final_clicked = True
+                        page.wait_for_timeout(4000)
                         break
                 except Exception:
                     continue
-        else:
-            # Dump available buttons for debugging
-            buttons = page.evaluate("""() => {
-                return Array.from(document.querySelectorAll('[role="button"]'))
-                    .filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
-                    .map(b => {
-                        const label = b.getAttribute('aria-label') || b.textContent?.trim().substring(0, 30);
-                        const disabled = b.getAttribute('aria-disabled') === 'true' ? ' (disabled)' : '';
-                        return label ? label + disabled : null;
-                    })
-                    .filter(Boolean).slice(0, 20);
-            }""")
-            return {"success": False, "url_fb": "", "error": f"Could not submit. Buttons: {buttons}"}
+            if not final_clicked:
+                buttons = fb_dump_buttons()
+                return {"success": False, "url_fb": "",
+                        "error": f"Clicked Next but could not find final Post/Share button. Buttons: {buttons}"}
+
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not submit post: {e}"}
 
-    page.wait_for_timeout(5000)
+    page.wait_for_timeout(3000)
     print("  Facebook post published")
     return {"success": True, "url_fb": "UPLOADED", "error": ""}
 
@@ -4371,6 +4396,311 @@ def main():
                             save_row_update(args.csv, row["upload_id"], {"da_deviation_url": da_url})
 
                 # Image stays in image_cache/ for re-upload resilience — not auto-deleted.
+
+                # ── Retry pass (1 retry for any failed platform) ──────────
+                to_retry = set()
+                if "500PX" in platforms and not ok_500px and not row.get("url_500px", "").strip():          to_retry.add("500PX")
+                if "35P"   in platforms and not ok_35p   and not row.get("url_35p", "").strip():            to_retry.add("35P")
+                if "VK"    in platforms and not ok_vk    and not row.get("url_vk", "").strip():             to_retry.add("VK")
+                if "X"     in platforms and not ok_x     and not row.get("url_x", "").strip():              to_retry.add("X")
+                if "BSKY"  in platforms and not ok_bsky  and not row.get("url_bsky", "").strip():           to_retry.add("BSKY")
+                if "IG"    in platforms and not ok_ig    and not row.get("url_ig", "").strip():             to_retry.add("IG")
+                if "FB"    in platforms and not ok_fb    and not row.get("url_fb", "").strip():             to_retry.add("FB")
+                if "DA"    in platforms and not ok_da    and not row.get("da_deviation_url", "").strip():   to_retry.add("DA")
+
+                if to_retry:
+                    retry_order = [p for p in ["500PX", "35P", "VK", "X", "BSKY", "IG", "FB", "DA"] if p in to_retry]
+                    print(f"\n  ── Retry pass ({', '.join(retry_order)}) — waiting 10s ──")
+                    time.sleep(10)
+
+                    if "500PX" in to_retry:
+                        errors = [e for e in errors if not e.startswith("500px:")]
+                        print(f"\n  ── 500px Retry ──")
+                        t0_500px = time.time()
+                        tags_500px = tags[:TAG_LIMIT_500PX]
+                        try:
+                            result_500px = upload_to_500px(page, row, desc_full, tags_500px, image_path, args.no_submit)
+                        except PlaywrightTimeout as e:
+                            result_500px = {"success": False, "url_500px": "", "error": f"Timeout: {e}"}
+                        except Exception as e:
+                            result_500px = {"success": False, "url_500px": "", "error": f"Unexpected: {e}"}
+                        if result_500px["success"]:
+                            ok_500px = True
+                            print(f"  500px: SUCCESS (retry, {time.time()-t0_500px:.0f}s) — {result_500px.get('url_500px', '')}")
+                            _u = result_500px.get("url_500px", "")
+                            if _u and _u not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"url_500px": _u})
+                        else:
+                            err = result_500px.get("error", "unknown")
+                            print(f"  500px: FAILED (retry, {time.time()-t0_500px:.0f}s) — {err}")
+                            errors.append(f"500px: {err}")
+
+                    if "35P" in to_retry:
+                        errors = [e for e in errors if not e.startswith("35photo:")]
+                        print(f"\n  ── 35photo Retry ──")
+                        t0_35p = time.time()
+                        tags_35p = tags[:TAG_LIMIT_500PX]
+                        try:
+                            result_35p = upload_to_35photo(page, row, desc_full, tags_35p, image_path, args.no_submit)
+                        except PlaywrightTimeout as e:
+                            result_35p = {"success": False, "url_35p": "", "error": f"Timeout: {e}"}
+                        except Exception as e:
+                            result_35p = {"success": False, "url_35p": "", "error": f"Unexpected: {e}"}
+                        if result_35p["success"]:
+                            ok_35p = True
+                            print(f"  35photo: SUCCESS (retry, {time.time()-t0_35p:.0f}s) — {result_35p.get('url_35p', '')}")
+                            _u = result_35p.get("url_35p", "")
+                            if _u and _u not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"url_35p": _u})
+                        else:
+                            err = result_35p.get("error", "unknown")
+                            print(f"  35photo: FAILED (retry, {time.time()-t0_35p:.0f}s) — {err}")
+                            errors.append(f"35photo: {err}")
+
+                    if "VK" in to_retry:
+                        errors = [e for e in errors if not e.startswith("VK:")]
+                        print(f"\n  ── VK Retry ──")
+                        t0_vk = time.time()
+                        vk_tag_people = row.get("vk_tag_people", "").strip()
+                        vk_groups = row.get("vk_groups", "").strip()
+                        vk_group_caption = row.get("vk_group_caption", "").strip()
+                        _vk_film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _vk_film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip():   _vk_film_parts.append(f"Lens: {row['film_lens'].strip()}")
+                            if row.get("film_stock", "").strip():  _vk_film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _vk_film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        try:
+                            result_vk = upload_to_vk(
+                                page, desc_full, image_path,
+                                vk_tag_people=vk_tag_people,
+                                vk_groups=vk_groups,
+                                vk_group_caption=vk_group_caption,
+                                film_info="\n".join(_vk_film_parts),
+                                photographer=config.get("accounts", {}).get("vk", ""),
+                                model_name=row.get("model_name", "").strip(),
+                                mua_name=row.get("mua_name", "").strip(),
+                                studio_name=row.get("studio_name", "").strip(),
+                                no_submit=args.no_submit,
+                            )
+                        except Exception as e:
+                            result_vk = {"success": False, "url_vk": "", "error": f"Unexpected: {e}"}
+                        if result_vk["success"]:
+                            ok_vk = True
+                            print(f"  VK: SUCCESS (retry, {time.time()-t0_vk:.0f}s) — {result_vk.get('url_vk', '')}")
+                            _u = result_vk.get("url_vk", "")
+                            vk_updates = {}
+                            if _u and _u not in ("NO_SUBMIT",):
+                                vk_updates["url_vk"] = _u
+                            _vg = result_vk.get("vk_groups_result", "")
+                            if _vg:
+                                vk_updates["vk_groups_result"] = _vg
+                            if vk_updates:
+                                save_row_update(args.csv, row["upload_id"], vk_updates)
+                        else:
+                            err = result_vk.get("error", "unknown")
+                            print(f"  VK: FAILED (retry, {time.time()-t0_vk:.0f}s) — {err}")
+                            errors.append(f"VK: {err}")
+
+                    if "X" in to_retry:
+                        errors = [e for e in errors if not e.startswith("X:")]
+                        print(f"\n  ── X.com Retry ──")
+                        t0_x = time.time()
+                        _film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip():   _film_parts.append(f"Lens: {row['film_lens'].strip()}")
+                            if row.get("film_stock", "").strip():  _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        post_text = build_x_post_text(
+                            get_effective_title(row), row.get("keywords", ""),
+                            model_name=row.get("model_name", "").strip(),
+                            x_handle=row.get("x_tag_people", "").strip(),
+                            film_info="\n".join(_film_parts),
+                            mua_name=row.get("mua_name", "").strip(),
+                            studio_name=row.get("studio_name", "").strip(),
+                        )
+                        try:
+                            result_x = upload_to_x(page, post_text, image_path, args.no_submit)
+                        except Exception as e:
+                            result_x = {"success": False, "url_x": "", "error": f"Unexpected: {e}"}
+                        if result_x["success"]:
+                            ok_x = True
+                            print(f"  X: SUCCESS (retry, {time.time()-t0_x:.0f}s) — {result_x.get('url_x', '')}")
+                            _u = result_x.get("url_x", "")
+                            if _u and _u not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"url_x": _u})
+                        else:
+                            err = result_x.get("error", "unknown")
+                            print(f"  X: FAILED (retry, {time.time()-t0_x:.0f}s) — {err}")
+                            errors.append(f"X: {err}")
+
+                    if "BSKY" in to_retry:
+                        errors = [e for e in errors if not e.startswith("BSKY:")]
+                        print(f"\n  ── Bluesky Retry ──")
+                        t0_bsky = time.time()
+                        is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+                        _film_parts = []
+                        if row.get("film_used", "").strip().upper() == "TRUE":
+                            if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                            if row.get("film_lens", "").strip():   _film_parts.append(f"Lens: {row['film_lens'].strip()}")
+                            if row.get("film_stock", "").strip():  _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                            if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        post_text = build_bsky_post_text(
+                            get_effective_title(row), row.get("keywords", ""),
+                            model_name=row.get("model_name", "").strip(),
+                            film_info="\n".join(_film_parts),
+                            caption=row.get("caption", "").strip(),
+                            mua_name=row.get("mua_name", "").strip(),
+                            studio_name=row.get("studio_name", "").strip(),
+                        )
+                        try:
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip())
+                        except Exception as e:
+                            result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
+                        if result_bsky["success"]:
+                            ok_bsky = True
+                            print(f"  BSKY: SUCCESS (retry, {time.time()-t0_bsky:.0f}s) — {result_bsky.get('url_bsky', '')}")
+                            _u = result_bsky.get("url_bsky", "")
+                            if _u and _u not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"url_bsky": _u})
+                        else:
+                            err = result_bsky.get("error", "unknown")
+                            print(f"  BSKY: FAILED (retry, {time.time()-t0_bsky:.0f}s) — {err}")
+                            errors.append(f"BSKY: {err}")
+
+                    if "IG" in to_retry:
+                        errors = [e for e in errors if not e.startswith("IG:")]
+                        print(f"\n  ── Instagram Retry ──")
+                        t0_ig = time.time()
+                        result_ig = None
+                        is_nsfw_ig = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+                        ig_image_path = None
+                        if is_nsfw_ig:
+                            safe_url = row.get("stash_url_safe", "").strip()
+                            if not safe_url:
+                                result_ig = {"success": False, "url_ig": "",
+                                             "error": "NSFW photo has no stash_url_safe — refusing to upload to Instagram"}
+                            else:
+                                ig_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
+                                print(f"    Using safe image (NSFW flag set)")
+                        else:
+                            ig_image_path = image_path
+                            if not ig_image_path:
+                                stash_url = row.get("stash_url_nsfw", "").strip() or row.get("stash_url", "").strip()
+                                if stash_url:
+                                    ig_image_path = download_stash_image(page, stash_url, row["upload_id"])
+                                else:
+                                    result_ig = {"success": False, "url_ig": "", "error": "No Sta.sh URL — cannot download image"}
+                        if result_ig is None:
+                            _ig_ok, _ig_err = validate_ig_image(ig_image_path)
+                            if not _ig_ok:
+                                result_ig = {"success": False, "url_ig": "", "error": f"Image validation failed: {_ig_err}"}
+                        if result_ig is None:
+                            _film_parts = []
+                            if row.get("film_used", "").strip().upper() == "TRUE":
+                                if row.get("film_camera", "").strip(): _film_parts.append(f"Camera: {row['film_camera'].strip()}")
+                                if row.get("film_lens", "").strip():   _film_parts.append(f"Lens: {row['film_lens'].strip()}")
+                                if row.get("film_stock", "").strip():  _film_parts.append(f"Film: {row['film_stock'].strip()}")
+                                if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                            _ig_handles = [h.strip() for h in row.get("ig_tag_people", "").split(",") if h.strip()]
+                            if not _ig_handles and row.get("model_name", "").strip():
+                                _ml = next((m for m in config.get("model_lookup", [])
+                                            if m.get("name", "").lower() == row["model_name"].strip().lower()), None)
+                                if _ml and _ml.get("ig_handle", "").strip():
+                                    _ig_handles = [_ml["ig_handle"].strip()]
+                                    print(f"    IG handle from model lookup: {_ig_handles[0]}")
+                            ig_caption = build_ig_caption(
+                                get_effective_title(row), row.get("keywords", ""),
+                                model_name=row.get("model_name", "").strip(),
+                                ig_handle=_ig_handles[0] if _ig_handles else "",
+                                film_info="\n".join(_film_parts),
+                                caption=row.get("caption", "").strip(),
+                                mua_name=row.get("mua_name", "").strip(),
+                                studio_name=row.get("studio_name", "").strip(),
+                            )
+                            ig_config = config.get("accounts", {}).get("instagram", {})
+                            try:
+                                result_ig = upload_to_instagram(ig_caption, ig_image_path, ig_config, args.no_submit, collaborators=_ig_handles or None)
+                            except Exception as e:
+                                result_ig = {"success": False, "url_ig": "", "error": f"Unexpected: {e}"}
+                        if result_ig["success"]:
+                            ok_ig = True
+                            print(f"  IG: SUCCESS (retry, {time.time()-t0_ig:.0f}s) — {result_ig.get('url_ig', '')}")
+                            _u = result_ig.get("url_ig", "")
+                            if _u and _u not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"url_ig": _u})
+                        else:
+                            err = result_ig.get("error", "unknown")
+                            print(f"  IG: FAILED (retry, {time.time()-t0_ig:.0f}s) — {err}")
+                            errors.append(f"IG: {err}")
+
+                    if "FB" in to_retry:
+                        errors = [e for e in errors if not e.startswith("FB:")]
+                        print(f"\n  ── Facebook Retry ──")
+                        t0_fb = time.time()
+                        location_fb = row.get("location_500px", "").strip()
+                        feeling_fb = row.get("fb_feeling", "").strip()
+                        tag_people_fb = row.get("fb_tag_people", "").strip()
+                        is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
+                        if is_nsfw:
+                            safe_url = row.get("stash_url_safe", "").strip()
+                            if not safe_url:
+                                result_fb = {"success": False, "url_fb": "",
+                                             "error": "NSFW photo has no stash_url_safe — refusing to upload to Facebook"}
+                            else:
+                                fb_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
+                                fb_caption = build_description_fb(row)
+                                print(f"    Using safe image (NSFW flag set)")
+                                try:
+                                    result_fb = upload_to_fb(page, fb_caption, fb_image_path, location_fb, feeling_fb, tag_people_fb, args.no_submit)
+                                except Exception as e:
+                                    result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
+                        else:
+                            fb_caption = build_description_fb(row)
+                            try:
+                                result_fb = upload_to_fb(page, fb_caption, image_path, location_fb, feeling_fb, tag_people_fb, args.no_submit)
+                            except Exception as e:
+                                result_fb = {"success": False, "url_fb": "", "error": f"Unexpected: {e}"}
+                        if result_fb["success"]:
+                            ok_fb = True
+                            print(f"  FB: SUCCESS (retry, {time.time()-t0_fb:.0f}s) — {result_fb.get('url_fb', '')}")
+                            _u = result_fb.get("url_fb", "")
+                            if _u and _u not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"url_fb": _u})
+                        else:
+                            err = result_fb.get("error", "unknown")
+                            print(f"  FB: FAILED (retry, {time.time()-t0_fb:.0f}s) — {err}")
+                            errors.append(f"FB: {err}")
+
+                    if "DA" in to_retry:
+                        errors = [e for e in errors if not e.startswith("DA:")]
+                        print(f"\n  ── DeviantArt Retry ──")
+                        t0_da = time.time()
+                        groups = parse_groups(row.get("da_groups", ""))
+                        try:
+                            result_da = upload_to_da(page, row, desc_full, tags, groups, args.no_submit)
+                        except PlaywrightTimeout as e:
+                            result_da = {"success": False, "deviation_url": "", "error": f"Timeout: {e}"}
+                        except Exception as e:
+                            result_da = {"success": False, "deviation_url": "", "error": f"Unexpected: {e}"}
+                        if result_da["success"]:
+                            ok_da = True
+                            print(f"  DA: SUCCESS (retry, {time.time()-t0_da:.0f}s) — {result_da.get('deviation_url', '')}")
+                            da_url = result_da.get("deviation_url", "")
+                            if da_url and da_url not in ("NO_SUBMIT",):
+                                save_row_update(args.csv, row["upload_id"], {"da_deviation_url": da_url})
+                        else:
+                            err = result_da.get("error", "unknown")
+                            print(f"  DA: FAILED (retry, {time.time()-t0_da:.0f}s) — {err}")
+                            errors.append(f"DA: {err}")
+                            ts = datetime.now().strftime("%H%M%S")
+                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_da_retry_{ts}.png"
+                            try:
+                                page.screenshot(path=str(shot_path))
+                                print(f"  Error screenshot: {shot_path}")
+                            except Exception:
+                                pass
 
                 # ── Update row status ─────────────────────────────
                 # Check which platforms are now done (either this run or previously)
