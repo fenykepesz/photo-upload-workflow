@@ -2912,20 +2912,40 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
 
     def fb_find_and_click_submit(label):
         """
-        Find an enabled submit button by aria-label OR exact visible text,
+        Find an enabled submit button SCOPED TO THE CREATE POST DIALOG,
         clear overlays above it, then click via page.mouse.click(cx, cy).
-        Using real mouse coordinates bypasses any overlay that Playwright's
-        locator.click() would still hit after JS pointer-events clearing.
-        Returns True on success.
+
+        Scoping is critical: [aria-label="Next"] also matches photo-carousel
+        navigation arrows in the timeline background. Clicking those lands
+        outside the dialog and dismisses it.
+
+        Anchor: the caption element was marked with data-fb-caption="true",
+        so we can walk up to the enclosing [role="dialog"] reliably.
         """
         info = page.evaluate("""(label) => {
-            // Search by aria-label first, then by exact text content
-            let candidates = Array.from(document.querySelectorAll('[aria-label="' + label + '"]'));
+            // Anchor to the Create Post dialog via the marked caption element
+            const captionEl = document.querySelector('[data-fb-caption="true"]');
+            let root = captionEl ? captionEl.closest('[role="dialog"]') : null;
+            if (!root) {
+                // Fallback: first visible dialog that contains a file input
+                for (const d of document.querySelectorAll('[role="dialog"]')) {
+                    const r = d.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0 && d.querySelector('input[type="file"]')) {
+                        root = d;
+                        break;
+                    }
+                }
+            }
+            if (!root) return {found: false, reason: 'no dialog found'};
+
+            // Search within the dialog only
+            let candidates = Array.from(root.querySelectorAll('[aria-label="' + label + '"]'));
             if (candidates.length === 0) {
-                candidates = Array.from(document.querySelectorAll('button,[role="button"]'))
+                candidates = Array.from(root.querySelectorAll('button,[role="button"]'))
                     .filter(el => el.textContent?.trim() === label);
             }
-            if (candidates.length === 0) return {found: false, reason: 'no elements'};
+            if (candidates.length === 0) return {found: false, reason: 'no elements in dialog'};
+
             let target = null;
             for (const btn of candidates) {
                 const r = btn.getBoundingClientRect();
@@ -2935,7 +2955,8 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
                     break;
                 }
             }
-            if (!target) return {found: false, reason: 'none enabled'};
+            if (!target) return {found: false, reason: 'none enabled in dialog'};
+
             const rect = target.getBoundingClientRect();
             const cx = rect.left + rect.width / 2;
             const cy = rect.top + rect.height / 2;
@@ -2953,7 +2974,6 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
         if not info.get("found"):
             return False
         page.wait_for_timeout(400)
-        # Use real mouse coordinates — avoids overlay re-interception from locator hit-test
         page.mouse.click(info["x"], info["y"])
         return True
 
@@ -2975,7 +2995,9 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
         The dropdown overlays the Next/Post button and must be closed first.
         FB provides an 'Exit typeahead' button for exactly this purpose."""
         info = page.evaluate("""() => {
-            const btn = Array.from(document.querySelectorAll('button,[role="button"]'))
+            const captionEl = document.querySelector('[data-fb-caption="true"]');
+            const root = captionEl ? captionEl.closest('[role="dialog"]') : document;
+            const btn = Array.from(root.querySelectorAll('button,[role="button"]'))
                 .find(el => {
                     const label = el.getAttribute('aria-label') || el.textContent?.trim();
                     const r = el.getBoundingClientRect();
