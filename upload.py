@@ -2911,18 +2911,19 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
     def fb_find_and_click_submit(label):
         """
         Find an enabled submit button by aria-label OR exact visible text,
-        clear overlays above it, then click. Returns True on success.
+        clear overlays above it, then click via page.mouse.click(cx, cy).
+        Using real mouse coordinates bypasses any overlay that Playwright's
+        locator.click() would still hit after JS pointer-events clearing.
+        Returns True on success.
         """
         info = page.evaluate("""(label) => {
             // Search by aria-label first, then by exact text content
             let candidates = Array.from(document.querySelectorAll('[aria-label="' + label + '"]'));
             if (candidates.length === 0) {
-                // Fall back to buttons/[role=button] whose trimmed text matches
                 candidates = Array.from(document.querySelectorAll('button,[role="button"]'))
                     .filter(el => el.textContent?.trim() === label);
             }
             if (candidates.length === 0) return {found: false, reason: 'no elements'};
-            // Pick the first visible + enabled candidate
             let target = null;
             for (const btn of candidates) {
                 const r = btn.getBoundingClientRect();
@@ -2936,6 +2937,7 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
             const rect = target.getBoundingClientRect();
             const cx = rect.left + rect.width / 2;
             const cy = rect.top + rect.height / 2;
+            // Clear every overlay element above the button
             const stack = document.elementsFromPoint(cx, cy);
             let cleared = 0;
             for (const el of stack) {
@@ -2943,24 +2945,15 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
                 el.style.pointerEvents = 'none';
                 cleared++;
             }
-            return {found: true, top: rect.top, label: target.getAttribute('aria-label') || target.textContent?.trim(), cleared: cleared};
+            return {found: true, x: cx, y: cy, cleared: cleared,
+                    label: target.getAttribute('aria-label') || target.textContent?.trim()};
         }""", label)
         if not info.get("found"):
             return False
-        page.wait_for_timeout(300)
-        # Re-locate and click (aria-label first, then text)
-        for loc in [page.locator(f'[aria-label="{label}"]'),
-                    page.locator(f'button:text-is("{label}")'),
-                    page.locator(f'[role="button"]:text-is("{label}")')]:
-            try:
-                for i in range(loc.count()):
-                    btn = loc.nth(i)
-                    if btn.is_visible() and btn.get_attribute("aria-disabled") != "true":
-                        btn.click(timeout=5000)
-                        return True
-            except Exception:
-                continue
-        return False
+        page.wait_for_timeout(400)
+        # Use real mouse coordinates — avoids overlay re-interception from locator hit-test
+        page.mouse.click(info["x"], info["y"])
+        return True
 
     def fb_dump_buttons():
         return page.evaluate("""() => {
