@@ -186,8 +186,25 @@ def get_row_platforms(row):
     return SUPPORTED_PLATFORMS & set(raw)
 
 
+def _parse_scheduled(sched_date, sched_time=""):
+    """Parse scheduled date in YYYY-MM-DD or DD/MM/YYYY format with optional HH:MM time."""
+    if sched_time:
+        for fmt in ["%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M"]:
+            try:
+                return datetime.strptime(f"{sched_date} {sched_time}", fmt)
+            except ValueError:
+                continue
+    for fmt in ["%Y-%m-%d", "%d/%m/%Y"]:
+        try:
+            return datetime.strptime(sched_date, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def filter_rows(rows, target_id=None):
     now = datetime.now()
+    today = now.date()
     targets = []
     for row in rows:
         # Specific row requested
@@ -199,21 +216,24 @@ def filter_rows(rows, target_id=None):
             if row.get("status", "").strip() != "Approved":
                 continue
 
-        # Check scheduled date/time — skip rows not yet due
+        # Check scheduled date/time
         sched_date = row.get("scheduled_date", "").strip()
         sched_time = row.get("scheduled_time", "").strip()
         if sched_date:
-            try:
-                if sched_time:
-                    scheduled = datetime.strptime(f"{sched_date} {sched_time}", "%Y-%m-%d %H:%M")
-                else:
-                    scheduled = datetime.strptime(sched_date, "%Y-%m-%d")
+            scheduled = _parse_scheduled(sched_date, sched_time)
+            if scheduled is None:
+                if target_id:
+                    print(f"WARNING: {row['upload_id']} has unparseable date '{sched_date}' — skipping")
+                continue
+            if target_id:
+                # --row flag: only skip if explicitly in the future
                 if scheduled > now:
-                    if target_id:
-                        print(f"NOTE: {row['upload_id']} is scheduled for {sched_date} {sched_time} — not yet due")
+                    print(f"NOTE: {row['upload_id']} is scheduled for {sched_date} {sched_time} — not yet due")
                     continue
-            except ValueError:
-                pass  # Unparseable date — let it through
+            else:
+                # Batch run: only upload rows scheduled for today
+                if scheduled.date() != today:
+                    continue
 
         # Must have at least one supported platform
         platforms = get_row_platforms(row)

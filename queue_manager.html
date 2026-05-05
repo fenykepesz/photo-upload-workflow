@@ -2149,6 +2149,14 @@
       }
     }
 
+    // Normalize date to YYYY-MM-DD for correct sorting/comparison.
+    // Handles both YYYY-MM-DD (ISO) and DD/MM/YYYY (legacy CSV format).
+    function normDate(s) {
+      if (!s) return '';
+      const d = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      return d ? `${d[3]}-${d[2]}-${d[1]}` : s;
+    }
+
     function applyFilters() {
       const s = document.getElementById('f-search').value.toLowerCase();
       const st = document.getElementById('f-status').value;
@@ -2159,12 +2167,13 @@
         if (s && ![r.title, r.caption, r.upload_id, r.notes, r.stash_url_nsfw].join(' ').toLowerCase().includes(s)) return false;
         if (st && r.status !== st) return false;
         if (pl && !r.platforms.split(',').map(p => p.trim()).includes(pl)) return false;
-        if (fr && r.scheduled_date < fr) return false;
-        if (to && r.scheduled_date > to) return false;
+        if (fr && normDate(r.scheduled_date) < fr) return false;
+        if (to && normDate(r.scheduled_date) > to) return false;
         return true;
       });
       filtered.sort((a, b) => {
-        const [av, bv] = [a[sortField] || '', b[sortField] || ''];
+        let av = a[sortField] || '', bv = b[sortField] || '';
+        if (sortField === 'scheduled_date') { av = normDate(av); bv = normDate(bv); }
         return av < bv ? -sortDir : av > bv ? sortDir : 0;
       });
       renderTable();
@@ -2484,7 +2493,7 @@
       const todayStr = today.toISOString().split('T')[0];
       const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
       const yesterdayStr = yesterday.toISOString().split('T')[0];
-      const dates = rows.map(r => r.scheduled_date).filter(Boolean).sort();
+      const dates = rows.map(r => normDate(r.scheduled_date)).filter(Boolean).sort();
       const maxDate = dates.length ? dates[dates.length - 1] : null;
       let newDate = todayStr;
       if (maxDate && maxDate >= yesterdayStr) {
@@ -2504,7 +2513,7 @@
       document.getElementById('modal-title').textContent = `Edit — ${id}`;
       refreshModelNameList();
       clearForm();
-      document.getElementById('m-date').value = r.scheduled_date || '';
+      document.getElementById('m-date').value = normDate(r.scheduled_date) || '';
       document.getElementById('m-time').value = r.scheduled_time || '10:00';
       document.getElementById('m-nsfw').value = r.stash_url_nsfw || '';
       document.getElementById('m-safe').value = r.stash_url_safe || '';
@@ -3594,6 +3603,12 @@ Return ONLY valid JSON, no markdown fences:
     function mlDelete(name) {
       const arr = getModelLookup().filter(x => x.name !== name);
       saveModelLookupData(arr);
+      // Also remove from model_names cache so it stops appearing in datalist
+      try {
+        const cached = JSON.parse(localStorage.getItem('model_names') || '[]');
+        localStorage.setItem('model_names', JSON.stringify(cached.filter(n => n !== name)));
+        refreshModelNameList();
+      } catch {}
       renderModelLookupTable();
     }
     function mlSave() {
