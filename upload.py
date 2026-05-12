@@ -61,6 +61,17 @@ def find_chrome():
     print("  Real Chrome not found — using Playwright's bundled Chromium")
     return None
 
+
+def find_default_chrome_profile():
+    """Return the path to the user's default Chrome User Data directory."""
+    system = _platform.system()
+    if system == "Windows":
+        return Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "User Data"
+    elif system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
+    else:
+        return Path.home() / ".config" / "google-chrome"
+
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DEFAULT_CSV = SCRIPT_DIR / "upload_queue.csv"
@@ -134,6 +145,8 @@ def parse_args():
     p.add_argument("--csv", type=Path, default=DEFAULT_CSV, help="Path to upload_queue.csv")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="Path to config.json")
     p.add_argument("--profile", type=Path, default=BROWSER_PROFILE, help="Browser profile directory")
+    p.add_argument("--default-profile", action="store_true",
+                   help="Use your real Chrome profile (all logins already there). Chrome must be fully closed first.")
     p.add_argument("--login", action="store_true", help="Open browser to log into DeviantArt (first-time setup)")
     p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
     p.add_argument("--clear-vk-drafts", action="store_true", help="Open browser and clear stuck VK group drafts")
@@ -3661,6 +3674,17 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 def main():
     args = parse_args()
     write_cache_stats()
+
+    if args.default_profile:
+        default_path = find_default_chrome_profile()
+        if not default_path.exists():
+            print(f"ERROR: Default Chrome profile not found at {default_path}")
+            sys.exit(1)
+        args.profile = default_path
+        print(f"Using default Chrome profile: {default_path}")
+        if not args.dry_run:
+            print("WARNING: Chrome must be fully closed before continuing.")
+            input("Press ENTER when Chrome is closed...")
 
     # Login mode: open browser for platform logins, then exit
     if args.login:
