@@ -106,7 +106,10 @@ def copy_chrome_profile(src_user_data: Path, dest: Path):
             continue
         if src.is_dir():
             if dst.exists():
-                shutil.rmtree(dst)
+                def _force_remove(func, path, _):
+                    os.chmod(path, 0o777)
+                    func(path)
+                shutil.rmtree(dst, onexc=_force_remove)
             shutil.copytree(src, dst)
         else:
             shutil.copy2(src, dst)
@@ -3792,7 +3795,8 @@ def main():
             page.wait_for_timeout(1000)
             login_step("https://bsky.app/",                      "Log into Bluesky in the browser window.",     "will open Facebook next")
             login_step("https://www.facebook.com/login",         "Log into Facebook in the browser window.",    "will open DeviantArt next")
-            login_step("https://www.deviantart.com/users/login", "Log into DeviantArt in the browser window.",  "press ENTER to finish")
+            login_step("https://www.deviantart.com/users/login", "Log into DeviantArt in the browser window.",  "will open 500px again to confirm")
+            login_step("https://500px.com/",                     "Confirm 500px is still logged in (or log in again if needed).", "press ENTER to finish")
             ctx.close()
         print("Logins saved. You can now run: python upload.py --no-submit")
         sys.exit(0)
