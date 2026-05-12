@@ -23,6 +23,7 @@ import csv
 import hashlib
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -71,6 +72,50 @@ def find_default_chrome_profile():
         return Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
     else:
         return Path.home() / ".config" / "google-chrome"
+
+
+def copy_chrome_profile(src_user_data: Path, dest: Path):
+    """Copy the essential files from the real Chrome profile into dest (project chrome-profile).
+    Chrome must be closed before calling this — the Cookies file is locked while Chrome runs.
+    """
+    # Files to copy from the User Data root (encryption key lives here)
+    root_files = ["Local State"]
+    # Files/dirs to copy from the Default profile subfolder
+    default_items = [
+        "Cookies", "Login Data", "Web Data", "Preferences",
+        "Extension Cookies", "Local Storage", "Session Storage",
+    ]
+
+    dest_default = dest / "Default"
+    dest_default.mkdir(parents=True, exist_ok=True)
+
+    copied, skipped = [], []
+    for name in root_files:
+        src = src_user_data / name
+        if src.exists():
+            shutil.copy2(src, dest / name)
+            copied.append(name)
+        else:
+            skipped.append(name)
+
+    for name in default_items:
+        src = src_user_data / "Default" / name
+        dst = dest_default / name
+        if not src.exists():
+            skipped.append(f"Default/{name}")
+            continue
+        if src.is_dir():
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+        copied.append(f"Default/{name}")
+
+    print(f"  Copied:  {', '.join(copied)}")
+    if skipped:
+        print(f"  Missing: {', '.join(skipped)} (not critical)")
+    print(f"Profile copied to {dest}")
 
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -147,6 +192,8 @@ def parse_args():
     p.add_argument("--profile", type=Path, default=BROWSER_PROFILE, help="Browser profile directory")
     p.add_argument("--default-profile", action="store_true",
                    help="Use your real Chrome profile (all logins already there). Chrome must be fully closed first.")
+    p.add_argument("--copy-profile", action="store_true",
+                   help="Copy logins from your real Chrome into the project chrome-profile, then exit. Chrome must be closed.")
     p.add_argument("--login", action="store_true", help="Open browser to log into DeviantArt (first-time setup)")
     p.add_argument("--skip-login-check", action="store_true", help="Skip pre-flight login verification")
     p.add_argument("--clear-vk-drafts", action="store_true", help="Open browser and clear stuck VK group drafts")
@@ -3674,6 +3721,18 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 def main():
     args = parse_args()
     write_cache_stats()
+
+    if args.copy_profile:
+        src = find_default_chrome_profile()
+        if not src.exists():
+            print(f"ERROR: Chrome User Data not found at {src}")
+            sys.exit(1)
+        print(f"Copying Chrome profile from {src}")
+        print("Chrome must be fully closed. Press ENTER when ready...")
+        input()
+        copy_chrome_profile(src, args.profile)
+        print("Done. Run upload.py normally (no extra flags needed).")
+        sys.exit(0)
 
     if args.default_profile:
         default_path = find_default_chrome_profile()
