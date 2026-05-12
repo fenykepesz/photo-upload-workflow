@@ -1035,7 +1035,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.7.0</span>
+      Photo Upload Queue <span>· v2.7.1</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -1073,6 +1073,16 @@
       </svg>
       Add Photo
     </button>
+    <button class="btn" onclick="clearImageCache()" title="Delete all cached images from image_cache folder">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+        <path d="M10 11v6M14 11v6" />
+        <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+      </svg>
+      Clear Cache
+    </button>
+    <span id="cache-stats" style="font-size:12px;color:var(--muted);white-space:nowrap"></span>
   </header>
 
   <!-- STATS -->
@@ -2601,6 +2611,8 @@
       const nsfw = document.getElementById('m-nsfw').value.trim();
       if (!date) { toast('Please set a scheduled date', 'error'); return; }
       if (!nsfw) { toast('Please enter the Sta.sh NSFW URL', 'error'); return; }
+      const safe = document.getElementById('m-safe').value.trim();
+      if (safe && safe === nsfw) { toast('Safe URL is identical to NSFW URL — upload to FB/IG would use the NSFW image', 'error'); return; }
       const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY', 'IG'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky', 'p-ig'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
       if (!document.getElementById('m-title').value.trim()) { toast('Title is required', 'error'); return; }
@@ -4661,6 +4673,91 @@ Return ONLY valid JSON, no markdown fences:
     loadVKData(false).then(() => { sRenderVKTable(); sUpdateFileStatus(); });
     loadConfigFile(false).then(() => sUpdateFileStatus());
     applyFilters(); updateStats();
+    refreshCacheStats();
+
+    // ── IMAGE CACHE ───────────────────────────────────────────────────────────
+    function storeCacheStatsHandle(fh) {
+      try {
+        const req = indexedDB.open('qm_handles', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('handles');
+        req.onsuccess = () => {
+          const tx = req.result.transaction('handles', 'readwrite');
+          tx.objectStore('handles').put(fh, 'cache_stats_file');
+        };
+      } catch (e) {}
+    }
+    function getStoredCacheStatsHandle() {
+      return new Promise(resolve => {
+        try {
+          const req = indexedDB.open('qm_handles', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('handles');
+          req.onsuccess = () => {
+            const tx = req.result.transaction('handles', 'readonly');
+            const get = tx.objectStore('handles').get('cache_stats_file');
+            get.onsuccess = () => resolve(get.result || null);
+            get.onerror = () => resolve(null);
+          };
+          req.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      });
+    }
+    async function writeCacheStatsFile(fh, count, bytes) {
+      try {
+        const writable = await fh.createWritable();
+        await writable.write(JSON.stringify({ count, bytes }));
+        await writable.close();
+      } catch (e) {}
+    }
+    async function refreshCacheStats() {
+      const el = document.getElementById('cache-stats');
+      if (!el) return;
+      const fh = await getStoredCacheStatsHandle();
+      if (!fh) { el.innerHTML = '<span style="cursor:pointer;text-decoration:underline" onclick="connectCacheStats()">Connect cache stats</span>'; return; }
+      try {
+        const perm = await fh.requestPermission({ mode: 'readwrite' });
+        if (perm !== 'granted') { el.innerHTML = '<span style="cursor:pointer;text-decoration:underline" onclick="connectCacheStats()">Reconnect cache stats</span>'; return; }
+        const file = await fh.getFile();
+        const stats = JSON.parse(await file.text());
+        const mb = (stats.bytes / 1024 / 1024).toFixed(1);
+        el.textContent = stats.count > 0 ? `${stats.count} file${stats.count !== 1 ? 's' : ''} · ${mb} MB` : 'Cache empty';
+      } catch (e) { el.textContent = ''; }
+    }
+    async function connectCacheStats() {
+      try {
+        const [fh] = await showOpenFilePicker({ types: [{ description: 'Cache stats', accept: { 'application/json': ['.json'] } }] });
+        storeCacheStatsHandle(fh);
+        refreshCacheStats();
+      } catch (e) { if (e.name !== 'AbortError') toast('Could not open file', 'error'); }
+    }
+    async function clearImageCache() {
+      const statsFh = await getStoredCacheStatsHandle();
+      let dirHandle;
+      try {
+        dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (e) {
+        if (e.name !== 'AbortError') toast('Could not open folder picker', 'error');
+        return;
+      }
+      let count = 0, totalBytes = 0;
+      const names = [];
+      for await (const [name, handle] of dirHandle.entries()) {
+        if (handle.kind === 'file') {
+          try { const f = await handle.getFile(); totalBytes += f.size; } catch {}
+          names.push(name);
+          count++;
+        }
+      }
+      if (count === 0) { toast('Image cache is already empty', 'success'); return; }
+      const mb = (totalBytes / 1024 / 1024).toFixed(1);
+      if (!confirm(`Clear ${count} cached image${count !== 1 ? 's' : ''} (${mb} MB)?`)) return;
+      let deleted = 0;
+      for (const name of names) {
+        try { await dirHandle.removeEntry(name); deleted++; } catch {}
+      }
+      toast(`Cleared ${deleted} image${deleted !== 1 ? 's' : ''} (${mb} MB freed)`, 'success');
+      if (statsFh) await writeCacheStatsFile(statsFh, 0, 0);
+      refreshCacheStats();
+    }
   </script>
 </body>
 

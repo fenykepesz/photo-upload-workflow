@@ -72,6 +72,20 @@ TAG_LIMIT_500PX = 15
 SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY", "IG"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 IMAGE_CACHE_DIR = SCRIPT_DIR / "image_cache"  # persistent — survives re-runs, never auto-deleted
+CACHE_STATS_FILE = SCRIPT_DIR / "image_cache_stats.json"
+
+
+def write_cache_stats():
+    """Write image_cache_stats.json with current file count and total size in bytes."""
+    count, total_bytes = 0, 0
+    if IMAGE_CACHE_DIR.exists():
+        for f in IMAGE_CACHE_DIR.iterdir():
+            if f.is_file():
+                count += 1
+                total_bytes += f.stat().st_size
+    with open(CACHE_STATS_FILE, "w", encoding="utf-8") as fh:
+        json.dump({"count": count, "bytes": total_bytes}, fh)
+
 
 # Photo-processing wait times (ms) — overridden at runtime from config.json wait_times
 WAIT_TIMES = {
@@ -176,7 +190,14 @@ def save_row_update(csv_path, upload_id, updates):
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
         writer.writeheader()
         writer.writerows(rows)
-    os.replace(tmp_path, csv_path)
+    for attempt in range(5):
+        try:
+            os.replace(tmp_path, csv_path)
+            break
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(1)
 
 
 # ── Row filtering ─────────────────────────────────────────────
@@ -3639,6 +3660,7 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 # ── Main ──────────────────────────────────────────────────────
 def main():
     args = parse_args()
+    write_cache_stats()
 
     # Login mode: open browser for platform logins, then exit
     if args.login:
@@ -3657,7 +3679,7 @@ def main():
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
             )
-            page = ctx.new_page()
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             apply_stealth(page)
             def login_step(url, msg, next_msg):
@@ -3701,6 +3723,7 @@ def main():
             print(f"Deleted {len(files)} cached image(s) from {IMAGE_CACHE_DIR}")
         else:
             print("Image cache directory does not exist — nothing to clear.")
+        write_cache_stats()
         sys.exit(0)
 
     # Import X.com cookies mode
@@ -4292,9 +4315,13 @@ def main():
                         ig_image_path = None
                         if is_nsfw_ig:
                             safe_url = row.get("stash_url_safe", "").strip()
+                            nsfw_url = row.get("stash_url_nsfw", "").strip()
                             if not safe_url:
                                 result_ig = {"success": False, "url_ig": "",
                                              "error": "NSFW photo has no stash_url_safe — refusing to upload to Instagram"}
+                            elif safe_url == nsfw_url:
+                                result_ig = {"success": False, "url_ig": "",
+                                             "error": "stash_url_safe is identical to stash_url_nsfw — refusing to upload NSFW image to Instagram"}
                             else:
                                 ig_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
                                 print(f"    Using safe image (NSFW flag set)")
@@ -4377,9 +4404,13 @@ def main():
                         # If NSFW, require stash_url_safe; if missing, fail hard
                         if is_nsfw:
                             safe_url = row.get("stash_url_safe", "").strip()
+                            nsfw_url = row.get("stash_url_nsfw", "").strip()
                             if not safe_url:
                                 result_fb = {"success": False, "url_fb": "",
                                              "error": "NSFW photo has no stash_url_safe — refusing to upload to Facebook"}
+                            elif safe_url == nsfw_url:
+                                result_fb = {"success": False, "url_fb": "",
+                                             "error": "stash_url_safe is identical to stash_url_nsfw — refusing to upload NSFW image to Facebook"}
                             else:
                                 # Download the safe version specifically for FB
                                 fb_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
@@ -4640,9 +4671,13 @@ def main():
                         ig_image_path = None
                         if is_nsfw_ig:
                             safe_url = row.get("stash_url_safe", "").strip()
+                            nsfw_url = row.get("stash_url_nsfw", "").strip()
                             if not safe_url:
                                 result_ig = {"success": False, "url_ig": "",
                                              "error": "NSFW photo has no stash_url_safe — refusing to upload to Instagram"}
+                            elif safe_url == nsfw_url:
+                                result_ig = {"success": False, "url_ig": "",
+                                             "error": "stash_url_safe is identical to stash_url_nsfw — refusing to upload NSFW image to Instagram"}
                             else:
                                 ig_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
                                 print(f"    Using safe image (NSFW flag set)")
@@ -4707,9 +4742,13 @@ def main():
                         is_nsfw = row.get("da_nsfw_flag", "").strip().upper() == "TRUE"
                         if is_nsfw:
                             safe_url = row.get("stash_url_safe", "").strip()
+                            nsfw_url = row.get("stash_url_nsfw", "").strip()
                             if not safe_url:
                                 result_fb = {"success": False, "url_fb": "",
                                              "error": "NSFW photo has no stash_url_safe — refusing to upload to Facebook"}
+                            elif safe_url == nsfw_url:
+                                result_fb = {"success": False, "url_fb": "",
+                                             "error": "stash_url_safe is identical to stash_url_nsfw — refusing to upload NSFW image to Facebook"}
                             else:
                                 fb_image_path = download_stash_image(page, safe_url, row["upload_id"] + "_safe")
                                 fb_caption = build_description_fb(row)
