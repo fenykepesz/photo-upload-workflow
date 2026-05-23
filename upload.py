@@ -1846,8 +1846,14 @@ def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info
     return text[:X_CHAR_LIMIT]
 
 
-def build_bsky_post_text(title, keywords_str, model_name="", film_info="", caption="", mua_name="", studio_name="", max_tags=5):
+def build_bsky_post_text(title, keywords_str, model_name="", film_info="", caption="", mua_name="", studio_name="", max_tags=5, bsky_handle="", dev_bsky_handle=""):
     """Build a Bluesky post from title + caption + hashtags, fitting within 300 characters."""
+    # Reserve space for handles typed separately by the uploader
+    handle_reserve = 0
+    for h in [bsky_handle, dev_bsky_handle]:
+        if h and h.strip():
+            handle_reserve += 1 + 1 + len(h.strip().lstrip("@"))  # \n + @ + handle
+    effective_limit = BSKY_CHAR_LIMIT - handle_reserve
     if model_name and model_name.strip():
         credit = f"Model: {model_name.strip()}\n"
         if mua_name and mua_name.strip():
@@ -1869,14 +1875,14 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", capti
         separator = "\n\n"
         # Fit as much caption as possible, leaving room for film_info and at least one hashtag
         reserve = (len("\n\n" + film_info) if film_info else 0) + 30
-        available = BSKY_CHAR_LIMIT - len(text) - len(separator) - reserve
+        available = effective_limit - len(text) - len(separator) - reserve
         if available >= 20:
             text = text + separator + (cap if len(cap) <= available else cap[:available - 1] + "…")
     if film_info:
         film_section = "\n\n" + film_info
-        if len(text) + len(film_section) <= BSKY_CHAR_LIMIT:
+        if len(text) + len(film_section) <= effective_limit:
             text = text + film_section
-    text = text[:BSKY_CHAR_LIMIT]
+    text = text[:effective_limit]
     if not keywords_str:
         return text
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
@@ -1889,14 +1895,14 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", capti
         sep = " " if hashtags else ""
         candidate_tags = hashtags + sep + hashtag
         full = text + "\n\n" + candidate_tags
-        if len(full) <= BSKY_CHAR_LIMIT:
+        if len(full) <= effective_limit:
             hashtags = candidate_tags
             tag_count += 1
         else:
             break
     if hashtags:
         text = text + "\n\n" + hashtags
-    return text[:BSKY_CHAR_LIMIT]
+    return text[:effective_limit]
 
 
 IG_CHAR_LIMIT = 2200
@@ -4380,11 +4386,12 @@ def main():
                             if row.get("film_lens", "").strip(): _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip(): _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
-                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts), caption=row.get("caption", "").strip(), mua_name=row.get("mua_name", "").strip(), studio_name=row.get("studio_name", "").strip())
+                        _bsky_handle = row.get("bsky_tag_people", "").strip()
+                        post_text = build_bsky_post_text(get_effective_title(row), row.get("keywords", ""), model_name=row.get("model_name", "").strip(), film_info="\n".join(_film_parts), caption=row.get("caption", "").strip(), mua_name=row.get("mua_name", "").strip(), studio_name=row.get("studio_name", "").strip(), bsky_handle=_bsky_handle)
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip())
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=_bsky_handle)
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
 
@@ -4743,6 +4750,7 @@ def main():
                             if row.get("film_lens", "").strip():   _film_parts.append(f"Lens: {row['film_lens'].strip()}")
                             if row.get("film_stock", "").strip():  _film_parts.append(f"Film: {row['film_stock'].strip()}")
                             if row.get("film_developed_by", "").strip(): _film_parts.append(f"Developed by: {row['film_developed_by'].strip()}")
+                        _bsky_handle = row.get("bsky_tag_people", "").strip()
                         post_text = build_bsky_post_text(
                             get_effective_title(row), row.get("keywords", ""),
                             model_name=row.get("model_name", "").strip(),
@@ -4750,9 +4758,10 @@ def main():
                             caption=row.get("caption", "").strip(),
                             mua_name=row.get("mua_name", "").strip(),
                             studio_name=row.get("studio_name", "").strip(),
+                            bsky_handle=_bsky_handle,
                         )
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=row.get("bsky_tag_people", "").strip())
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=_bsky_handle)
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
                         if result_bsky["success"]:
