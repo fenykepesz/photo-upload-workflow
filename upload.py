@@ -1816,11 +1816,16 @@ def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info
     else:
         text = title.strip()
     if film_info:
-        text = text + "\n\n" + film_info
+        film_section = "\n\n" + film_info
+        if len(text) + len(film_section) <= X_CHAR_LIMIT:
+            text = text + film_section
     if dev_handle and dev_handle.strip():
-        text = text + f"\nDev: @{dev_handle.strip().lstrip('@')}"
+        dev_section = f"\nDev: @{dev_handle.strip().lstrip('@')}"
+        if len(text) + len(dev_section) <= X_CHAR_LIMIT:
+            text = text + dev_section
+    text = text[:X_CHAR_LIMIT]
     if not keywords_str:
-        return text[:X_CHAR_LIMIT]
+        return text
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
     hashtags = ""
     tag_count = 0
@@ -1838,7 +1843,7 @@ def build_x_post_text(title, keywords_str, model_name="", x_handle="", film_info
             break
     if hashtags:
         text = text + "\n\n" + hashtags
-    return text
+    return text[:X_CHAR_LIMIT]
 
 
 def build_bsky_post_text(title, keywords_str, model_name="", film_info="", caption="", mua_name="", studio_name="", max_tags=5):
@@ -1868,9 +1873,12 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", capti
         if available >= 20:
             text = text + separator + (cap if len(cap) <= available else cap[:available - 1] + "…")
     if film_info:
-        text = text + "\n\n" + film_info
+        film_section = "\n\n" + film_info
+        if len(text) + len(film_section) <= BSKY_CHAR_LIMIT:
+            text = text + film_section
+    text = text[:BSKY_CHAR_LIMIT]
     if not keywords_str:
-        return text[:BSKY_CHAR_LIMIT]
+        return text
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
     hashtags = ""
     tag_count = 0
@@ -1888,7 +1896,7 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", capti
             break
     if hashtags:
         text = text + "\n\n" + hashtags
-    return text
+    return text[:BSKY_CHAR_LIMIT]
 
 
 IG_CHAR_LIMIT = 2200
@@ -1915,11 +1923,20 @@ def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info
     else:
         text = title.strip()
     if caption and caption.strip():
-        text = text + "\n\n" + caption.strip()
+        cap_section = "\n\n" + caption.strip()
+        if len(text) + len(cap_section) <= IG_CHAR_LIMIT:
+            text = text + cap_section
+        else:
+            available = IG_CHAR_LIMIT - len(text) - 2
+            if available > 20:
+                text = text + "\n\n" + caption.strip()[:available - 1] + "…"
     if film_info:
-        text = text + "\n\n" + film_info
+        film_section = "\n\n" + film_info
+        if len(text) + len(film_section) <= IG_CHAR_LIMIT:
+            text = text + film_section
+    text = text[:IG_CHAR_LIMIT]
     if not keywords_str:
-        return text[:IG_CHAR_LIMIT]
+        return text
     tags = [k.strip() for k in keywords_str.split(",") if k.strip()]
     hashtags = ""
     tag_count = 0
@@ -1935,7 +1952,7 @@ def build_ig_caption(title, keywords_str, model_name="", ig_handle="", film_info
             break
     if hashtags:
         text = text + "\n\n" + hashtags
-    return text
+    return text[:IG_CHAR_LIMIT]
 
 
 def get_lab_handles(contact_name, lab_lookup):
