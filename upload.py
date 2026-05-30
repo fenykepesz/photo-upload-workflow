@@ -2327,6 +2327,7 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, 
     print("  Opening composer...")
     try:
         new_post_btn = page.locator(
+            '[aria-label="Compose new post"], '
             '[aria-label="New Post"], '
             '[aria-label="New post"], '
             '[aria-label="Compose post"], '
@@ -3698,27 +3699,28 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
         return {"success": True, "deviation_url": "NO_SUBMIT", "error": ""}
 
     print("  Submitting...")
-    # Use JS to click the Submit button INSIDE the form modal (not the nav bar one)
-    submit_result = page.evaluate("""
+    # Find Submit button inside a ReactModal, get its coords, then real mouse click
+    submit_rect = page.evaluate("""
         (() => {
-            // Find Submit button inside a ReactModal (the form), not the nav bar
             const modals = document.querySelectorAll('.ReactModal__Content--after-open');
             for (const modal of modals) {
                 const btns = modal.querySelectorAll('button');
                 for (const btn of btns) {
                     if (btn.textContent.trim() === 'Submit' && btn.getAttribute('role') !== 'menuitem') {
                         btn.scrollIntoView({block: 'center'});
-                        btn.click();
-                        return 'clicked';
+                        const r = btn.getBoundingClientRect();
+                        return {x: r.left + r.width / 2, y: r.top + r.height / 2};
                     }
                 }
             }
-            return 'not_found';
+            return null;
         })()
     """)
 
-    if submit_result == "not_found":
+    if not submit_rect:
         return {"success": False, "deviation_url": "", "error": "Submit button not found inside form modal"}
+    page.wait_for_timeout(300)
+    page.mouse.click(submit_rect["x"], submit_rect["y"])
 
     # ── Wait for redirect to deviation page ───────────────────
     print("  Waiting for redirect to deviation page...")
