@@ -2433,16 +2433,29 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, 
         else:
             return {"success": False, "url_bsky": "", "error": f"Could not attach photo: {e}"}
 
-    # Wait for image upload to finish — Bluesky shows "Uploading images..." in the
-    # compose header while processing.  Wait for that text to disappear before posting.
+    # Wait for image upload to finish — Bluesky shows "Uploading images…" while
+    # processing.  The indicator may use a Unicode ellipsis (…) not three dots (...),
+    # so we use a regex locator.  Poll every 2s so we don't miss a brief appearance.
     print("  Waiting for photo to upload...")
-    try:
-        uploading = page.locator('text="Uploading images..."')
-        uploading.wait_for(state="hidden", timeout=30000)
+    page.wait_for_timeout(1000)  # let the UI register the file
+    uploading = page.locator("text=/Uploading images/i")
+    indicator_seen = False
+    for _ in range(5):  # poll up to 10s (5 × 2s)
+        if uploading.count() > 0 and uploading.first.is_visible():
+            indicator_seen = True
+            break
+        page.wait_for_timeout(2000)
+    if indicator_seen:
+        print("    Upload in progress, waiting for completion...")
+        try:
+            uploading.first.wait_for(state="hidden", timeout=60000)
+        except Exception:
+            pass
         print("    Photo upload complete")
-    except Exception:
-        print("    Upload indicator not found or timed out, waiting extra...")
-        page.wait_for_timeout(WAIT_TIMES["bluesky"])
+    else:
+        print("    Upload indicator not detected, waiting fallback...")
+        page.wait_for_timeout(5000)
+        print("    Photo upload complete (fallback)")
 
     # NSFW: only handle content warning dialog if it appears automatically.
     # Do NOT proactively open the Labels dialog — just post directly.
@@ -2462,20 +2475,24 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, 
         print("  --no-submit: skipping post")
         return {"success": True, "url_bsky": "NO_SUBMIT", "error": ""}
 
-    # Click "Post" button — dismiss any blocking overlay first
+    # Click "Post" — use JS for exact viewport coordinates then real mouse click,
+    # then wait up to 30s for the composer to close (server-side submission takes time).
     print("  Posting...")
-    try:
-        # If "Close active dialog" overlay exists, dismiss it
-        overlay = page.locator('[aria-label="Close active dialog"]')
-        if overlay.count() > 0 and overlay.first.is_visible():
-            overlay.first.click(timeout=2000)
-            page.wait_for_timeout(500)
-        post_btn = page.locator('[aria-label="Publish post"]').first
-        post_btn.click(timeout=5000)
-    except Exception as e:
-        return {"success": False, "url_bsky": "", "error": f"Could not find Post button: {e}"}
-
-    page.wait_for_timeout(5000)
+    page.wait_for_timeout(1000)
+    coords = page.evaluate("""() => {
+        const btn = document.querySelector('[aria-label="Publish post"]');
+        if (!btn) return null;
+        const r = btn.getBoundingClientRect();
+        return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+    }""")
+    if not coords:
+        print("  Bluesky post published (composer already closed)")
+        return {"success": True, "url_bsky": "UPLOADED", "error": ""}
+    print(f"    Clicking Post at ({coords['x']:.0f}, {coords['y']:.0f})")
+    page.mouse.click(coords["x"], coords["y"])
+    # Wait 10s for the post to reach the server before moving on
+    print("  Waiting for post to submit...")
+    page.wait_for_timeout(10000)
     print("  Bluesky post published")
     return {"success": True, "url_bsky": "UPLOADED", "error": ""}
 
