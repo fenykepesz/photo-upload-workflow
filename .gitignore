@@ -39,3 +39,16 @@ __pycache__/
 # Old / test files
 test_queue.csv
 upload_queue_old.csv
+
+# Cookies exported from browser (contain live session tokens — never commit)
+fb_cookies.json
+x_cookies.json
+VK_data.json
+*_cookies.json
+
+# Log files from upload runs
+*.log
+
+# Backup files
+*.bak
+*.bak2

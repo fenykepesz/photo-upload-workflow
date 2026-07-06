@@ -203,6 +203,8 @@ def parse_args():
     p.add_argument("--clear-image-cache", action="store_true", help="Delete all cached images in image_cache/ and exit")
     p.add_argument("--import-x-cookies", metavar="FILE",
                    help="Import X.com cookies from a Cookie-Editor JSON export into the browser profile")
+    p.add_argument("--import-fb-cookies", metavar="FILE",
+                   help="Import Facebook cookies from a Cookie-Editor JSON export into the browser profile")
     p.add_argument("--fix-fb-location", action="store_true",
                    help="Open browser to Facebook profile settings so you can set the Current City")
     p.add_argument("--refresh-ig-token", action="store_true",
@@ -3767,6 +3769,11 @@ def main():
     args = parse_args()
     write_cache_stats()
 
+    _proxy_url = os.environ.get('SOCKS5_PROXY', '').strip()
+    _proxy_kwarg = {'proxy': {'server': _proxy_url}} if _proxy_url else {}
+    if _proxy_url:
+        print(f'[proxy] Routing browser traffic through {_proxy_url}')
+
     if args.copy_profile:
         src = find_default_chrome_profile()
         if not src.exists():
@@ -3806,6 +3813,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -3874,7 +3882,7 @@ def main():
                 "path":   c.get("path", "/"),
                 "secure": c.get("secure", False),
                 "httpOnly": c.get("httpOnly", False),
-                "sameSite": c.get("sameSite", "None") or "None",
+                "sameSite": {"no_restriction": "None", "lax": "Lax", "strict": "Strict"}.get((c.get("sameSite") or "").lower(), "None"),
             }
             if c.get("expirationDate"):
                 cookie["expires"] = int(c["expirationDate"])
@@ -3890,6 +3898,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             ctx.add_cookies(pw_cookies)
             page = ctx.new_page()
@@ -3902,6 +3911,54 @@ def main():
             else:
                 print(f"WARNING: Expected x.com/home but ended up at {page.url}")
                 print("You may not be fully logged in — check the browser window.")
+            print("Press ENTER to close...")
+            input()
+            ctx.close()
+        sys.exit(0)
+
+    if args.import_fb_cookies:
+        cookie_file = Path(args.import_fb_cookies)
+        if not cookie_file.exists():
+            print(f"ERROR: Cookie file not found: {cookie_file}")
+            sys.exit(1)
+        with open(cookie_file, encoding="utf-8") as f:
+            raw_cookies = json.load(f)
+        pw_cookies = []
+        for c in raw_cookies:
+            cookie = {
+                "name":     c["name"],
+                "value":    c["value"],
+                "domain":   c.get("domain", ".facebook.com"),
+                "path":     c.get("path", "/"),
+                "secure":   c.get("secure", False),
+                "httpOnly": c.get("httpOnly", False),
+                "sameSite": {"no_restriction": "None", "lax": "Lax", "strict": "Strict"}.get((c.get("sameSite") or "").lower(), "None"),
+            }
+            if c.get("expirationDate"):
+                cookie["expires"] = int(c["expirationDate"])
+            pw_cookies.append(cookie)
+        print(f"Importing {len(pw_cookies)} Facebook cookies into profile...")
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(args.profile),
+                headless=False,
+                executable_path=find_chrome(),
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
+                **_proxy_kwarg,
+            )
+            ctx.add_cookies(pw_cookies)
+            page = ctx.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            apply_stealth(page)
+            page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            if "facebook.com" in page.url and "login" not in page.url:
+                print("SUCCESS: Logged into Facebook.")
+            else:
+                print(f"WARNING: Ended up at {page.url} — may not be logged in.")
             print("Press ENTER to close...")
             input()
             ctx.close()
@@ -3920,6 +3977,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             page = ctx.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -4015,6 +4073,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             page = ctx.new_page()
             page.goto("https://vk.com", wait_until="domcontentloaded", timeout=30000)
@@ -4137,6 +4196,7 @@ def main():
             locale="en-IL",
             geolocation={"latitude": 32.08, "longitude": 34.78},
             permissions=["geolocation"],
+            **_proxy_kwarg,
         )
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -4338,6 +4398,34 @@ def main():
                             vk_updates["vk_groups_result"] = vk_gr
                         if vk_updates:
                             save_row_update(args.csv, row["upload_id"], vk_updates)
+
+                # ── Browser restart (post-VK memory cleanup) ───
+                print("\n  ── Restarting browser (post-VK memory cleanup) ──")
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                context = pw.chromium.launch_persistent_context(
+                    user_data_dir=str(args.profile),
+                    headless=False,
+                    executable_path=find_chrome(),
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ],
+                    viewport={"width": 1280, "height": 900},
+                    slow_mo=100,
+                    timezone_id="Asia/Jerusalem",
+                    locale="en-IL",
+                    geolocation={"latitude": 32.08, "longitude": 34.78},
+                    permissions=["geolocation"],
+                    **_proxy_kwarg,
+                )
+                page = context.new_page()
+                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                apply_stealth(page)
+                print("  Browser restarted.\n")
 
                 # ── X (between VK and DA) ────────────────────────
                 if "X" in platforms:

@@ -6,11 +6,11 @@ Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, **VK**
 
 ## How It Works
 
-`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px first, then 35photo, then VK, then X, then Bluesky, then Facebook, then DA last (since publishing to DA consumes the Sta.sh staging item).
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → VK → **[browser restart]** → X → Bluesky → Facebook → DA last (publishing DA consumes the Sta.sh staging item). The browser restarts after VK to release accumulated memory from VK's group submissions before continuing.
 
 ```
 Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
--> 500px upload -> 35photo upload -> VK wall post -> X.com post -> Bluesky post -> Facebook post -> DeviantArt publish (last)
+-> 500px upload -> 35photo upload -> VK wall post -> [browser restart] -> X.com post -> Bluesky post -> Facebook post -> DeviantArt publish (last)
 -> CSV updated with results
 ```
 
@@ -306,6 +306,26 @@ Film info is also included in X.com and Bluesky posts (inserted between the titl
 | **DA always last** | 500px, 35photo, VK, X, Bluesky, and Facebook run first; Sta.sh is preserved until DA is done |
 | **Error screenshots** | Saves `error_*.png` on failure for debugging |
 | **Failed platform indicator** | Dashboard shows which specific platforms failed (red "✗ Platform — Failed") |
+
+---
+
+## Stability & Recovery
+
+### Memory management (VPS)
+
+- A **6 GB swap file** (`/swapfile`) is active and persisted in `/etc/fstab`. This prevents the Linux OOM killer from terminating Chromium during memory spikes.
+- The **browser restarts automatically after VK** (before X). VK's group submissions — up to 14 consecutive page loads with file uploads — are the heaviest browser operation. Restarting here releases accumulated memory. All cookies and sessions are persisted to the `chrome-profile/` directory, so no re-login is needed.
+
+### Chrome crash recovery
+
+If a run fails with *"Opening in existing browser session"* or *"Target page, context or browser has been closed"*:
+
+```bash
+pkill -f chrome-profile
+rm -f /root/photo-upload-workflow/chrome-profile/Singleton*
+```
+
+Then retry the upload with `--row ID`.
 
 ---
 
