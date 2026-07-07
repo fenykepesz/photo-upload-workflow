@@ -6,12 +6,13 @@ Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, **VK**
 
 ## How It Works
 
-`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → VK → **[browser restart]** → X → Bluesky → Facebook → DA last (publishing DA consumes the Sta.sh staging item). The browser restarts after VK to release accumulated memory from VK's group submissions before continuing.
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → **[browser restart]** → VK → X → Bluesky → Facebook → DA last (publishing DA consumes the Sta.sh staging item). The browser restarts before VK to release memory accumulated during 35photo's tag-filling, giving VK a clean browser for its group submission loop.
 
 ```
 Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
--> 500px upload -> 35photo upload -> VK wall post -> [browser restart] -> X.com post -> Bluesky post -> Facebook post -> DeviantArt publish (last)
+-> 500px upload -> 35photo upload -> [browser restart] -> VK wall post -> X.com post -> Bluesky post -> Facebook post -> DeviantArt publish (last)
 -> CSV updated with results
+-> Telegram summary sent to uploads channel
 ```
 
 ---
@@ -314,7 +315,7 @@ Film info is also included in X.com and Bluesky posts (inserted between the titl
 ### Memory management (VPS)
 
 - A **6 GB swap file** (`/swapfile`) is active and persisted in `/etc/fstab`. This prevents the Linux OOM killer from terminating Chromium during memory spikes.
-- The **browser restarts automatically after VK** (before X). VK's group submissions — up to 14 consecutive page loads with file uploads — are the heaviest browser operation. Restarting here releases accumulated memory. All cookies and sessions are persisted to the `chrome-profile/` directory, so no re-login is needed.
+- The **browser restarts automatically before VK** (after 35photo). 35photo's tag-filling loop accumulates significant memory; restarting here gives VK a fresh browser for its heavy group submission loop (up to 14 consecutive page loads). All cookies and sessions are persisted to the `chrome-profile/` directory, so no re-login is needed.
 
 ### Chrome crash recovery
 
@@ -326,6 +327,42 @@ rm -f /root/photo-upload-workflow/chrome-profile/Singleton*
 ```
 
 Then retry the upload with `--row ID`.
+
+---
+
+## Notifications & Logging
+
+### Telegram summary
+
+After each photo row completes, a summary is sent to the configured Telegram channel:
+
+```
+✅ PH-2026-128 — Cobblestone and Cathedral
+⏱ 8m 02s
+
+500PX ✅  35P ✅  VK ✅  X ✅
+BSKY ✅  IG ⏭  FB ⏭  DA ✅
+VK groups: 14/15  (❌ some_group)
+🔄 1 planned restart(s)
+🔗 https://www.deviantart.com/flyy1/art/...
+```
+
+Requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_UPLOADS_CHANNEL` in `/root/.hermes/.env`. Falls back to `TELEGRAM_HOME_CHANNEL` if the uploads channel is not set.
+
+### Per-run logs
+
+Each run writes a timestamped log to `logs/run_YYYYMMDD_HHMMSS.log` with one line per platform and per VK group, including Chromium PID. A gap in the log or a PID change shows exactly where a crash occurred.
+
+```
+2026-07-07 10:01:00  START           PID=?   rows=PH-2026-128
+2026-07-07 10:01:02  LAUNCH          PID=123 initial browser
+2026-07-07 10:05:00  500PX           PID=123 SUCCESS
+2026-07-07 10:08:00  35P             PID=123 SUCCESS
+2026-07-07 10:08:05  RESTART         PID=456 intentional pre-VK
+2026-07-07 10:09:00  VK              PID=456 SUCCESS
+2026-07-07 10:09:10  VK/nuart.photo  PID=456 OK
+...
+```
 
 ---
 
