@@ -65,6 +65,96 @@ def write_run_log(event, detail, pid=None, fh=None):
     target.flush()
 
 
+
+def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_start):
+    """Send compact upload summary to Telegram uploads channel."""
+    import urllib.parse as _uparse
+    import urllib.request as _ureq
+
+    env_file = Path("/root/.hermes/.env")
+    if not env_file.exists():
+        return
+    creds = {}
+    for _line in env_file.read_text().splitlines():
+        if "=" in _line and not _line.startswith("#"):
+            _k, _v = _line.split("=", 1)
+            creds[_k.strip()] = _v.strip()
+
+    token   = creds.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = creds.get("TELEGRAM_UPLOADS_CHANNEL") or creds.get("TELEGRAM_HOME_CHANNEL", "")
+    if not token or not chat_id:
+        return
+
+    elapsed  = int(time.time() - run_start)
+    duration = f"{elapsed // 60}m {elapsed % 60:02d}s"
+    title    = row.get("title", row["upload_id"])
+    row_id   = row["upload_id"]
+
+    PLAT_ORDER = [("500PX","500PX"),("35P","35P"),("VK","VK"),("X","X"),
+                  ("BSKY","BSKY"),("IG","IG"),("FB","FB"),("DA","DA")]
+    cells, any_failed = [], False
+    for key, label in PLAT_ORDER:
+        if key not in platforms:
+            continue
+        done = ok_map.get(key, False)
+        if done is True:
+            cells.append(label + " ✅")
+        elif done == "skip":
+            cells.append(label + " ⏭")
+        else:
+            cells.append(label + " ❌")
+            any_failed = True
+    grid_text = chr(10).join("  ".join(cells[i:i+4]) for i in range(0, len(cells), 4))
+
+    vk_line = ""
+    if vk_groups_result:
+        groups    = [g for g in vk_groups_result.split(",") if g]
+        ok_count  = sum(1 for g in groups if g.endswith(":OK"))
+        fail_list = [g.split(":")[0] for g in groups if "FAILED" in g]
+        vk_line   = f"\nVK groups: {ok_count}/{len(groups)}"
+        if fail_list:
+            vk_line += "  (❌ " + ", ".join(fail_list) + ")"
+
+    pid_line = ""
+    if log_path and log_path.exists():
+        pids, restarts = set(), 0
+        for _ln in log_path.read_text().splitlines():
+            _m = re.search(r"PID=(\d+)", _ln)
+            if _m:
+                pids.add(_m.group(1))
+            if "RESTART" in _ln and "intentional" in _ln:
+                restarts += 1
+        unplanned = max(0, len(pids) - 1 - restarts)
+        if unplanned > 0:
+            pid_line = f"\n⚠️ {unplanned} unplanned crash(es) — check log"
+        elif restarts:
+            pid_line = f"\n🔄 {restarts} planned restart(s)"
+
+    da_url  = row.get("da_deviation_url", "").strip()
+    da_line = f"\n🔗 {da_url}" if da_url else ""
+
+    icon = "✅" if not any_failed else "⚠️"
+    msg  = (
+        f"{icon} <b>{row_id}</b> — {title}\n"
+        f"⏱ {duration}\n\n"
+        f"{grid_text}"
+        f"{vk_line}"
+        f"{pid_line}"
+        f"{da_line}"
+    )
+
+    payload = _uparse.urlencode({
+        "chat_id": chat_id, "text": msg,
+        "parse_mode": "HTML", "disable_web_page_preview": "true",
+    }).encode()
+    try:
+        _ureq.urlopen(_ureq.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage", payload
+        ), timeout=10)
+        print("  Telegram summary sent.")
+    except Exception as _e:
+        print(f"  WARNING: Telegram notification failed: {_e}")
+
 def find_chrome():
     """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
     system = _platform.system()
@@ -4260,6 +4350,7 @@ def main():
                 print(f"[{i + 1}/{len(target_rows)}] {row['upload_id']} — {row.get('title', '?')}")
                 print(f"{'=' * 60}")
 
+                _row_start = time.time()
                 platforms = get_row_platforms(row)
                 all_row_platforms = platforms  # full set — used for final status check
                 if args.platform:
@@ -5159,6 +5250,18 @@ def main():
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")
                 results_summary.append((row["upload_id"], ", ".join(summary_detail)))
+                _ok_map = {
+                    "500PX": True if ok_500px else ("skip" if row.get("url_500px","").strip() else False),
+                    "35P":   True if ok_35p  else ("skip" if row.get("url_35p","").strip()   else False),
+                    "VK":    True if ok_vk   else ("skip" if row.get("url_vk","").strip()    else False),
+                    "X":     True if ok_x    else ("skip" if row.get("url_x","").strip()     else False),
+                    "BSKY":  True if ok_bsky else ("skip" if row.get("url_bsky","").strip()  else False),
+                    "IG":    True if ok_ig   else ("skip" if row.get("url_ig","").strip()    else False),
+                    "FB":    True if ok_fb   else ("skip" if row.get("url_fb","").strip()    else False),
+                    "DA":    True if ok_da   else ("skip" if row.get("da_deviation_url","").strip() else False),
+                }
+                _vk_gr = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
+                send_run_summary(row, platforms, _ok_map, _vk_gr, _run_log_path, _row_start)
                 write_run_log("ROW_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
 
         finally:
