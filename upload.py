@@ -1314,7 +1314,7 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
 
     # Wait for the post dialog contenteditable to appear before trying to fill it
     try:
-        page.wait_for_selector('[contenteditable="true"]', timeout=8000)
+        page.wait_for_selector('[contenteditable="true"]', timeout=10000)
     except Exception:
         pass
 
