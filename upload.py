@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -39,6 +40,26 @@ except ImportError:
     def apply_stealth(page): pass  # graceful fallback if not installed
 
 import platform as _platform
+
+def get_chromium_pid():
+    try:
+        r = subprocess.run(["pgrep", "-n", "-f", "chrome-linux64/chrome"],
+                           capture_output=True, text=True)
+        pid = r.stdout.strip()
+        return int(pid) if pid.isdigit() else None
+    except Exception:
+        return None
+
+
+def write_run_log(fh, event, detail, pid=None):
+    if fh is None:
+        return
+    from datetime import datetime as _dt
+    pid_str = f"PID={pid}" if pid else "PID=?"
+    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    fh.write(f"{ts}  {event:<12}  {pid_str}  {detail}" + chr(10))
+    fh.flush()
+
 
 def find_chrome():
     """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
@@ -122,6 +143,7 @@ def copy_chrome_profile(src_user_data: Path, dest: Path):
 
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
+LOGS_DIR = SCRIPT_DIR / "logs"
 DEFAULT_CSV = SCRIPT_DIR / "upload_queue.csv"
 DEFAULT_CONFIG = SCRIPT_DIR / "config.json"
 BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
@@ -4178,6 +4200,14 @@ def main():
         print("ERROR: No browser profile found. Run first:  python upload.py --login")
         sys.exit(1)
 
+    # -- Run log --
+    LOGS_DIR.mkdir(exist_ok=True)
+    from datetime import datetime as _dt2
+    _run_log_path = LOGS_DIR / f"run_{_dt2.now().strftime('%Y%m%d_%H%M%S')}.log"
+    _run_log = open(_run_log_path, "w")
+    write_run_log(_run_log, "START", "rows=" + ",".join(r["upload_id"] for r in target_rows))
+    print(f"  Run log: {_run_log_path}")
+
     # Launch browser
     print(f"\nLaunching browser (profile: {args.profile})")
     with sync_playwright() as pw:
@@ -4201,6 +4231,8 @@ def main():
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         apply_stealth(page)
+        _current_pid = get_chromium_pid()
+        write_run_log(_run_log, "LAUNCH", "initial browser", pid=_current_pid)
 
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
@@ -4338,6 +4370,37 @@ def main():
                         if url_35p and url_35p not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_35p": url_35p})
 
+
+                # -- Browser restart (pre-VK memory cleanup) --
+                print("\n  -- Restarting browser (pre-VK memory cleanup) --")
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                context = pw.chromium.launch_persistent_context(
+                    user_data_dir=str(args.profile),
+                    headless=False,
+                    executable_path=find_chrome(),
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ],
+                    viewport={"width": 1280, "height": 900},
+                    slow_mo=100,
+                    timezone_id="Asia/Jerusalem",
+                    locale="en-IL",
+                    geolocation={"latitude": 32.08, "longitude": 34.78},
+                    permissions=["geolocation"],
+                    **_proxy_kwarg,
+                )
+                page = context.new_page()
+                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                apply_stealth(page)
+                _current_pid = get_chromium_pid()
+                write_run_log(_run_log, "RESTART", "intentional pre-VK", pid=_current_pid)
+                print("  Browser restarted.\n")
+
                 # ── VK (API-based, between 35P and DA) ───────────
                 if "VK" in platforms:
                     already = row.get("url_vk", "").strip()
@@ -4398,35 +4461,6 @@ def main():
                             vk_updates["vk_groups_result"] = vk_gr
                         if vk_updates:
                             save_row_update(args.csv, row["upload_id"], vk_updates)
-
-                # ── Browser restart (post-VK memory cleanup) ───
-                print("\n  ── Restarting browser (post-VK memory cleanup) ──")
-                try:
-                    context.close()
-                except Exception:
-                    pass
-                context = pw.chromium.launch_persistent_context(
-                    user_data_dir=str(args.profile),
-                    headless=False,
-                    executable_path=find_chrome(),
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                    ],
-                    viewport={"width": 1280, "height": 900},
-                    slow_mo=100,
-                    timezone_id="Asia/Jerusalem",
-                    locale="en-IL",
-                    geolocation={"latitude": 32.08, "longitude": 34.78},
-                    permissions=["geolocation"],
-                    **_proxy_kwarg,
-                )
-                page = context.new_page()
-                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                apply_stealth(page)
-                print("  Browser restarted.\n")
-
                 # ── X (between VK and DA) ────────────────────────
                 if "X" in platforms:
                     already = row.get("url_x", "").strip()
@@ -5092,6 +5126,10 @@ def main():
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")
                 results_summary.append((row["upload_id"], ", ".join(summary_detail)))
+                write_run_log(_run_log, "PLATFORM_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
+                _vk_gr = result_vk.get("vk_groups_result", "") if "result_vk" in locals() and result_vk else ""
+                if _vk_gr:
+                    write_run_log(_run_log, "VK_GROUPS", _vk_gr, pid=get_chromium_pid())
 
         finally:
             context.close()
@@ -5103,6 +5141,8 @@ def main():
     for uid, detail in results_summary:
         print(f"  {uid} — {detail}")
     print(f"\n{len(results_summary)} row(s) processed.")
+    write_run_log(_run_log, "DONE", f"{len(results_summary)} row(s) processed")
+    _run_log.close()
 
 
 if __name__ == "__main__":
