@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -39,6 +40,26 @@ except ImportError:
     def apply_stealth(page): pass  # graceful fallback if not installed
 
 import platform as _platform
+
+def get_chromium_pid():
+    try:
+        r = subprocess.run(["pgrep", "-n", "-f", "chrome-linux64/chrome"],
+                           capture_output=True, text=True)
+        pid = r.stdout.strip()
+        return int(pid) if pid.isdigit() else None
+    except Exception:
+        return None
+
+
+def write_run_log(fh, event, detail, pid=None):
+    if fh is None:
+        return
+    from datetime import datetime as _dt
+    pid_str = f"PID={pid}" if pid else "PID=?"
+    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    fh.write(f"{ts}  {event:<12}  {pid_str}  {detail}" + chr(10))
+    fh.flush()
+
 
 def find_chrome():
     """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
@@ -122,6 +143,7 @@ def copy_chrome_profile(src_user_data: Path, dest: Path):
 
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
+LOGS_DIR = SCRIPT_DIR / "logs"
 DEFAULT_CSV = SCRIPT_DIR / "upload_queue.csv"
 DEFAULT_CONFIG = SCRIPT_DIR / "config.json"
 BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
@@ -203,6 +225,8 @@ def parse_args():
     p.add_argument("--clear-image-cache", action="store_true", help="Delete all cached images in image_cache/ and exit")
     p.add_argument("--import-x-cookies", metavar="FILE",
                    help="Import X.com cookies from a Cookie-Editor JSON export into the browser profile")
+    p.add_argument("--import-fb-cookies", metavar="FILE",
+                   help="Import Facebook cookies from a Cookie-Editor JSON export into the browser profile")
     p.add_argument("--fix-fb-location", action="store_true",
                    help="Open browser to Facebook profile settings so you can set the Current City")
     p.add_argument("--refresh-ig-token", action="store_true",
@@ -3767,6 +3791,11 @@ def main():
     args = parse_args()
     write_cache_stats()
 
+    _proxy_url = os.environ.get('SOCKS5_PROXY', '').strip()
+    _proxy_kwarg = {'proxy': {'server': _proxy_url}} if _proxy_url else {}
+    if _proxy_url:
+        print(f'[proxy] Routing browser traffic through {_proxy_url}')
+
     if args.copy_profile:
         src = find_default_chrome_profile()
         if not src.exists():
@@ -3806,6 +3835,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -3874,7 +3904,7 @@ def main():
                 "path":   c.get("path", "/"),
                 "secure": c.get("secure", False),
                 "httpOnly": c.get("httpOnly", False),
-                "sameSite": c.get("sameSite", "None") or "None",
+                "sameSite": {"no_restriction": "None", "lax": "Lax", "strict": "Strict"}.get((c.get("sameSite") or "").lower(), "None"),
             }
             if c.get("expirationDate"):
                 cookie["expires"] = int(c["expirationDate"])
@@ -3890,6 +3920,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             ctx.add_cookies(pw_cookies)
             page = ctx.new_page()
@@ -3902,6 +3933,54 @@ def main():
             else:
                 print(f"WARNING: Expected x.com/home but ended up at {page.url}")
                 print("You may not be fully logged in — check the browser window.")
+            print("Press ENTER to close...")
+            input()
+            ctx.close()
+        sys.exit(0)
+
+    if args.import_fb_cookies:
+        cookie_file = Path(args.import_fb_cookies)
+        if not cookie_file.exists():
+            print(f"ERROR: Cookie file not found: {cookie_file}")
+            sys.exit(1)
+        with open(cookie_file, encoding="utf-8") as f:
+            raw_cookies = json.load(f)
+        pw_cookies = []
+        for c in raw_cookies:
+            cookie = {
+                "name":     c["name"],
+                "value":    c["value"],
+                "domain":   c.get("domain", ".facebook.com"),
+                "path":     c.get("path", "/"),
+                "secure":   c.get("secure", False),
+                "httpOnly": c.get("httpOnly", False),
+                "sameSite": {"no_restriction": "None", "lax": "Lax", "strict": "Strict"}.get((c.get("sameSite") or "").lower(), "None"),
+            }
+            if c.get("expirationDate"):
+                cookie["expires"] = int(c["expirationDate"])
+            pw_cookies.append(cookie)
+        print(f"Importing {len(pw_cookies)} Facebook cookies into profile...")
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(args.profile),
+                headless=False,
+                executable_path=find_chrome(),
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Jerusalem",
+                locale="en-IL",
+                **_proxy_kwarg,
+            )
+            ctx.add_cookies(pw_cookies)
+            page = ctx.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            apply_stealth(page)
+            page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            if "facebook.com" in page.url and "login" not in page.url:
+                print("SUCCESS: Logged into Facebook.")
+            else:
+                print(f"WARNING: Ended up at {page.url} — may not be logged in.")
             print("Press ENTER to close...")
             input()
             ctx.close()
@@ -3920,6 +3999,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             page = ctx.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -4015,6 +4095,7 @@ def main():
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
+                **_proxy_kwarg,
             )
             page = ctx.new_page()
             page.goto("https://vk.com", wait_until="domcontentloaded", timeout=30000)
@@ -4119,6 +4200,14 @@ def main():
         print("ERROR: No browser profile found. Run first:  python upload.py --login")
         sys.exit(1)
 
+    # -- Run log --
+    LOGS_DIR.mkdir(exist_ok=True)
+    from datetime import datetime as _dt2
+    _run_log_path = LOGS_DIR / f"run_{_dt2.now().strftime('%Y%m%d_%H%M%S')}.log"
+    _run_log = open(_run_log_path, "w")
+    write_run_log(_run_log, "START", "rows=" + ",".join(r["upload_id"] for r in target_rows))
+    print(f"  Run log: {_run_log_path}")
+
     # Launch browser
     print(f"\nLaunching browser (profile: {args.profile})")
     with sync_playwright() as pw:
@@ -4137,10 +4226,13 @@ def main():
             locale="en-IL",
             geolocation={"latitude": 32.08, "longitude": 34.78},
             permissions=["geolocation"],
+            **_proxy_kwarg,
         )
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         apply_stealth(page)
+        _current_pid = get_chromium_pid()
+        write_run_log(_run_log, "LAUNCH", "initial browser", pid=_current_pid)
 
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
@@ -4278,6 +4370,37 @@ def main():
                         if url_35p and url_35p not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_35p": url_35p})
 
+
+                # -- Browser restart (pre-VK memory cleanup) --
+                print("\n  -- Restarting browser (pre-VK memory cleanup) --")
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                context = pw.chromium.launch_persistent_context(
+                    user_data_dir=str(args.profile),
+                    headless=False,
+                    executable_path=find_chrome(),
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ],
+                    viewport={"width": 1280, "height": 900},
+                    slow_mo=100,
+                    timezone_id="Asia/Jerusalem",
+                    locale="en-IL",
+                    geolocation={"latitude": 32.08, "longitude": 34.78},
+                    permissions=["geolocation"],
+                    **_proxy_kwarg,
+                )
+                page = context.new_page()
+                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                apply_stealth(page)
+                _current_pid = get_chromium_pid()
+                write_run_log(_run_log, "RESTART", "intentional pre-VK", pid=_current_pid)
+                print("  Browser restarted.\n")
+
                 # ── VK (API-based, between 35P and DA) ───────────
                 if "VK" in platforms:
                     already = row.get("url_vk", "").strip()
@@ -4338,7 +4461,6 @@ def main():
                             vk_updates["vk_groups_result"] = vk_gr
                         if vk_updates:
                             save_row_update(args.csv, row["upload_id"], vk_updates)
-
                 # ── X (between VK and DA) ────────────────────────
                 if "X" in platforms:
                     already = row.get("url_x", "").strip()
@@ -5004,6 +5126,10 @@ def main():
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")
                 results_summary.append((row["upload_id"], ", ".join(summary_detail)))
+                write_run_log(_run_log, "PLATFORM_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
+                _vk_gr = result_vk.get("vk_groups_result", "") if "result_vk" in locals() and result_vk else ""
+                if _vk_gr:
+                    write_run_log(_run_log, "VK_GROUPS", _vk_gr, pid=get_chromium_pid())
 
         finally:
             context.close()
@@ -5015,6 +5141,8 @@ def main():
     for uid, detail in results_summary:
         print(f"  {uid} — {detail}")
     print(f"\n{len(results_summary)} row(s) processed.")
+    write_run_log(_run_log, "DONE", f"{len(results_summary)} row(s) processed")
+    _run_log.close()
 
 
 if __name__ == "__main__":
