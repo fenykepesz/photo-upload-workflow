@@ -51,14 +51,18 @@ def get_chromium_pid():
         return None
 
 
-def write_run_log(fh, event, detail, pid=None):
-    if fh is None:
+_run_log_fh = None  # module-level handle set at run start
+
+
+def write_run_log(event, detail, pid=None, fh=None):
+    target = fh or _run_log_fh
+    if target is None:
         return
     from datetime import datetime as _dt
     pid_str = f"PID={pid}" if pid else "PID=?"
     ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-    fh.write(f"{ts}  {event:<12}  {pid_str}  {detail}" + chr(10))
-    fh.flush()
+    target.write(f"{ts}  {event:<14}  {pid_str}  {detail}" + chr(10))
+    target.flush()
 
 
 def find_chrome():
@@ -1401,6 +1405,7 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
 
         status = "NO_SUBMIT" if gr.get("no_submit") else ("OK" if gr["success"] else "FAILED")
         group_results.append(f"{slug}:{status}")
+        write_run_log(f"VK/{slug}", status, pid=get_chromium_pid())
 
         if gr["success"]:
             print(f"    Group {slug}: OK")
@@ -4205,7 +4210,9 @@ def main():
     from datetime import datetime as _dt2
     _run_log_path = LOGS_DIR / f"run_{_dt2.now().strftime('%Y%m%d_%H%M%S')}.log"
     _run_log = open(_run_log_path, "w")
-    write_run_log(_run_log, "START", "rows=" + ",".join(r["upload_id"] for r in target_rows))
+    global _run_log_fh
+    _run_log_fh = _run_log
+    write_run_log("START", "rows=" + ",".join(r["upload_id"] for r in target_rows))
     print(f"  Run log: {_run_log_path}")
 
     # Launch browser
@@ -4232,7 +4239,7 @@ def main():
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         apply_stealth(page)
         _current_pid = get_chromium_pid()
-        write_run_log(_run_log, "LAUNCH", "initial browser", pid=_current_pid)
+        write_run_log("LAUNCH", "initial browser", pid=_current_pid)
 
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
@@ -4281,6 +4288,7 @@ def main():
                     already = row.get("url_500px", "").strip()
                     if already:
                         print(f"\n  500px: already uploaded ({already}) — skipping")
+                        write_run_log("500PX", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── 500px Upload ──")
                         t0_500px = time.time()
@@ -4305,9 +4313,11 @@ def main():
                         if result_500px["success"]:
                             ok_500px = True
                             print(f"  500px: SUCCESS ({time.time()-t0_500px:.0f}s) — {result_500px.get('url_500px', '')}")
+                            write_run_log("500PX", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_500px.get("error", "unknown")
                             print(f"  500px: FAILED ({time.time()-t0_500px:.0f}s) — {err}")
+                            write_run_log("500PX", "FAILED", pid=get_chromium_pid())
                             errors.append(f"500px: {err}")
                             # Screenshot on failure
                             ts = datetime.now().strftime("%H%M%S")
@@ -4328,6 +4338,7 @@ def main():
                     already = row.get("url_35p", "").strip()
                     if already:
                         print(f"\n  35photo: already uploaded ({already}) — skipping")
+                        write_run_log("35PHOTO", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── 35photo Upload ──")
                         t0_35p = time.time()
@@ -4352,9 +4363,11 @@ def main():
                         if result_35p["success"]:
                             ok_35p = True
                             print(f"  35photo: SUCCESS ({time.time()-t0_35p:.0f}s) — {result_35p.get('url_35p', '')}")
+                            write_run_log("35PHOTO", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_35p.get("error", "unknown")
                             print(f"  35photo: FAILED ({time.time()-t0_35p:.0f}s) — {err}")
+                            write_run_log("35PHOTO", "FAILED", pid=get_chromium_pid())
                             errors.append(f"35photo: {err}")
                             # Screenshot on failure
                             ts = datetime.now().strftime("%H%M%S")
@@ -4398,7 +4411,7 @@ def main():
                 page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 apply_stealth(page)
                 _current_pid = get_chromium_pid()
-                write_run_log(_run_log, "RESTART", "intentional pre-VK", pid=_current_pid)
+                write_run_log("RESTART", "intentional pre-VK", pid=_current_pid)
                 print("  Browser restarted.\n")
 
                 # ── VK (API-based, between 35P and DA) ───────────
@@ -4406,6 +4419,7 @@ def main():
                     already = row.get("url_vk", "").strip()
                     if already:
                         print(f"\n  VK: already uploaded ({already}) — skipping")
+                        write_run_log("VK", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── VK Upload ──")
                         t0_vk = time.time()
@@ -4446,9 +4460,11 @@ def main():
                         if result_vk["success"]:
                             ok_vk = True
                             print(f"  VK: SUCCESS ({time.time()-t0_vk:.0f}s) — {result_vk.get('url_vk', '')}")
+                            write_run_log("VK", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_vk.get("error", "unknown")
                             print(f"  VK: FAILED ({time.time()-t0_vk:.0f}s) — {err}")
+                            write_run_log("VK", "FAILED", pid=get_chromium_pid())
                             errors.append(f"VK: {err}")
 
                         # Update CSV with VK result
@@ -4466,6 +4482,7 @@ def main():
                     already = row.get("url_x", "").strip()
                     if already:
                         print(f"\n  X: already uploaded ({already}) — skipping")
+                        write_run_log("X", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── X.com Upload ──")
                         t0_x = time.time()
@@ -4494,9 +4511,11 @@ def main():
                         if result_x["success"]:
                             ok_x = True
                             print(f"  X: SUCCESS ({time.time()-t0_x:.0f}s) — {result_x.get('url_x', '')}")
+                            write_run_log("X", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_x.get("error", "unknown")
                             print(f"  X: FAILED ({time.time()-t0_x:.0f}s) — {err}")
+                            write_run_log("X", "FAILED", pid=get_chromium_pid())
                             errors.append(f"X: {err}")
 
                         # Update CSV with X result
@@ -4509,6 +4528,7 @@ def main():
                     already = row.get("url_bsky", "").strip()
                     if already:
                         print(f"\n  BSKY: already uploaded ({already}) — skipping")
+                        write_run_log("BSKY", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── Bluesky Upload ──")
                         t0_bsky = time.time()
@@ -4539,9 +4559,11 @@ def main():
                         if result_bsky["success"]:
                             ok_bsky = True
                             print(f"  BSKY: SUCCESS ({time.time()-t0_bsky:.0f}s) — {result_bsky.get('url_bsky', '')}")
+                            write_run_log("BSKY", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_bsky.get("error", "unknown")
                             print(f"  BSKY: FAILED ({time.time()-t0_bsky:.0f}s) — {err}")
+                            write_run_log("BSKY", "FAILED", pid=get_chromium_pid())
                             errors.append(f"BSKY: {err}")
 
                         # Update CSV with BSKY result
@@ -4554,6 +4576,7 @@ def main():
                     already = row.get("url_ig", "").strip()
                     if already:
                         print(f"\n  IG: already uploaded ({already}) — skipping")
+                        write_run_log("IG", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── Instagram Upload ──")
                         t0_ig = time.time()
@@ -4630,9 +4653,11 @@ def main():
                         if result_ig["success"]:
                             ok_ig = True
                             print(f"  IG: SUCCESS ({time.time()-t0_ig:.0f}s) — {result_ig.get('url_ig', '')}")
+                            write_run_log("IG", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_ig.get("error", "unknown")
                             print(f"  IG: FAILED ({time.time()-t0_ig:.0f}s) — {err}")
+                            write_run_log("IG", "FAILED", pid=get_chromium_pid())
                             errors.append(f"IG: {err}")
 
                         url_ig = result_ig.get("url_ig", "")
@@ -4644,6 +4669,7 @@ def main():
                     already = row.get("url_fb", "").strip()
                     if already:
                         print(f"\n  FB: already uploaded ({already}) — skipping")
+                        write_run_log("FB", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── Facebook Upload ──")
                         t0_fb = time.time()
@@ -4693,9 +4719,11 @@ def main():
                         if result_fb["success"]:
                             ok_fb = True
                             print(f"  FB: SUCCESS ({time.time()-t0_fb:.0f}s) — {result_fb.get('url_fb', '')}")
+                            write_run_log("FB", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_fb.get("error", "unknown")
                             print(f"  FB: FAILED ({time.time()-t0_fb:.0f}s) — {err}")
+                            write_run_log("FB", "FAILED", pid=get_chromium_pid())
                             errors.append(f"FB: {err}")
 
                         # Update CSV with FB result
@@ -4708,6 +4736,7 @@ def main():
                     already = row.get("da_deviation_url", "").strip()
                     if already:
                         print(f"\n  DA: already uploaded ({already}) — skipping")
+                        write_run_log("DA", "skipped", pid=get_chromium_pid())
                     else:
                         print(f"\n  ── DeviantArt Upload ──")
                         t0_da = time.time()
@@ -4722,9 +4751,11 @@ def main():
                         if result_da["success"]:
                             ok_da = True
                             print(f"  DA: SUCCESS ({time.time()-t0_da:.0f}s) — {result_da.get('deviation_url', '')}")
+                            write_run_log("DA", "SUCCESS", pid=get_chromium_pid())
                         else:
                             err = result_da.get("error", "unknown")
                             print(f"  DA: FAILED ({time.time()-t0_da:.0f}s) — {err}")
+                            write_run_log("DA", "FAILED", pid=get_chromium_pid())
                             errors.append(f"DA: {err}")
                             # Screenshot on failure
                             ts = datetime.now().strftime("%H%M%S")
@@ -4908,12 +4939,14 @@ def main():
                         if result_bsky["success"]:
                             ok_bsky = True
                             print(f"  BSKY: SUCCESS (retry, {time.time()-t0_bsky:.0f}s) — {result_bsky.get('url_bsky', '')}")
+                            write_run_log("BSKY", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_bsky.get("url_bsky", "")
                             if _u and _u not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"url_bsky": _u})
                         else:
                             err = result_bsky.get("error", "unknown")
                             print(f"  BSKY: FAILED (retry, {time.time()-t0_bsky:.0f}s) — {err}")
+                            write_run_log("BSKY", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"BSKY: {err}")
 
                     if "IG" in to_retry:
@@ -5126,10 +5159,7 @@ def main():
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")
                 results_summary.append((row["upload_id"], ", ".join(summary_detail)))
-                write_run_log(_run_log, "PLATFORM_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
-                _vk_gr = result_vk.get("vk_groups_result", "") if "result_vk" in locals() and result_vk else ""
-                if _vk_gr:
-                    write_run_log(_run_log, "VK_GROUPS", _vk_gr, pid=get_chromium_pid())
+                write_run_log("ROW_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
 
         finally:
             context.close()
@@ -5141,7 +5171,7 @@ def main():
     for uid, detail in results_summary:
         print(f"  {uid} — {detail}")
     print(f"\n{len(results_summary)} row(s) processed.")
-    write_run_log(_run_log, "DONE", f"{len(results_summary)} row(s) processed")
+    write_run_log("DONE", f"{len(results_summary)} row(s) processed")
     _run_log.close()
 
 
