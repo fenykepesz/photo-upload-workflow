@@ -44,7 +44,7 @@ import platform as _platform
 
 def get_chromium_pid():
     try:
-        r = subprocess.run(["pgrep", "-n", "-f", "chrome-linux64/chrome"],
+        r = subprocess.run(["pgrep", "-o", "-f", "chrome-linux64/chrome"],
                            capture_output=True, text=True)
         pid = r.stdout.strip()
         return int(pid) if pid.isdigit() else None
