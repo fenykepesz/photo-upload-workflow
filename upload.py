@@ -23,6 +23,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -5267,7 +5268,13 @@ def main():
                     "DA":    True if ok_da   else ("skip" if row.get("da_deviation_url","").strip() else False),
                 }
                 _vk_gr = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
-                send_run_summary(row, platforms, _ok_map, _vk_gr, _run_log_path, _row_start)
+                print("  [DEBUG] Sending Telegram summary...")
+                try:
+                    send_run_summary(row, platforms, _ok_map, _vk_gr, _run_log_path, _row_start)
+                except Exception as _tg_err:
+                    import traceback
+                    print(f"  ERROR in send_run_summary: {_tg_err}")
+                    traceback.print_exc()
                 write_run_log("ROW_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
 
         finally:
