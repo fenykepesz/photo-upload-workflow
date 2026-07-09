@@ -6,13 +6,13 @@ Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, **VK**
 
 ## How It Works
 
-`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → **[browser restart]** → VK → X → Bluesky → Facebook → DA last (publishing DA consumes the Sta.sh staging item). The browser restarts before VK to release memory accumulated during 35photo's tag-filling, giving VK a clean browser for its group submission loop.
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → **[browser restart]** → VK → X → Bluesky → Facebook → **[browser restart]** → DA last (publishing DA consumes the Sta.sh staging item). Two intentional browser restarts per run: before VK (clears memory from 35photo's tag-filling loop) and before DA (gives DA the cleanest possible browser for its complex multi-step form).
 
 ```
 Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
--> 500px upload -> 35photo upload -> [browser restart] -> VK wall post -> X.com post -> Bluesky post -> Facebook post -> DeviantArt publish (last)
--> CSV updated with results
--> Telegram summary sent to uploads channel
+-> 500px -> 35photo -> [restart] -> VK -> X -> Bluesky -> Facebook -> [restart] -> DeviantArt (last)
+-> CSV updated after each platform
+-> Telegram summary sent to uploads channel (even on crash or SIGTERM)
 ```
 
 ---
@@ -85,7 +85,7 @@ Upload each photo to [Sta.sh](https://sta.sh) (DeviantArt's staging area) before
 
 ## The Upload Queue (`upload_queue.csv`)
 
-Each row represents one scheduled upload. Open `queue_manager.html` in your browser for a visual editor, or edit the CSV directly.
+Each row represents one scheduled upload. Open `queue_manager.html` via `queue_server.py` (`http://hermes:8484/queue_manager.html`) for a visual editor — the dashboard auto-fetches the CSV from the server on every page load so it always reflects the latest upload results. You can also edit the CSV directly.
 
 ### Column Reference
 
@@ -155,6 +155,12 @@ python upload.py
 python upload.py --row PH-2026-001
 ```
 
+### Re-upload one platform only
+
+```bash
+python upload.py --row PH-2026-001 --platform DA
+```
+
 ### Preview what would happen
 
 ```bash
@@ -178,6 +184,7 @@ python upload.py --csv path/to/queue.csv --config path/to/config.json
 | Flag | Description |
 |---|---|
 | `--row ID` | Upload only this row (bypasses status filter) |
+| `--platform NAME` | Restrict to one platform only — must be used with `--row` (e.g. `--platform DA`) |
 | `--dry-run` | Preview without launching browser |
 | `--no-submit` | Fill forms but don't click Submit/Publish |
 | `--csv PATH` | Custom CSV path (default: `upload_queue.csv`) |
@@ -315,7 +322,18 @@ Film info is also included in X.com and Bluesky posts (inserted between the titl
 ### Memory management (VPS)
 
 - A **6 GB swap file** (`/swapfile`) is active and persisted in `/etc/fstab`. This prevents the Linux OOM killer from terminating Chromium during memory spikes.
-- The **browser restarts automatically before VK** (after 35photo). 35photo's tag-filling loop accumulates significant memory; restarting here gives VK a fresh browser for its heavy group submission loop (up to 14 consecutive page loads). All cookies and sessions are persisted to the `chrome-profile/` directory, so no re-login is needed.
+- The browser **restarts twice per run**: before VK (clears memory from 35photo's tag-filling loop) and before DA (gives DA the cleanest possible browser for its complex multi-step form). Cookies and sessions persist to `chrome-profile/` so no re-login is needed.
+
+### Graceful Chrome shutdown
+
+All browser close calls use `close_context_gracefully()`, which sends a `Browser.close` CDP command before Playwright tears down the process. This lets Chrome write its session state cleanly, preventing the "browser didn't shut down correctly" restore dialog on the next launch.
+
+### Crash and signal handling
+
+The script has two layers of recovery that fire even when a run crashes or is killed:
+
+- **Crash handler** (`except Exception`): catches any unhandled exception in the row loop, sends a Telegram summary with whatever platforms succeeded, and saves `status=Partial` (or `Failed`) to the CSV.
+- **Signal handler** (SIGTERM / SIGINT): registered at startup. If the process is killed externally (e.g. by systemd or Ctrl-C), reads the CSV (already updated per-platform) to build an accurate ok_map, fires the Telegram summary, updates CSV status, then exits with `128 + signum`.
 
 ### Chrome crash recovery
 
