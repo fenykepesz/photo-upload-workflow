@@ -60,6 +60,21 @@ _current_csv_path  = None
 
 
 
+def close_context_gracefully(context):
+    """Send Browser.close via CDP so Chrome can write exited_cleanly before Playwright SIGKILLs it."""
+    try:
+        pages = context.pages
+        if pages:
+            cdp = context.new_cdp_session(pages[0])
+            cdp.send("Browser.close")
+    except Exception:
+        pass
+    try:
+        context.close()
+    except Exception:
+        pass
+
+
 def write_run_log(event, detail, pid=None, fh=None):
     target = fh or _run_log_fh
     if target is None:
@@ -3974,7 +3989,7 @@ def main():
                 executable_path=find_chrome(),
                 args=[
                     "--disable-blink-features=AutomationControlled",
-                    "--no-first-run", "--hide-crash-restore-bubble",
+                    "--no-first-run",
                     "--no-default-browser-check",
                 ],
                 viewport={"width": 1280, "height": 900},
@@ -4014,7 +4029,7 @@ def main():
             login_step("https://www.facebook.com/login",         "Log into Facebook in the browser window.",    "will open DeviantArt next")
             login_step("https://www.deviantart.com/users/login", "Log into DeviantArt in the browser window.",  "will open 500px again to confirm")
             login_step("https://500px.com/",                     "Confirm 500px is still logged in (or log in again if needed).", "press ENTER to finish")
-            ctx.close()
+            close_context_gracefully(ctx)
         print("Logins saved. You can now run: python upload.py --no-submit")
         sys.exit(0)
 
@@ -4061,7 +4076,7 @@ def main():
                 user_data_dir=str(args.profile),
                 headless=False,
                 executable_path=find_chrome(),
-                args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--hide-crash-restore-bubble"],
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
@@ -4080,7 +4095,7 @@ def main():
                 print("You may not be fully logged in — check the browser window.")
             print("Press ENTER to close...")
             input()
-            ctx.close()
+            close_context_gracefully(ctx)
         sys.exit(0)
 
     if args.import_fb_cookies:
@@ -4110,7 +4125,7 @@ def main():
                 user_data_dir=str(args.profile),
                 headless=False,
                 executable_path=find_chrome(),
-                args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--hide-crash-restore-bubble"],
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
@@ -4128,7 +4143,7 @@ def main():
                 print(f"WARNING: Ended up at {page.url} — may not be logged in.")
             print("Press ENTER to close...")
             input()
-            ctx.close()
+            close_context_gracefully(ctx)
         sys.exit(0)
 
     # Fix Facebook location (Current City in profile)
@@ -4140,7 +4155,7 @@ def main():
                 user_data_dir=str(args.profile),
                 headless=False,
                 executable_path=find_chrome(),
-                args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--hide-crash-restore-bubble"],
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
@@ -4151,7 +4166,7 @@ def main():
             page.goto("https://www.facebook.com/profile.php?sk=about_living", wait_until="domcontentloaded", timeout=30000)
             print("Press ENTER when done...")
             input()
-            ctx.close()
+            close_context_gracefully(ctx)
         sys.exit(0)
 
     # Find Instagram Business Account ID
@@ -4236,7 +4251,7 @@ def main():
                 user_data_dir=str(args.profile),
                 headless=False,
                 executable_path=find_chrome(),
-                args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--hide-crash-restore-bubble"],
+                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
                 viewport={"width": 1280, "height": 900},
                 timezone_id="Asia/Jerusalem",
                 locale="en-IL",
@@ -4273,7 +4288,7 @@ def main():
             print("  DevTools (F12) → Application → Storage → Clear site data")
             print("\nPress ENTER when done...")
             input()
-            ctx.close()
+            close_context_gracefully(ctx)
         print("VK drafts cleared. You can now run the upload.")
         sys.exit(0)
 
@@ -4364,7 +4379,7 @@ def main():
             executable_path=find_chrome(),
             args=[
                 "--disable-blink-features=AutomationControlled",
-                "--no-first-run", "--hide-crash-restore-bubble",
+                "--no-first-run",
                 "--no-default-browser-check",
             ],
             viewport={"width": 1280, "height": 900},
@@ -4388,7 +4403,7 @@ def main():
             if failed_logins:
                 print("ERROR: Not logged in to: " + ", ".join(failed_logins))
                 print("Run:   python upload.py --login")
-                context.close()
+                close_context_gracefully(context)
                 sys.exit(1)
             print("All login checks passed. Starting uploads...")
 
@@ -4533,7 +4548,7 @@ def main():
                 # -- Browser restart (pre-VK memory cleanup) --
                 print("\n  -- Restarting browser (pre-VK memory cleanup) --")
                 try:
-                    context.close()
+                    close_context_gracefully(context)
                 except Exception:
                     pass
                 context = pw.chromium.launch_persistent_context(
@@ -4542,7 +4557,7 @@ def main():
                     executable_path=find_chrome(),
                     args=[
                         "--disable-blink-features=AutomationControlled",
-                        "--no-first-run", "--hide-crash-restore-bubble",
+                        "--no-first-run",
                         "--no-default-browser-check",
                     ],
                     viewport={"width": 1280, "height": 900},
@@ -4881,14 +4896,14 @@ def main():
                 if "DA" in platforms and not row.get("da_deviation_url", "").strip():
                     print("  -- Restarting browser (pre-DA cleanup) --")
                     try:
-                        context.close()
+                        close_context_gracefully(context)
                     except Exception:
                         pass
                     context = pw.chromium.launch_persistent_context(
                         user_data_dir=str(args.profile),
                         headless=False,
                         executable_path=find_chrome(),
-                        args=["--disable-blink-features=AutomationControlled","--no-first-run", "--hide-crash-restore-bubble","--no-default-browser-check"],
+                        args=["--disable-blink-features=AutomationControlled","--no-first-run","--no-default-browser-check"],
                         viewport={"width": 1280, "height": 900},
                         slow_mo=100,
                         timezone_id="Asia/Jerusalem",
@@ -5382,7 +5397,7 @@ def main():
             except Exception:
                 pass
         finally:
-            context.close()
+            close_context_gracefully(context)
 
     # Summary
     print(f"\n{'=' * 60}")
