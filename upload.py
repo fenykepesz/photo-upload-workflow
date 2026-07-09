@@ -53,6 +53,11 @@ def get_chromium_pid():
 
 
 _run_log_fh = None  # module-level handle set at run start
+_current_row_id    = None
+_current_platforms: set = set()
+_current_row_start = 0.0
+_current_csv_path  = None
+
 
 
 def write_run_log(event, detail, pid=None, fh=None):
@@ -3891,6 +3896,44 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 # ── Main ──────────────────────────────────────────────────────
 def main():
     args = parse_args()
+    import signal as _signal
+
+    def _signal_handler(signum, frame):
+        write_run_log("SIGNAL", "sig=" + str(signum) + " -- firing summary before exit",
+                      pid=get_chromium_pid())
+        if _current_row_id and _current_csv_path:
+            try:
+                fresh_rows = load_queue(_current_csv_path)
+                fresh_row = next(
+                    (r for r in fresh_rows if r["upload_id"] == _current_row_id), None
+                )
+                if fresh_row:
+                    ok_map = {
+                        "500PX": bool(fresh_row.get("url_500px", "").strip()),
+                        "35P":   bool(fresh_row.get("url_35p",   "").strip()),
+                        "VK":    bool(fresh_row.get("url_vk",    "").strip()),
+                        "X":     bool(fresh_row.get("url_x",     "").strip()),
+                        "BSKY":  bool(fresh_row.get("url_bsky",  "").strip()),
+                        "IG":    bool(fresh_row.get("url_ig",    "").strip()),
+                        "FB":    bool(fresh_row.get("url_fb",    "").strip()),
+                        "DA":    bool(fresh_row.get("da_deviation_url", "").strip()),
+                    }
+                    ok_map = {k: v for k, v in ok_map.items() if k in _current_platforms}
+                    vk_gr = fresh_row.get("vk_groups_result", "")
+                    send_run_summary(fresh_row, _current_platforms, ok_map,
+                                     vk_gr, _run_log_path, _current_row_start)
+                    any_ok = any(ok_map.values())
+                    save_row_update(_current_csv_path, _current_row_id, {
+                        "status":    "Partial" if any_ok else "Failed",
+                        "error_log": "SIGNAL " + str(signum) + ": process killed mid-run",
+                    })
+            except Exception:
+                pass
+        sys.exit(128 + signum)
+
+    _signal.signal(_signal.SIGTERM, _signal_handler)
+    _signal.signal(_signal.SIGINT,  _signal_handler)
+
     write_cache_stats()
 
     _proxy_url = os.environ.get('SOCKS5_PROXY', '').strip()
@@ -4358,7 +4401,12 @@ def main():
                 print(f"{'=' * 60}")
 
                 _row_start = time.time()
+                global _current_row_id, _current_platforms, _current_row_start, _current_csv_path
+                _current_row_id    = row["upload_id"]
+                _current_row_start = _row_start
+                _current_csv_path  = str(args.csv)
                 platforms = get_row_platforms(row)
+                _current_platforms = platforms
                 all_row_platforms = platforms  # full set — used for final status check
                 if args.platform:
                     requested = args.platform.strip().upper()
