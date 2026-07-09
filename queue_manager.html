@@ -2055,7 +2055,20 @@
     }
     let _pendingReconnectHandle = null;
     async function autoLoadCSV() {
-      // Try to re-read from disk using stored fileHandle (always fresh)
+      // 1. Try HTTP fetch from server (works when served via queue_server.py)
+      try {
+        const res = await fetch('/upload_queue.csv', { cache: 'no-store' });
+        if (res.ok) {
+          const txt = await res.text();
+          rows = parseCSV(txt);
+          cacheCSV(txt, 'upload_queue.csv');
+          document.getElementById('file-label').textContent = '📄 upload_queue.csv (server)';
+          document.getElementById('btn-save').disabled = false;
+          refresh();
+          return;
+        }
+      } catch (e) { /* not served via HTTP — fall through */ }
+      // 2. Try to re-read from disk using stored fileHandle (always fresh)
       const storedFH = await getStoredFileHandle();
       if (storedFH) {
         try {
