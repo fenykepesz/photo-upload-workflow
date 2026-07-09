@@ -4829,6 +4829,32 @@ def main():
                         if url_fb and url_fb not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_fb": url_fb})
 
+                # -- Browser restart (pre-DA: give DA the cleanest browser) --
+                if "DA" in platforms and not row.get("da_deviation_url", "").strip():
+                    print("  -- Restarting browser (pre-DA cleanup) --")
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+                    context = pw.chromium.launch_persistent_context(
+                        user_data_dir=str(args.profile),
+                        headless=False,
+                        executable_path=find_chrome(),
+                        args=["--disable-blink-features=AutomationControlled","--no-first-run","--no-default-browser-check"],
+                        viewport={"width": 1280, "height": 900},
+                        slow_mo=100,
+                        timezone_id="Asia/Jerusalem",
+                        locale="en-IL",
+                        geolocation={"latitude": 32.08, "longitude": 34.78},
+                        permissions=["geolocation"],
+                        **_proxy_kwarg,
+                    )
+                    page = context.new_page()
+                    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    apply_stealth(page)
+                    write_run_log("RESTART", "intentional pre-DA", pid=get_chromium_pid())
+                    print("  Browser restarted.")
+
                 # ── DA (must run last — consumes Sta.sh) ──────────
                 if "DA" in platforms:
                     already = row.get("da_deviation_url", "").strip()
@@ -5277,6 +5303,36 @@ def main():
                     traceback.print_exc()
                 write_run_log("ROW_DONE", row["upload_id"] + ": " + ", ".join(summary_detail), pid=get_chromium_pid())
 
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as _loop_exc:
+            import traceback as _tb
+            print(f"  FATAL: row crashed mid-run: {_loop_exc}")
+            _tb.print_exc()
+            write_run_log("CRASH", str(_loop_exc)[:120], pid=get_chromium_pid())
+            try:
+                _ok_map_c = {
+                    "500PX": True if ok_500px else ("skip" if row.get("url_500px","").strip() else False),
+                    "35P":   True if ok_35p  else ("skip" if row.get("url_35p","").strip()   else False),
+                    "VK":    True if ok_vk   else ("skip" if row.get("url_vk","").strip()    else False),
+                    "X":     True if ok_x    else ("skip" if row.get("url_x","").strip()     else False),
+                    "BSKY":  True if ok_bsky else ("skip" if row.get("url_bsky","").strip()  else False),
+                    "IG":    True if ok_ig   else ("skip" if row.get("url_ig","").strip()    else False),
+                    "FB":    True if ok_fb   else ("skip" if row.get("url_fb","").strip()    else False),
+                    "DA":    True if ok_da   else ("skip" if row.get("da_deviation_url","").strip() else False),
+                }
+                _vk_gr_c = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
+                send_run_summary(row, platforms, _ok_map_c, _vk_gr_c, _run_log_path, _row_start)
+            except Exception:
+                pass
+            try:
+                _any_ok = any([ok_500px, ok_35p, ok_vk, ok_x, ok_bsky, ok_ig, ok_fb, ok_da])
+                save_row_update(args.csv, row["upload_id"], {
+                    "status": "Partial" if _any_ok else "Failed",
+                    "error_log": f"CRASH: {str(_loop_exc)[:150]}",
+                })
+            except Exception:
+                pass
         finally:
             context.close()
 
