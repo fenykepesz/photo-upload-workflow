@@ -1035,7 +1035,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.8.0</span>
+      Photo Upload Queue <span>· v2.8.1</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -2054,6 +2054,7 @@
       } catch (e) { if (e.name !== 'AbortError') toast('Load error: ' + e.message, 'error'); }
     }
     let _pendingReconnectHandle = null;
+    let _loadedFromServer = false;
     async function autoLoadCSV() {
       // 1. Try HTTP fetch from server (works when served via queue_server.py)
       try {
@@ -2064,6 +2065,7 @@
           cacheCSV(txt, 'upload_queue.csv');
           document.getElementById('file-label').textContent = '📄 upload_queue.csv (server)';
           document.getElementById('btn-save').disabled = false;
+          _loadedFromServer = true;
           refresh();
           return;
         }
@@ -2127,6 +2129,14 @@
     async function saveCSV() {
       const csv = toCSV(rows);
       cacheCSV(csv, localStorage.getItem('csv_filename') || 'upload_queue.csv');
+      if (_loadedFromServer) {
+        try {
+          const res = await fetch('/save-csv', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: csv });
+          if (res.ok) { toast('Saved to server ✓', 'success'); }
+          else { toast('Server save failed: ' + res.status, 'error'); }
+        } catch (e) { toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       try {
         if (!fileHandle && 'showSaveFilePicker' in window) {
           fileHandle = await showSaveFilePicker({
