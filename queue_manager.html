@@ -1035,7 +1035,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.8.1</span>
+      Photo Upload Queue <span>· v2.8.2</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -2055,6 +2055,7 @@
     }
     let _pendingReconnectHandle = null;
     let _loadedFromServer = false;
+    let _loadedConfigFromServer = false;
     async function autoLoadCSV() {
       // 1. Try HTTP fetch from server (works when served via queue_server.py)
       try {
@@ -3159,6 +3160,7 @@ Return ONLY valid JSON, no markdown fences:
         const res = await fetch('config.json');
         if (res.ok) {
           configData = await res.json();
+          _loadedConfigFromServer = true;
           sApplyConfig(); sUpdateFileStatus();
           return;
         }
@@ -3327,6 +3329,14 @@ Return ONLY valid JSON, no markdown fences:
       obj.mua_lookup = getMuaLookup();
       obj.studio_lookup = getStudioLookup();
       const text = JSON.stringify(obj, null, 2);
+      if (_loadedConfigFromServer) {
+        try {
+          const res = await fetch('/save-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+          if (res.ok) { if (!silent) toast('config.json saved to server ✓', 'success'); }
+          else { if (!silent) toast('Server config save failed: ' + res.status, 'error'); }
+        } catch (e) { if (!silent) toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
         if (silent) { toast('config.json not linked — open it in Settings → Config to enable auto-save', 'warning'); return; }
         try {
