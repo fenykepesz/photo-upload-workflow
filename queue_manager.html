@@ -1035,7 +1035,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.8.2</span>
+      Photo Upload Queue <span>· v2.8.3</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -2056,6 +2056,8 @@
     let _pendingReconnectHandle = null;
     let _loadedFromServer = false;
     let _loadedConfigFromServer = false;
+    let _loadedDAFromServer = false;
+    let _loadedVKFromServer = false;
     async function autoLoadCSV() {
       // 1. Try HTTP fetch from server (works when served via queue_server.py)
       try {
@@ -2832,6 +2834,7 @@
         const res = await fetch('da_data.json');
         if (!res.ok) throw new Error('fetch failed');
         daData = await res.json();
+        _loadedDAFromServer = true;
         cacheDAData();
         populateDAChoices();
         if (interactive) toast('Galleries & Groups synced', 'success');
@@ -2928,6 +2931,7 @@
         const res = await fetch('VK_data.json');
         if (!res.ok) throw new Error('fetch failed');
         vkData = await res.json();
+        _loadedVKFromServer = true;
         cacheVKData();
         populateVKGroupsList();
         if (interactive) toast('VK Groups synced', 'success');
@@ -3437,6 +3441,14 @@ Return ONLY valid JSON, no markdown fences:
       if (!daData) { toast('No DA data loaded', 'error'); return; }
       const text = JSON.stringify(daData, null, 4);
       cacheDAData();
+      if (_loadedDAFromServer) {
+        try {
+          const res = await fetch('/save-da-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+          if (res.ok) { toast('da_data.json saved to server ✓', 'success'); }
+          else { toast('Server save failed: ' + res.status, 'error'); }
+        } catch (e) { toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       if (!daDataHandle && typeof showSaveFilePicker !== 'undefined') {
         try {
           daDataHandle = await showSaveFilePicker({ suggestedName: 'da_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
@@ -3494,6 +3506,14 @@ Return ONLY valid JSON, no markdown fences:
       const text = JSON.stringify(vkData, null, 2);
       cacheVKData();
       populateVKGroupsList();
+      if (_loadedVKFromServer) {
+        try {
+          const res = await fetch('/save-vk-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+          if (res.ok) { toast('VK_data.json saved to server ✓', 'success'); }
+          else { toast('Server save failed: ' + res.status, 'error'); }
+        } catch (e) { toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       if (!vkDataFileHandle && typeof showSaveFilePicker !== 'undefined') {
         try {
           vkDataFileHandle = await showSaveFilePicker({ suggestedName: 'VK_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
