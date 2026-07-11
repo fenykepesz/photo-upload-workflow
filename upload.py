@@ -88,7 +88,7 @@ def write_run_log(event, detail, pid=None, fh=None):
 
 
 def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_start):
-    """Send compact upload summary to Telegram uploads channel."""
+    """Send upload summary to Telegram as a timestamped log table."""
     import urllib.parse as _uparse
     import urllib.request as _ureq
 
@@ -107,61 +107,87 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
         return
 
     elapsed  = int(time.time() - run_start)
-    duration = f"{elapsed // 60}m {elapsed % 60:02d}s"
+    mins     = elapsed // 60
+    duration = f"~{mins} minute{'s' if mins != 1 else ''}" if mins >= 1 else f"{elapsed}s"
     title    = row.get("title", row["upload_id"])
     row_id   = row["upload_id"]
+    model    = row.get("model_name", "").strip()
 
-    PLAT_ORDER = [("500PX","500PX"),("35P","35P"),("VK","VK"),("X","X"),
-                  ("BSKY","BSKY"),("IG","IG"),("FB","FB"),("DA","DA")]
-    cells, any_failed = [], False
-    for key, label in PLAT_ORDER:
-        if key not in platforms:
-            continue
-        done = ok_map.get(key, False)
-        if done is True:
-            cells.append(label + " ✅")
-        elif done == "skip":
-            cells.append(label + " ⏭")
-        else:
-            cells.append(label + " ❌")
-            any_failed = True
-    grid_text = chr(10).join("  ".join(cells[i:i+4]) for i in range(0, len(cells), 4))
+    any_failed = any(v is False for v in ok_map.values())
+    n_ok       = sum(1 for v in ok_map.values() if v)
+    n_total    = len(ok_map)
 
-    vk_line = ""
-    if vk_groups_result:
-        groups    = [g for g in vk_groups_result.split(",") if g]
-        ok_count  = sum(1 for g in groups if g.endswith(":OK"))
-        fail_list = [g.split(":")[0] for g in groups if "FAILED" in g]
-        vk_line   = f"\nVK groups: {ok_count}/{len(groups)}"
-        if fail_list:
-            vk_line += "  (❌ " + ", ".join(fail_list) + ")"
-
-    pid_line = ""
+    # ── Build log table from run log file ────────────────────────────────────
+    table_rows = []
     if log_path and log_path.exists():
-        pids, restarts = set(), 0
+        vk_first_t     = None
+        vk_group_count = 0
+        vk_group_ok    = 0
+        _line_re = re.compile(
+            r'\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\s+(\S+)\s+PID=\S+(.*)'
+        )
         for _ln in log_path.read_text().splitlines():
-            _m = re.search(r"PID=(\d+)", _ln)
-            if _m:
-                pids.add(_m.group(1))
-            if "RESTART" in _ln and "intentional" in _ln:
-                restarts += 1
-        unplanned = max(0, len(pids) - 1 - restarts)
-        if unplanned > 0:
-            pid_line = f"\n⚠️ {unplanned} unplanned crash(es) — check log"
-        elif restarts:
-            pid_line = f"\n🔄 {restarts} planned restart(s)"
+            _m = _line_re.match(_ln)
+            if not _m:
+                continue
+            t, ev, rest = _m.group(1), _m.group(2), _m.group(3).strip()
 
-    da_url  = row.get("da_deviation_url", "").strip()
-    da_line = f"\n🔗 {da_url}" if da_url else ""
+            if ev == 'START':
+                table_rows.append(f"{t}  START")
+            elif ev == 'RESTART':
+                label = ('pre-VK' if 'VK' in rest else
+                         'pre-DA' if 'DA' in rest else
+                         rest.replace('intentional ', ''))
+                table_rows.append(f"{t}  RESTART   {label}")
+            elif ev.startswith('VK/'):
+                if vk_first_t is None:
+                    vk_first_t = t
+                vk_group_count += 1
+                if rest == 'OK':
+                    vk_group_ok += 1
+            elif ev == 'VK':
+                if rest == 'skipped':
+                    table_rows.append(f"{t}  VK        done in first run")
+                elif vk_group_count:
+                    ok_str = (f"  ({vk_group_ok}/{vk_group_count} groups OK)"
+                              if vk_group_ok < vk_group_count else
+                              f"  ({vk_group_count} groups)")
+                    status = 'SUCCESS' if rest == 'SUCCESS' else 'FAILED'
+                    table_rows.append(
+                        f"{vk_first_t}–{t}  VK {status}{ok_str}"
+                    )
+                    vk_first_t = None; vk_group_count = 0; vk_group_ok = 0
+                else:
+                    table_rows.append(f"{t}  VK        {rest}")
+            elif ev in ('500PX', '35PHOTO', 'X', 'BSKY', 'IG', 'FB', 'DA'):
+                status = 'done in first run' if rest == 'skipped' else rest
+                table_rows.append(f"{t}  {ev:<9} {status}")
+            elif ev == 'DONE':
+                table_rows.append(f"{t}  DONE      all {n_ok} platforms ✓")
 
-    icon = "✅" if not any_failed else "⚠️"
-    msg  = (
-        f"{icon} <b>{row_id}</b> — {title}\n"
-        f"⏱ {duration}\n\n"
-        f"{grid_text}"
-        f"{vk_line}"
-        f"{pid_line}"
-        f"{da_line}"
+    # ── Compose message ───────────────────────────────────────────────────────
+    if not any_failed:
+        header = f"✅ Complete success. All {n_total} platforms done in {duration}."
+    elif n_ok:
+        header = f"⚠️ Partial. {n_ok}/{n_total} platforms done in {duration}."
+    else:
+        header = f"❌ Failed after {duration}."
+
+    meta = []
+    if model:
+        meta.append(f"👤 {model}")
+    meta.append(f"🆔 {row_id}")
+    da_url = row.get("da_deviation_url", "").strip()
+    if da_url:
+        meta.append(f"🔗 {da_url}")
+
+    msg = (
+        f"{header}\n"
+        f"\n📸 <b>{title}</b>\n"
+        + "  ".join(meta)
+        + f"\n\n<pre>"
+        + "\n".join(table_rows)
+        + "</pre>"
     )
 
     payload = _uparse.urlencode({
