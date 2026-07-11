@@ -3940,8 +3940,18 @@ def main():
     import signal as _signal
 
     def _signal_handler(signum, frame):
+        # Gracefully shut down Chrome first so it cannot complete an in-flight upload
+        # on an already-dead Python process (which causes duplicate posts on retry).
+        # SIGTERM lets Chrome write exited_cleanly; safe to call from a signal handler.
+        _chrome_pid = get_chromium_pid()
+        if _chrome_pid:
+            try:
+                import os as _os
+                _os.kill(_chrome_pid, _signal.SIGTERM)
+            except Exception:
+                pass
         write_run_log("SIGNAL", "sig=" + str(signum) + " -- firing summary before exit",
-                      pid=get_chromium_pid())
+                      pid=_chrome_pid)
         if _current_row_id and _current_csv_path:
             try:
                 fresh_rows = load_queue(_current_csv_path)
@@ -3974,6 +3984,18 @@ def main():
 
     _signal.signal(_signal.SIGTERM, _signal_handler)
     _signal.signal(_signal.SIGINT,  _signal_handler)
+
+    # Kill any Chrome left over from a previously interrupted run.
+    # Prevents an orphaned browser from completing an upload that the new run
+    # would then repeat, causing duplicate posts.
+    _stale_pid = get_chromium_pid()
+    if _stale_pid:
+        try:
+            import os as _os
+            _os.kill(_stale_pid, _signal.SIGTERM)
+            time.sleep(1)
+        except Exception:
+            pass
 
     write_cache_stats()
 
