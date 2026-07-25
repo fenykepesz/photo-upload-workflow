@@ -285,6 +285,14 @@ def copy_chrome_profile(src_user_data: Path, dest: Path):
 # ── Constants ─────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
 LOGS_DIR = SCRIPT_DIR / "logs"
+ERROR_SHOTS_DIR = LOGS_DIR / "errors"
+
+
+def error_shot_path(upload_id, platform_slug):
+    """Path for a failure screenshot, under logs/errors/ (not the repo root)."""
+    ERROR_SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%H%M%S")
+    return ERROR_SHOTS_DIR / f"error_{upload_id}_{platform_slug}_{ts}.png"
 DEFAULT_CSV = SCRIPT_DIR / "upload_queue.csv"
 DEFAULT_CONFIG = SCRIPT_DIR / "config.json"
 BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
@@ -295,6 +303,30 @@ SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY", "IG"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 IMAGE_CACHE_DIR = SCRIPT_DIR / "image_cache"  # persistent — survives re-runs, never auto-deleted
 CACHE_STATS_FILE = SCRIPT_DIR / "image_cache_stats.json"
+
+
+IMAGE_CACHE_MAX_AGE_DAYS = 60
+
+
+def prune_image_cache():
+    """Delete cached images older than IMAGE_CACHE_MAX_AGE_DAYS.
+
+    Uploaded rows never need their image again; the cache exists only for
+    re-upload resilience within a queue cycle. 60 days comfortably covers that.
+    """
+    if not IMAGE_CACHE_DIR.exists():
+        return
+    cutoff = time.time() - IMAGE_CACHE_MAX_AGE_DAYS * 86400
+    removed = 0
+    for f in IMAGE_CACHE_DIR.iterdir():
+        if f.is_file() and f.stat().st_mtime < cutoff:
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+    if removed:
+        print(f"  Pruned {removed} cached image(s) older than {IMAGE_CACHE_MAX_AGE_DAYS} days")
 
 
 def write_cache_stats():
@@ -396,36 +428,58 @@ def load_queue(path):
 
 
 def save_row_update(csv_path, upload_id, updates):
-    """Read CSV, update one row, write back. Crash-safe per-row updates."""
-    rows = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames
-        rows = list(reader)
+    """Read CSV, update one row, write back. Crash-safe per-row updates.
 
-    for row in rows:
-        if row["upload_id"] == upload_id:
-            row.update(updates)
-            break
+    Holds an exclusive flock on a sidecar .lock file for the whole
+    read-modify-write so a concurrent writer (queue_server.py, if it takes
+    the same lock) cannot interleave and lose updates.
+    """
+    lock_fh = None
+    try:
+        import fcntl
+        lock_fh = open(Path(csv_path).with_suffix(".csv.lock"), "w")
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+    except (ImportError, OSError):
+        lock_fh = None  # Windows or lock failure — proceed unlocked
 
-    # Add any new columns from updates that aren't in the CSV yet
-    for key in updates:
-        if key not in fieldnames:
-            fieldnames.append(key)
+    try:
+        rows = []
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            rows = list(reader)
 
-    tmp_path = Path(csv_path).with_suffix(".csv.tmp")
-    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
-        writer.writeheader()
-        writer.writerows(rows)
-    for attempt in range(5):
-        try:
-            os.replace(tmp_path, csv_path)
-            break
-        except PermissionError:
-            if attempt == 4:
-                raise
-            time.sleep(1)
+        for row in rows:
+            if row["upload_id"] == upload_id:
+                row.update(updates)
+                break
+
+        # Add any new columns from updates that aren't in the CSV yet
+        for key in updates:
+            if key not in fieldnames:
+                fieldnames.append(key)
+
+        tmp_path = Path(csv_path).with_suffix(".csv.tmp")
+        with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
+            writer.writeheader()
+            writer.writerows(rows)
+        for attempt in range(5):
+            try:
+                os.replace(tmp_path, csv_path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(1)
+    finally:
+        if lock_fh is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fh, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            lock_fh.close()
 
 
 # ── Row filtering ─────────────────────────────────────────────
@@ -480,9 +534,14 @@ def filter_rows(rows, target_id=None):
                     print(f"NOTE: {row['upload_id']} is scheduled for {sched_date} {sched_time} — not yet due")
                     continue
             else:
-                # Batch run: only upload rows scheduled for today
-                if scheduled.date() != today:
+                # Batch run: rows scheduled today, plus catch-up for rows
+                # missed on previous days (server down, run skipped) up to
+                # 7 days back. Future rows are never picked up early.
+                days_late = (today - scheduled.date()).days
+                if days_late < 0 or days_late > 7:
                     continue
+                if days_late > 0:
+                    print(f"NOTE: {row['upload_id']} was scheduled {days_late} day(s) ago — catching up")
 
         # Must have at least one supported platform
         platforms = get_row_platforms(row)
@@ -573,6 +632,49 @@ def run_login_checks(page, platforms):
             failed.append(plat)
     print()
     return failed
+
+
+# ── Post-publish URL capture (best effort) ────────────────────
+def capture_post_url(page, platform, handle=""):
+    """Best-effort harvest of the real post URL right after publishing.
+
+    Returns "" when nothing could be found — callers fall back to the
+    legacy "UPLOADED" sentinel, so this never changes success/failure
+    semantics, it only enriches the CSV when a URL is detectable.
+    Never raises.
+    """
+    try:
+        if platform == "X":
+            # X shows a "Your post was sent" toast with a View link
+            link = page.locator('[data-testid="toast"] a[href*="/status/"]').first
+            if link.count() > 0:
+                href = link.get_attribute("href") or ""
+                if href.startswith("/"):
+                    href = "https://x.com" + href
+                return href
+        elif platform == "500PX":
+            # After publish the success screen links to the new photo
+            link = page.locator('a[href*="/photo/"]').first
+            if link.count() > 0:
+                href = link.get_attribute("href") or ""
+                if href.startswith("/"):
+                    href = "https://500px.com" + href
+                return href
+        elif platform == "VK":
+            # Visit own wall and grab the newest post link. Best effort —
+            # a pinned post may be matched instead of the new one.
+            h = (handle or "").strip().lstrip("@")
+            if h:
+                page.goto(f"https://vk.com/{h}", wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(2000)
+                href = page.evaluate("""() => {
+                    const a = document.querySelector('a[href*="wall"][href*="_"]');
+                    return a ? a.href : '';
+                }""")
+                return href or ""
+    except Exception:
+        pass
+    return ""
 
 
 # ── Description & Tags ────────────────────────────────────────
@@ -923,38 +1025,33 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     title = get_effective_title(row)
     nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
 
-    def js_escape_500px(s):
-        return s.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("'", "\\'").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
-
-    # Title — React controlled input, use native setter + events
-    print(f"  Setting metadata: title, description, category, keywords...")
-    page.evaluate(f"""
-        (() => {{
-            const el = document.querySelector('#editpanel-title');
-            if (!el) return;
-            el.focus();
-            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-            setter.call(el, '{js_escape_500px(title)}');
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            el.dispatchEvent(new Event('change', {{bubbles: true}}));
-            el.dispatchEvent(new Event('blur', {{bubbles: true}}));
-        }})()
-    """)
+    # Title — React controlled input, use native setter + events.
+    # Text is passed as an evaluate argument (never interpolated into JS
+    # source) so no character in a title can break the script.
+    print("  Setting metadata: title, description, category, keywords...")
+    page.evaluate("""(text) => {
+        const el = document.querySelector('#editpanel-title');
+        if (!el) return;
+        el.focus();
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(el, text);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+        el.dispatchEvent(new Event('blur', {bubbles: true}));
+    }""", title)
     page.wait_for_timeout(500)
 
     # Description — React controlled textarea, use native setter + events
-    page.evaluate(f"""
-        (() => {{
-            const el = document.querySelector('#edit-panel-description');
-            if (!el) return;
-            el.focus();
-            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-            setter.call(el, `{js_escape_500px(desc_full)}`);
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            el.dispatchEvent(new Event('change', {{bubbles: true}}));
-            el.dispatchEvent(new Event('blur', {{bubbles: true}}));
-        }})()
-    """)
+    page.evaluate("""(text) => {
+        const el = document.querySelector('#edit-panel-description');
+        if (!el) return;
+        el.focus();
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(el, text);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+        el.dispatchEvent(new Event('blur', {bubbles: true}));
+    }""", desc_full)
     page.wait_for_timeout(500)
 
     # Category — use JS click to bypass overlay (image preview intercepts pointer events)
@@ -1127,7 +1224,10 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
 
     page.wait_for_timeout(5000)
     print("  Upload complete")
-    return {"success": True, "url_500px": "UPLOADED", "error": ""}
+    real_url = capture_post_url(page, "500PX")
+    if real_url:
+        print(f"  Post URL: {real_url}")
+    return {"success": True, "url_500px": real_url or "UPLOADED", "error": ""}
 
 
 # ── 35photo Upload ────────────────────────────────────────────
@@ -1511,7 +1611,11 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
             return {"success": False, "url_vk": "", "error": "Could not find Publish button"}
         page.wait_for_timeout(5000)
         print("  Wall post created")
-        wall_url = "UPLOADED"
+        # Harvest the real wall-post URL from own profile. Safe to navigate
+        # away here — the group-suggestion loop below does its own goto per group.
+        wall_url = capture_post_url(page, "VK", handle=photographer) or "UPLOADED"
+        if wall_url != "UPLOADED":
+            print(f"  Post URL: {wall_url}")
 
     wall_result = {"success": True, "url_vk": wall_url, "error": "", "vk_groups_result": ""}
 
@@ -2472,7 +2576,10 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
 
     page.wait_for_timeout(5000)
     print("  Tweet posted")
-    return {"success": True, "url_x": "UPLOADED", "error": ""}
+    real_url = capture_post_url(page, "X")
+    if real_url:
+        print(f"  Post URL: {real_url}")
+    return {"success": True, "url_x": real_url or "UPLOADED", "error": ""}
 
 
 # ── Bluesky Upload ──────────────────────────────────────────────
@@ -3487,22 +3594,18 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     title = get_effective_title(row)
     nsfw_flag = row.get("da_nsfw_flag", "FALSE").strip().upper()
 
-    def js_escape(s):
-        return s.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("'", "\\'").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
-
-    # 1. TITLE — input[name="title"] (React controlled)
+    # 1. TITLE — input[name="title"] (React controlled). Text passed as an
+    # evaluate argument, never interpolated into the JS source.
     print("  Setting title...")
-    page.evaluate(f"""
-        (() => {{
-            const el = document.querySelector('input[name="title"]');
-            if (!el) return 'not_found';
-            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-            setter.call(el, '{js_escape(title)}');
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            el.dispatchEvent(new Event('change', {{bubbles: true}}));
-            return el.value;
-        }})()
-    """)
+    page.evaluate("""(text) => {
+        const el = document.querySelector('input[name="title"]');
+        if (!el) return 'not_found';
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(el, text);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+        return el.value;
+    }""", title)
 
     # 2. MATURE CHECKBOX — input[name="matureContent"]
     if nsfw_flag == "TRUE":
@@ -3564,16 +3667,14 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 
     # 4. DESCRIPTION — TipTap ProseMirror contenteditable
     print("  Setting description...")
-    page.evaluate(f"""
-        (() => {{
-            const el = document.querySelector('.tiptap.ProseMirror, [contenteditable="true"]');
-            if (!el) return 'not_found';
-            el.focus();
-            document.execCommand('selectAll');
-            document.execCommand('insertText', false, `{js_escape(desc_full)}`);
-            return 'set';
-        }})()
-    """)
+    page.evaluate("""(text) => {
+        const el = document.querySelector('.tiptap.ProseMirror, [contenteditable="true"]');
+        if (!el) return 'not_found';
+        el.focus();
+        document.execCommand('selectAll');
+        document.execCommand('insertText', false, text);
+        return 'set';
+    }""", desc_full)
 
     # ── Gallery selection (dropdown, not a modal) ───────────────
     galleries = [g.strip() for g in row.get("da_gallery", "Featured").split(",") if g.strip()]
@@ -3941,7 +4042,20 @@ def main():
     args = parse_args()
     import signal as _signal
 
+    _sig_state = {"fired": False}
+
     def _signal_handler(signum, frame):
+        # Re-entrancy guard — a second signal during cleanup exits immediately.
+        if _sig_state["fired"]:
+            os._exit(128 + signum)
+        _sig_state["fired"] = True
+        # Watchdog — if cleanup itself wedges (network stall in the Telegram
+        # call, stuck Playwright event loop), SIGALRM force-exits after 30s.
+        try:
+            _signal.signal(_signal.SIGALRM, lambda *_a: os._exit(128 + signum))
+            _signal.alarm(30)
+        except (AttributeError, ValueError, OSError):
+            pass  # SIGALRM unavailable (Windows) or not in main thread
         # Gracefully shut down Chrome first so it cannot complete an in-flight upload
         # on an already-dead Python process (which causes duplicate posts on retry).
         # SIGTERM lets Chrome write exited_cleanly; safe to call from a signal handler.
@@ -3999,6 +4113,7 @@ def main():
         except Exception:
             pass
 
+    prune_image_cache()
     write_cache_stats()
 
     _proxy_url = os.environ.get('SOCKS5_PROXY', '').strip()
@@ -4531,8 +4646,7 @@ def main():
                             write_run_log("500PX", "FAILED", pid=get_chromium_pid())
                             errors.append(f"500px: {err}")
                             # Screenshot on failure
-                            ts = datetime.now().strftime("%H%M%S")
-                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_500px_{ts}.png"
+                            shot_path = error_shot_path(row['upload_id'], "500px")
                             try:
                                 page.screenshot(path=str(shot_path))
                                 print(f"  Error screenshot: {shot_path}")
@@ -4581,8 +4695,7 @@ def main():
                             write_run_log("35PHOTO", "FAILED", pid=get_chromium_pid())
                             errors.append(f"35photo: {err}")
                             # Screenshot on failure
-                            ts = datetime.now().strftime("%H%M%S")
-                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_35p_{ts}.png"
+                            shot_path = error_shot_path(row['upload_id'], "35p")
                             try:
                                 page.screenshot(path=str(shot_path))
                                 print(f"  Error screenshot: {shot_path}")
@@ -4995,8 +5108,7 @@ def main():
                             write_run_log("DA", "FAILED", pid=get_chromium_pid())
                             errors.append(f"DA: {err}")
                             # Screenshot on failure
-                            ts = datetime.now().strftime("%H%M%S")
-                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_da_{ts}.png"
+                            shot_path = error_shot_path(row['upload_id'], "da")
                             try:
                                 page.screenshot(path=str(shot_path))
                                 print(f"  Error screenshot: {shot_path}")
@@ -5025,6 +5137,13 @@ def main():
                     retry_order = [p for p in ["500PX", "35P", "VK", "X", "BSKY", "IG", "FB", "DA"] if p in to_retry]
                     print(f"\n  ── Retry pass ({', '.join(retry_order)}) — waiting 10s ──")
                     time.sleep(10)
+                    # Reset page state — the failed attempt may have left a
+                    # stuck modal or half-filled form behind.
+                    try:
+                        page.goto("about:blank", timeout=10000)
+                        page.wait_for_timeout(500)
+                    except Exception:
+                        pass
 
                     if "500PX" in to_retry:
                         errors = [e for e in errors if not e.startswith("500px:")]
@@ -5040,12 +5159,14 @@ def main():
                         if result_500px["success"]:
                             ok_500px = True
                             print(f"  500px: SUCCESS (retry, {time.time()-t0_500px:.0f}s) — {result_500px.get('url_500px', '')}")
+                            write_run_log("500PX", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_500px.get("url_500px", "")
                             if _u and _u not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"url_500px": _u})
                         else:
                             err = result_500px.get("error", "unknown")
                             print(f"  500px: FAILED (retry, {time.time()-t0_500px:.0f}s) — {err}")
+                            write_run_log("500PX", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"500px: {err}")
 
                     if "35P" in to_retry:
@@ -5062,12 +5183,14 @@ def main():
                         if result_35p["success"]:
                             ok_35p = True
                             print(f"  35photo: SUCCESS (retry, {time.time()-t0_35p:.0f}s) — {result_35p.get('url_35p', '')}")
+                            write_run_log("35PHOTO", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_35p.get("url_35p", "")
                             if _u and _u not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"url_35p": _u})
                         else:
                             err = result_35p.get("error", "unknown")
                             print(f"  35photo: FAILED (retry, {time.time()-t0_35p:.0f}s) — {err}")
+                            write_run_log("35PHOTO", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"35photo: {err}")
 
                     if "VK" in to_retry:
@@ -5101,6 +5224,7 @@ def main():
                         if result_vk["success"]:
                             ok_vk = True
                             print(f"  VK: SUCCESS (retry, {time.time()-t0_vk:.0f}s) — {result_vk.get('url_vk', '')}")
+                            write_run_log("VK", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_vk.get("url_vk", "")
                             vk_updates = {}
                             if _u and _u not in ("NO_SUBMIT",):
@@ -5113,6 +5237,7 @@ def main():
                         else:
                             err = result_vk.get("error", "unknown")
                             print(f"  VK: FAILED (retry, {time.time()-t0_vk:.0f}s) — {err}")
+                            write_run_log("VK", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"VK: {err}")
 
                     if "X" in to_retry:
@@ -5140,12 +5265,14 @@ def main():
                         if result_x["success"]:
                             ok_x = True
                             print(f"  X: SUCCESS (retry, {time.time()-t0_x:.0f}s) — {result_x.get('url_x', '')}")
+                            write_run_log("X", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_x.get("url_x", "")
                             if _u and _u not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"url_x": _u})
                         else:
                             err = result_x.get("error", "unknown")
                             print(f"  X: FAILED (retry, {time.time()-t0_x:.0f}s) — {err}")
+                            write_run_log("X", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"X: {err}")
 
                     if "BSKY" in to_retry:
@@ -5248,12 +5375,14 @@ def main():
                         if result_ig["success"]:
                             ok_ig = True
                             print(f"  IG: SUCCESS (retry, {time.time()-t0_ig:.0f}s) — {result_ig.get('url_ig', '')}")
+                            write_run_log("IG", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_ig.get("url_ig", "")
                             if _u and _u not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"url_ig": _u})
                         else:
                             err = result_ig.get("error", "unknown")
                             print(f"  IG: FAILED (retry, {time.time()-t0_ig:.0f}s) — {err}")
+                            write_run_log("IG", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"IG: {err}")
 
                     if "FB" in to_retry:
@@ -5290,12 +5419,14 @@ def main():
                         if result_fb["success"]:
                             ok_fb = True
                             print(f"  FB: SUCCESS (retry, {time.time()-t0_fb:.0f}s) — {result_fb.get('url_fb', '')}")
+                            write_run_log("FB", "SUCCESS (retry)", pid=get_chromium_pid())
                             _u = result_fb.get("url_fb", "")
                             if _u and _u not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"url_fb": _u})
                         else:
                             err = result_fb.get("error", "unknown")
                             print(f"  FB: FAILED (retry, {time.time()-t0_fb:.0f}s) — {err}")
+                            write_run_log("FB", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"FB: {err}")
 
                     if "DA" in to_retry:
@@ -5312,15 +5443,16 @@ def main():
                         if result_da["success"]:
                             ok_da = True
                             print(f"  DA: SUCCESS (retry, {time.time()-t0_da:.0f}s) — {result_da.get('deviation_url', '')}")
+                            write_run_log("DA", "SUCCESS (retry)", pid=get_chromium_pid())
                             da_url = result_da.get("deviation_url", "")
                             if da_url and da_url not in ("NO_SUBMIT",):
                                 save_row_update(args.csv, row["upload_id"], {"da_deviation_url": da_url})
                         else:
                             err = result_da.get("error", "unknown")
                             print(f"  DA: FAILED (retry, {time.time()-t0_da:.0f}s) — {err}")
+                            write_run_log("DA", "FAILED (retry)", pid=get_chromium_pid())
                             errors.append(f"DA: {err}")
-                            ts = datetime.now().strftime("%H%M%S")
-                            shot_path = SCRIPT_DIR / f"error_{row['upload_id']}_da_retry_{ts}.png"
+                            shot_path = error_shot_path(row['upload_id'], "da_retry")
                             try:
                                 page.screenshot(path=str(shot_path))
                                 print(f"  Error screenshot: {shot_path}")
