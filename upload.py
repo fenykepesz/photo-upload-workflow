@@ -564,9 +564,11 @@ def run_login_checks(page, platforms):
     print("\n── Pre-flight login check ──────────────────────────────")
     failed = []
     for plat in ordered:
+        write_run_log("LOGIN_CHECK", f"{plat} checking", pid=get_chromium_pid())
         ok = verify_login(page, plat)
         status = "✓ PASS" if ok else "✗ FAIL"
         print(f"  {plat:<8} {status}")
+        write_run_log("LOGIN_CHECK", f"{plat} {'PASS' if ok else 'FAIL'}", pid=get_chromium_pid())
         if not ok:
             failed.append(plat)
     print()
