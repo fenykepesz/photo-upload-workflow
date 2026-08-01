@@ -3,11 +3,20 @@ upload_queue.csv
 config.json
 da_data.json
 
+# VPS-only wrapper/integration scripts — deliberately never committed,
+# same treatment as queue_server.py (which also has no local copy).
+# Belt-and-suspenders: these already don't exist in this local clone.
+run_upload.sh
+run_login.sh
+run_nosubmit.sh
+erikrozman_publish.py
+
 # Temporary local photo files used during upload
 temp/
 
 # Persistent image cache — survives re-runs, never committed
 image_cache/
+image_cache_stats.json
 
 # macOS
 .DS_Store

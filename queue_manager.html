@@ -846,6 +846,33 @@
       border-left: 3px solid var(--accent);
     }
 
+    /* ── SAVE-FAIL BANNER ── */
+    /* Persistent (no auto-dismiss, unlike .toast) -- stays up until a save
+       actually succeeds again, so a save failure can't quietly get missed
+       the way a 3.5s toast can during heads-down data entry. */
+    .save-fail-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      background: var(--error);
+      color: #fff;
+      padding: 10px 20px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .save-fail-banner .btn {
+      background: #fff;
+      color: var(--error);
+      border: none;
+    }
+
     @keyframes slide-in {
       from {
         transform: translateX(16px);
@@ -1925,6 +1952,11 @@
 
   <div class="toasts" id="toasts"></div>
 
+  <div id="save-fail-banner" class="save-fail-banner" style="display:none">
+    <span>⚠ Not saved to server — check your connection. Last attempt failed at <span id="save-fail-time"></span>.</span>
+    <button class="btn btn-sm" onclick="retrySave()">Retry now</button>
+  </div>
+
   <script>
     // ── STATE ──────────────────────────────────────────────────────────────────────
     let rows = [], filtered = [], selId = null, editId = null, fileHandle = null;
@@ -2129,16 +2161,44 @@
         loadCSV();
       }
     }
+    // Tracks whether the most recent save attempt failed, so repeated
+    // failures during an outage update the same persistent banner instead
+    // of stacking alert() popups or relying on an easy-to-miss toast.
+    let _saveFailing = false;
+
+    function onSaveOk() {
+      if (_saveFailing) {
+        _saveFailing = false;
+        document.getElementById('save-fail-banner').style.display = 'none';
+        toast('Reconnected — saved ✓', 'success');
+      } else {
+        toast('Saved to server ✓', 'success');
+      }
+    }
+
+    function onSaveFail(detail) {
+      const firstFailure = !_saveFailing;
+      _saveFailing = true;
+      document.getElementById('save-fail-time').textContent = new Date().toLocaleTimeString();
+      document.getElementById('save-fail-banner').style.display = 'flex';
+      if (firstFailure) {
+        alert('Save failed: ' + detail + '\n\nYour change is still here in the browser, but it has NOT reached the server. Keep this tab open and click "Retry now" (top of page) once your connection is back.');
+      }
+    }
+
+    async function retrySave() {
+      await saveCSV();
+    }
+
     async function saveCSV() {
       const csv = toCSV(rows);
       cacheCSV(csv, localStorage.getItem('csv_filename') || 'upload_queue.csv');
       if (_loadedFromServer) {
         try {
           const res = await fetch('/save-csv', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: csv });
-          if (res.ok) { toast('Saved to server ✓', 'success'); }
-          else { toast('Server save failed: ' + res.status, 'error'); }
-        } catch (e) { toast('Save error: ' + e.message, 'error'); }
-        return;
+          if (res.ok) { onSaveOk(); return true; }
+          else { onSaveFail('server returned ' + res.status); return false; }
+        } catch (e) { onSaveFail(e.message); return false; }
       }
       try {
         if (!fileHandle && 'showSaveFilePicker' in window) {
@@ -2150,14 +2210,19 @@
         if (fileHandle) {
           const w = await fileHandle.createWritable();
           await w.write(csv); await w.close();
-          toast('Saved ✓', 'success');
+          onSaveOk();
+          return true;
         } else {
           const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
           Object.assign(document.createElement('a'), { href: url, download: 'upload_queue.csv' }).click();
           URL.revokeObjectURL(url);
           toast('Downloaded CSV', 'info');
+          return true;
         }
-      } catch (e) { if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error'); }
+      } catch (e) {
+        if (e.name !== 'AbortError') { onSaveFail(e.message); return false; }
+        return false;
+      }
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
@@ -2426,15 +2491,15 @@
       toast('Status → ' + s, 'info');
     }
     function deleteSel() { if (selId) deleteById(selId); }
-    function deleteById(id) {
+    async function deleteById(id) {
       if (!confirm(`Delete ${id}?`)) return;
       rows = rows.filter(r => r.upload_id !== id);
       if (selId === id) closeDetail();
-      refresh(); toast('Deleted', 'info');
-      saveCSV();
+      refresh();
+      if (await saveCSV()) toast('Deleted', 'info');
     }
 
-    function resetById(id) {
+    async function resetById(id) {
       const r = rows.find(x => x.upload_id === id);
       if (!r) return;
       const urls = ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb','url_ig']
@@ -2447,11 +2512,11 @@
         r[k] = '';
       }
       r.status = 'Approved';
-      selectRow(id); refresh(); saveCSV();
-      toast(`Reset ${id} — ready for re-upload`, 'success');
+      selectRow(id); refresh();
+      if (await saveCSV()) toast(`Reset ${id} — ready for re-upload`, 'success');
     }
 
-    function retryFailed(id) {
+    async function retryFailed(id) {
       const r = rows.find(x => x.upload_id === id);
       if (!r) return;
       if (r.status !== 'Partial' && r.status !== 'Failed') {
@@ -2476,8 +2541,8 @@
       if (!confirm(msg)) return;
       r.error_log = '';
       r.status = 'Approved';
-      selectRow(id); refresh(); saveCSV();
-      toast(`${id} — retrying ${willRetry.join(', ')}`, 'success');
+      selectRow(id); refresh();
+      if (await saveCSV()) toast(`${id} — retrying ${willRetry.join(', ')}`, 'success');
     }
 
     // ── MODAL ──────────────────────────────────────────────────────────────────────
@@ -2541,6 +2606,7 @@
       document.getElementById('p-da').checked = true;
       updateRequiredFields();
       document.getElementById('overlay').classList.add('open');
+      document.querySelector('.modal-body').scrollTop = 0;
     }
     function openEditModal() { if (selId) openEditById(selId); }
     function openEditById(id) {
@@ -2630,9 +2696,10 @@
       if (r.mua_name) applyMuaLookup(r.mua_name);
       if (r.studio_name) applyStudioLookup(r.studio_name);
       document.getElementById('overlay').classList.add('open');
+      document.querySelector('.modal-body').scrollTop = 0;
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
-    function saveEntry() {
+    async function saveEntry() {
       const date = document.getElementById('m-date').value;
       const nsfw = document.getElementById('m-nsfw').value.trim();
       if (!date) { toast('Please set a scheduled date', 'error'); return; }
@@ -2711,13 +2778,12 @@
         error_log: existing?.error_log || '',
       };
 
+      const wasEdit = !!editId;
       if (editId) {
         const idx = rows.findIndex(r => r.upload_id === editId);
         if (idx >= 0) rows[idx] = entry;
-        toast('Updated ✓', 'success');
       } else {
         rows.push(entry);
-        toast(`Added ${entry.upload_id}`, 'success');
       }
 
       saveModelName(entry.model_name);
@@ -2732,7 +2798,12 @@
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
-      saveCSV();
+      // Wait for the save to actually reach the server before calling this
+      // done -- previously fire-and-forget, which is how 6 rows were lost
+      // to a silent connectivity gap on 2026-08-01 with no visible warning.
+      if (await saveCSV()) {
+        toast(wasEdit ? 'Updated ✓' : `Added ${entry.upload_id} ✓ (saved)`, 'success');
+      }
     }
 
     // ── UTILS ──────────────────────────────────────────────────────────────────────
@@ -4618,6 +4689,8 @@ Return ONLY valid JSON, no markdown fences:
 
       closeAiPanel();
       toast('AI metadata applied', 'success');
+      const modelField = document.getElementById('m-model-name');
+      if (modelField) modelField.focus();
     }
 
     function closeAiPanel() {
