@@ -1062,7 +1062,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.8.4</span>
+      Photo Upload Queue <span>· v2.8.5</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -1914,12 +1914,12 @@
       <!-- ── Studios panel ── -->
       <div class="s-panel" id="s-tab-studio">
         <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
-          Map studio names to platform handles for tagging. Set <strong>Studio</strong> in the photo form to include a studio credit line and auto-tag them on upload.
+          Map studio names to platform handles for tagging and a default location. Set <strong>Studio</strong> in the photo form to include a studio credit line, auto-tag them on upload, and auto-fill the Location field if it's still empty.
         </div>
         <div class="s-section-title">Studio Lookup Table</div>
         <table class="s-data-table" id="studio-lookup-table">
-          <thead><tr><th>Name</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th>FB Tags</th><th style="width:90px"></th></tr></thead>
-          <tbody id="studio-lookup-tbody"><tr><td colspan="7" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr></tbody>
+          <thead><tr><th>Name</th><th>Location</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th>FB Tags</th><th style="width:90px"></th></tr></thead>
+          <tbody id="studio-lookup-tbody"><tr><td colspan="8" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr></tbody>
         </table>
         <div style="margin-top:10px"><button class="btn btn-sm" onclick="studioAddNew()">+ Add Studio</button></div>
 
@@ -1927,6 +1927,7 @@
           <div class="s-section-title" style="margin-bottom:8px" id="studio-form-title">Add Studio</div>
           <input type="hidden" id="studio-edit-name">
           <div class="s-field"><span class="s-field-label">Name</span><input type="text" id="studio-name" placeholder="e.g. Studio Lumière" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">Location</span><input type="text" id="studio-location" placeholder="e.g. Budapest, Hungary" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">X Handle</span><input type="text" id="studio-x-handle" placeholder="e.g. studiolumiere (without @)" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="studio-bsky-handle" placeholder="e.g. studiolumiere.bsky.social" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">IG Handle</span><input type="text" id="studio-ig-handle" placeholder="e.g. studiolumiere (without @)" autocomplete="off"></div>
@@ -4092,11 +4093,12 @@ Return ONLY valid JSON, no markdown fences:
       if (!tbody) return;
       const arr = getStudioLookup();
       if (!arr.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr>';
         return;
       }
       tbody.innerHTML = arr.map(m => `<tr>
         <td>${h(m.name)}</td>
+        <td style="font-size:11px">${h(m.location || '—')}</td>
         <td style="font-size:11px">${h(m.x_handle || '—')}</td>
         <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
         <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
@@ -4111,7 +4113,7 @@ Return ONLY valid JSON, no markdown fences:
     function studioAddNew() {
       document.getElementById('studio-form-title').textContent = 'Add Studio';
       document.getElementById('studio-edit-name').value = '';
-      ['studio-name','studio-x-handle','studio-bsky-handle','studio-ig-handle','studio-vk-handle','studio-fb-tags'].forEach(id => document.getElementById(id).value = '');
+      ['studio-name','studio-location','studio-x-handle','studio-bsky-handle','studio-ig-handle','studio-vk-handle','studio-fb-tags'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('studio-lookup-form').style.display = '';
       document.getElementById('studio-name').focus();
     }
@@ -4121,6 +4123,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('studio-form-title').textContent = 'Edit Studio';
       document.getElementById('studio-edit-name').value = m.name;
       document.getElementById('studio-name').value = m.name;
+      document.getElementById('studio-location').value = m.location || '';
       document.getElementById('studio-x-handle').value = m.x_handle || '';
       document.getElementById('studio-bsky-handle').value = m.bsky_handle || '';
       document.getElementById('studio-ig-handle').value = m.ig_handle || '';
@@ -4140,6 +4143,7 @@ Return ONLY valid JSON, no markdown fences:
       if (!name) { toast('Name is required', 'error'); return; }
       const entry = {
         name,
+        location:    document.getElementById('studio-location').value.trim(),
         x_handle:    document.getElementById('studio-x-handle').value.trim(),
         bsky_handle: document.getElementById('studio-bsky-handle').value.trim(),
         ig_handle:   document.getElementById('studio-ig-handle').value.trim(),
@@ -4164,6 +4168,10 @@ Return ONLY valid JSON, no markdown fences:
       if (!studioName) return;
       const m = getStudioLookup().find(x => x.name.toLowerCase() === studioName.toLowerCase());
       if (!m) return;
+      if (m.location) {
+        const locEl = document.getElementById('m-loc-500px');
+        if (locEl && !locEl.value.trim()) locEl.value = m.location;
+      }
       function appendHandle(elId, handle) {
         if (!handle) return;
         const el = document.getElementById(elId);
