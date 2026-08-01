@@ -314,6 +314,7 @@ Film info is also included in X.com and Bluesky posts (inserted between the titl
 | **DA always last** | 500px, 35photo, VK, X, Bluesky, and Facebook run first; Sta.sh is preserved until DA is done |
 | **Error screenshots** | Saves `error_*.png` on failure for debugging |
 | **Failed platform indicator** | Dashboard shows which specific platforms failed (red "✗ Platform — Failed") |
+| **Save-failure detection** | Dashboard add/edit/delete/reset/retry actions await the server save; a dropped connection shows a persistent banner (plus a one-time alert) instead of failing silently |
 
 ---
 
