@@ -315,6 +315,7 @@ Film info is also included in X.com and Bluesky posts (inserted between the titl
 | **Error screenshots** | Saves `error_*.png` on failure for debugging |
 | **Failed platform indicator** | Dashboard shows which specific platforms failed (red "✗ Platform — Failed") |
 | **Save-failure detection** | Dashboard add/edit/delete/reset/retry actions await the server save; a dropped connection shows a persistent banner (plus a one-time alert) instead of failing silently |
+| **Live CSV sync** | Dashboard polls the server every 5s and reloads if `upload.py` wrote changes, so a long-open tab can't save stale data over a fresh upload run's results |
 
 ---
 

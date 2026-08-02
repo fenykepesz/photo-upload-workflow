@@ -38,19 +38,15 @@ Week 4 — hardening:
 ---
 
 ### #2 — Concurrent write race (Python + JS 5s poller) · Week 4
-**Status:** [ ] Pending
+**Status:** [x] Done — `062352e`+ (2026-08-02, prompted by a real incident)
 
-**Issue:** The dashboard's 5s poller can read and re-save the CSV at the exact moment `upload.py` is writing, causing one to overwrite the other.
+**Issue:** The dashboard's `/save-csv` always overwrote the whole file from the browser's in-memory `rows` snapshot, non-atomically, with no lock. In server mode the dashboard never refreshed `rows` after initial page load, so a tab left open for hours would silently blow away anything `upload.py` wrote in the meantime the next time *any* row was saved.
 
-**Impact:** Rare but can silently wipe a freshly-written `url_ig`, `url_500px`, or status update.
+**Impact:** Confirmed active, not just theoretical — on 2026-08-01 a save from a stale tab reverted `PH-2026-149` from a fully-completed 8-platform upload back to `Approved` with its URL columns wiped, which would have caused a duplicate re-post on the next run had it gone unnoticed.
 
-**Approach:** Python writes `upload_queue.csv.lock` before writing and deletes it after. JS poller checks for the lock file and skips that tick if present.
+**What was done:** `queue_server.py`'s `/save-csv` now takes the same `upload_queue.csv.lock` flock `save_row_update()` uses and writes via tmp+`os.replace` (matches #1's atomicity). `queue_manager.html` gained a second 5s poller for server mode (the existing one only covered local-file-handle mode) that refetches `/upload_queue.csv` and refreshes `rows` when it's changed — skipped while a modal is open or a save is in flight, so it can't clobber an edit in progress. Shrinks the staleness window from "however long the tab's been open" to ≤5s.
 
-**Files:** `upload.py` — `save_row_update()` · `queue_manager.html` — `setInterval` poller.
-
-**Effort:** M · **Fix risk:** Low — worst case: JS misses one 5s tick.
-
-**Depends on:** #1 (atomic writes should be in place first).
+**Files:** `queue_server.py` — `save_csv()` (VPS-only, untracked) · `queue_manager.html` — `saveCSV()`, new server-mode poller.
 
 ---
 

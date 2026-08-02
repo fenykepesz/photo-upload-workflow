@@ -1062,7 +1062,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.8.5</span>
+      Photo Upload Queue <span>· v2.8.6</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -2191,15 +2191,22 @@
       await saveCSV();
     }
 
+    // True while a save-csv request is in flight, so the background poller
+    // (below) never refreshes `rows` out from under an edit that's on its
+    // way to the server but hasn't landed yet.
+    let _savingInFlight = false;
+
     async function saveCSV() {
       const csv = toCSV(rows);
       cacheCSV(csv, localStorage.getItem('csv_filename') || 'upload_queue.csv');
       if (_loadedFromServer) {
+        _savingInFlight = true;
         try {
           const res = await fetch('/save-csv', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: csv });
           if (res.ok) { onSaveOk(); return true; }
           else { onSaveFail('server returned ' + res.status); return false; }
         } catch (e) { onSaveFail(e.message); return false; }
+        finally { _savingInFlight = false; }
       }
       try {
         if (!fileHandle && 'showSaveFilePicker' in window) {
@@ -4739,6 +4746,31 @@ Return ONLY valid JSON, no markdown fences:
         refresh();
         toast('CSV reloaded', 'info');
       } catch (e) { /* permission revoked or file gone */ }
+    }, 5000);
+
+    // Poll the server every 5s for CSV changes written by upload.py — a tab
+    // left open for hours otherwise keeps a stale in-memory `rows` snapshot,
+    // and any later save (add/edit/delete/reset/retry) blindly overwrites
+    // the whole file with it, silently wiping out whatever upload.py wrote
+    // in between (real incident: 2026-08-01, PH-2026-149's completed upload
+    // status was erased this way by a save from a stale tab hours later).
+    // Skips while a modal is open (mid-edit) or a save is in flight, so this
+    // can never clobber an edit that hasn't reached the server yet.
+    setInterval(async () => {
+      if (!_loadedFromServer) return;
+      if (_savingInFlight) return;
+      if (document.getElementById('overlay').classList.contains('open')) return;
+      try {
+        const res = await fetch('/upload_queue.csv', { cache: 'no-store' });
+        if (!res.ok) return;
+        const txt = await res.text();
+        const cached = localStorage.getItem('csv_cache');
+        if (txt === cached) return;
+        rows = parseCSV(txt);
+        cacheCSV(txt, 'upload_queue.csv');
+        refresh();
+        toast('CSV reloaded — updated by upload script', 'info');
+      } catch (e) { /* offline — next tick will retry */ }
     }, 5000);
 
     // ── COLUMN RESIZER ──────────────────────────────────────────────────────────
