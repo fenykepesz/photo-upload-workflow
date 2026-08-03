@@ -84,6 +84,7 @@ def write_run_log(event, detail, pid=None, fh=None):
     ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
     target.write(f"{ts}  {event:<14}  {pid_str}  {detail}" + chr(10))
     target.flush()
+    _update_live_summary(event, detail)
 
 
 
@@ -106,22 +107,109 @@ def _telegram_creds():
 
 
 def _send_telegram_message(text, parse_mode="HTML"):
+    """Send a new message. Returns its message_id (for later editing), or
+    None if sending failed or credentials aren't configured."""
+    import json as _json
     import urllib.parse as _uparse
     import urllib.request as _ureq
 
     token, chat_id = _telegram_creds()
     if not token:
-        return
+        return None
     payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
     if parse_mode:
         payload["parse_mode"] = parse_mode
     try:
-        _ureq.urlopen(_ureq.Request(
+        resp = _ureq.urlopen(_ureq.Request(
             f"https://api.telegram.org/bot{token}/sendMessage", _uparse.urlencode(payload).encode()
         ), timeout=10)
         print("  Telegram message sent.")
+        return _json.loads(resp.read()).get("result", {}).get("message_id")
     except Exception as _e:
         print(f"  WARNING: Telegram notification failed: {_e}")
+        return None
+
+
+def _edit_telegram_message(message_id, text, parse_mode="HTML"):
+    """Edit an existing message in place — used for live per-row progress so
+    watchers get one notification (the initial send) and then see the same
+    message update as platforms complete, instead of one push per platform."""
+    import urllib.parse as _uparse
+    import urllib.request as _ureq
+
+    token, chat_id = _telegram_creds()
+    if not token or not message_id:
+        return False
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text,
+               "disable_web_page_preview": "true"}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    try:
+        _ureq.urlopen(_ureq.Request(
+            f"https://api.telegram.org/bot{token}/editMessageText", _uparse.urlencode(payload).encode()
+        ), timeout=10)
+        return True
+    except Exception as _e:
+        print(f"  WARNING: Telegram live-edit failed: {_e}")
+        return False
+
+
+# Live per-row progress message state. Set by start_live_summary() when a
+# row begins; write_run_log() edits this same message as events land;
+# send_run_summary() performs the final edit and clears it. A row that
+# crashes before start_live_summary() ran (or whose edit ultimately fails)
+# just falls back to a single message at the end, same as before this
+# feature existed — never worse than the old behavior, just not live.
+_live_message_id = None
+_live_row = None
+
+
+def start_live_summary(row, platforms):
+    """Post the initial live-updating progress message for a row."""
+    global _live_message_id, _live_row
+    _live_row = row
+    title = row.get("title", row["upload_id"])
+    row_id = row["upload_id"]
+    model = (row.get("model_name") or "").strip()
+    meta = []
+    if model:
+        meta.append(f"👤 {model}")
+    meta.append(f"🆔 {row_id}")
+    msg = (
+        f"🔄 Uploading — {len(platforms)} platform(s)\n"
+        f"\n📸 <b>{title}</b>\n"
+        + "  ".join(meta)
+        + "\n\n<pre>(starting...)</pre>"
+    )
+    _live_message_id = _send_telegram_message(msg)
+
+
+def _update_live_summary(event, detail):
+    """Refresh the live progress message after an event that changes what
+    the table looks like. Individual VK group attempts and the LAUNCH event
+    never produce a visible table line, so they're skipped to avoid
+    edits that would just re-send identical content."""
+    if _live_message_id is None or _live_row is None or _run_log_fh is None:
+        return
+    if event == 'LAUNCH' or event.startswith('VK/'):
+        return
+    title = _live_row.get("title", _live_row.get("upload_id", "?"))
+    row_id = _live_row.get("upload_id", "?")
+    model = (_live_row.get("model_name") or "").strip()
+    meta = []
+    if model:
+        meta.append(f"👤 {model}")
+    meta.append(f"🆔 {row_id}")
+    table_rows = _build_table_rows(Path(_run_log_fh.name), n_ok=0)
+    msg = (
+        f"🔄 Uploading…\n"
+        f"\n📸 <b>{title}</b>\n"
+        + "  ".join(meta)
+        + f"\n\n<pre>"
+        + "\n".join(table_rows)
+        + "</pre>"
+    )
+    _edit_telegram_message(_live_message_id, msg)
 
 
 def send_preflight_notification(needed_platforms, failed_logins):
@@ -147,8 +235,88 @@ def send_preflight_notification(needed_platforms, failed_logins):
     _send_telegram_message(msg, parse_mode=None)
 
 
+def _build_table_rows(log_path, n_ok):
+    """Parse a run log into the timestamped table lines used in Telegram
+    messages. `n_ok` only affects the DONE line's count, which never appears
+    until a row has actually finished — safe to pass 0 for in-progress calls."""
+    table_rows = []
+    if not (log_path and log_path.exists()):
+        return table_rows
+
+    vk_first_t     = None
+    vk_group_count = 0
+    vk_group_ok    = 0
+    login_first_t  = None
+    login_last_t   = None
+    login_ok       = 0
+    login_total    = 0
+    _line_re = re.compile(
+        r'\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\s+(\S+)\s+PID=\S+(.*)'
+    )
+    for _ln in log_path.read_text().splitlines():
+        _m = _line_re.match(_ln)
+        if not _m:
+            continue
+        t, ev, rest = _m.group(1), _m.group(2), _m.group(3).strip()
+
+        if ev == 'START':
+            table_rows.append(f"{t}  START")
+        elif ev == 'LOGIN_CHECK':
+            # rest is "<PLATFORM> checking" or "<PLATFORM> PASS/FAIL" —
+            # only the result lines carry a status to aggregate.
+            _parts = rest.split()
+            if len(_parts) == 2 and _parts[1] in ('PASS', 'FAIL'):
+                if login_first_t is None:
+                    login_first_t = t
+                login_last_t = t
+                login_total += 1
+                if _parts[1] == 'PASS':
+                    login_ok += 1
+        elif ev == 'RESTART':
+            label = ('pre-VK' if 'VK' in rest else
+                     'pre-DA' if 'DA' in rest else
+                     rest.replace('intentional ', ''))
+            table_rows.append(f"{t}  RESTART   {label}")
+        elif ev.startswith('VK/'):
+            if vk_first_t is None:
+                vk_first_t = t
+            vk_group_count += 1
+            if rest == 'OK':
+                vk_group_ok += 1
+        elif ev == 'VK':
+            if rest == 'skipped':
+                table_rows.append(f"{t}  VK        done in first run")
+            elif vk_group_count:
+                ok_str = (f"  ({vk_group_ok}/{vk_group_count} groups OK)"
+                          if vk_group_ok < vk_group_count else
+                          f"  ({vk_group_count} groups)")
+                status = 'SUCCESS' if rest == 'SUCCESS' else 'FAILED'
+                table_rows.append(
+                    f"{vk_first_t}–{t}  VK {status}{ok_str}"
+                )
+                vk_first_t = None; vk_group_count = 0; vk_group_ok = 0
+            else:
+                table_rows.append(f"{t}  VK        {rest}")
+        elif ev in ('500PX', '35PHOTO', 'X', 'BSKY', 'IG', 'FB', 'DA'):
+            status = 'done in first run' if rest == 'skipped' else rest
+            table_rows.append(f"{t}  {ev:<9} {status}")
+        elif ev == 'DONE':
+            table_rows.append(f"{t}  DONE      all {n_ok} platforms ✓")
+
+    if login_total:
+        ok_str = (f"{login_ok}/{login_total} OK" if login_ok < login_total
+                  else f"{login_total} OK")
+        preflight_line = f"{login_first_t}–{login_last_t}  PREFLIGHT {ok_str}"
+        insert_at = 1 if table_rows and table_rows[0].endswith('START') else 0
+        table_rows.insert(insert_at, preflight_line)
+
+    return table_rows
+
+
 def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_start):
-    """Send upload summary to Telegram as a timestamped log table."""
+    """Send (or finalize the row's live-updating message, if one is active)
+    the upload summary to Telegram as a timestamped log table."""
+    global _live_message_id
     token, _chat_id = _telegram_creds()
     if not token:
         return
@@ -164,75 +332,7 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
     n_ok       = sum(1 for v in ok_map.values() if v)
     n_total    = len(ok_map)
 
-    # ── Build log table from run log file ────────────────────────────────────
-    table_rows = []
-    if log_path and log_path.exists():
-        vk_first_t     = None
-        vk_group_count = 0
-        vk_group_ok    = 0
-        login_first_t  = None
-        login_last_t   = None
-        login_ok       = 0
-        login_total    = 0
-        _line_re = re.compile(
-            r'\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\s+(\S+)\s+PID=\S+(.*)'
-        )
-        for _ln in log_path.read_text().splitlines():
-            _m = _line_re.match(_ln)
-            if not _m:
-                continue
-            t, ev, rest = _m.group(1), _m.group(2), _m.group(3).strip()
-
-            if ev == 'START':
-                table_rows.append(f"{t}  START")
-            elif ev == 'LOGIN_CHECK':
-                # rest is "<PLATFORM> checking" or "<PLATFORM> PASS/FAIL" —
-                # only the result lines carry a status to aggregate.
-                _parts = rest.split()
-                if len(_parts) == 2 and _parts[1] in ('PASS', 'FAIL'):
-                    if login_first_t is None:
-                        login_first_t = t
-                    login_last_t = t
-                    login_total += 1
-                    if _parts[1] == 'PASS':
-                        login_ok += 1
-            elif ev == 'RESTART':
-                label = ('pre-VK' if 'VK' in rest else
-                         'pre-DA' if 'DA' in rest else
-                         rest.replace('intentional ', ''))
-                table_rows.append(f"{t}  RESTART   {label}")
-            elif ev.startswith('VK/'):
-                if vk_first_t is None:
-                    vk_first_t = t
-                vk_group_count += 1
-                if rest == 'OK':
-                    vk_group_ok += 1
-            elif ev == 'VK':
-                if rest == 'skipped':
-                    table_rows.append(f"{t}  VK        done in first run")
-                elif vk_group_count:
-                    ok_str = (f"  ({vk_group_ok}/{vk_group_count} groups OK)"
-                              if vk_group_ok < vk_group_count else
-                              f"  ({vk_group_count} groups)")
-                    status = 'SUCCESS' if rest == 'SUCCESS' else 'FAILED'
-                    table_rows.append(
-                        f"{vk_first_t}–{t}  VK {status}{ok_str}"
-                    )
-                    vk_first_t = None; vk_group_count = 0; vk_group_ok = 0
-                else:
-                    table_rows.append(f"{t}  VK        {rest}")
-            elif ev in ('500PX', '35PHOTO', 'X', 'BSKY', 'IG', 'FB', 'DA'):
-                status = 'done in first run' if rest == 'skipped' else rest
-                table_rows.append(f"{t}  {ev:<9} {status}")
-            elif ev == 'DONE':
-                table_rows.append(f"{t}  DONE      all {n_ok} platforms ✓")
-
-        if login_total:
-            ok_str = (f"{login_ok}/{login_total} OK" if login_ok < login_total
-                      else f"{login_total} OK")
-            preflight_line = f"{login_first_t}–{login_last_t}  PREFLIGHT {ok_str}"
-            insert_at = 1 if table_rows and table_rows[0].endswith('START') else 0
-            table_rows.insert(insert_at, preflight_line)
+    table_rows = _build_table_rows(log_path, n_ok)
 
     # ── Compose message ───────────────────────────────────────────────────────
     if not any_failed:
@@ -259,7 +359,12 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
         + "</pre>"
     )
 
-    _send_telegram_message(msg)
+    if _live_message_id is not None:
+        if not _edit_telegram_message(_live_message_id, msg):
+            _send_telegram_message(msg)  # edit failed — fall back to a new send
+        _live_message_id = None
+    else:
+        _send_telegram_message(msg)
 
 def find_chrome():
     """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
@@ -4668,6 +4773,8 @@ def main():
                         continue
                     platforms = {requested}
                 print(f"  Platforms: {', '.join(sorted(platforms))}")
+                if not args.dry_run and not args.no_submit:
+                    start_live_summary(row, platforms)
 
                 desc_full = build_description(row, config)
                 tags = prepare_tags(row.get("keywords", ""))
