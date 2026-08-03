@@ -975,6 +975,19 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
         return {"success": False, "url_500px": "",
                 "error": "Not logged into 500px — run: python upload.py --login"}
 
+    # Dismiss the GDPR consent overlay if 500px shows it. Its backdrop
+    # intercepts pointer events across the whole page, so the Upload button
+    # hover below resolves the locator fine but times out on actionability —
+    # confirmed via error screenshot on 2026-08-03 (PH-2026-151).
+    try:
+        agree_btn = page.locator('button:has-text("AGREE"), button:has-text("Agree")')
+        if agree_btn.count() > 0 and agree_btn.first.is_visible():
+            agree_btn.first.click(timeout=3000)
+            print("    Dismissed privacy consent banner")
+            page.wait_for_timeout(1000)
+    except Exception:
+        pass
+
     # Hover Upload button → click dropdown item → modal opens
     upload_btn = page.locator("button:has-text('Upload'), a:has-text('Upload')").first
     upload_btn.hover()
