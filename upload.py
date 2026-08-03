@@ -87,23 +87,70 @@ def write_run_log(event, detail, pid=None, fh=None):
 
 
 
-def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_start):
-    """Send upload summary to Telegram as a timestamped log table."""
-    import urllib.parse as _uparse
-    import urllib.request as _ureq
-
+def _telegram_creds():
+    """Shared credential loader for every direct-to-Telegram post in this
+    script (separate from Hermes's own agent-mediated delivery)."""
     env_file = Path("/root/.hermes/.env")
     if not env_file.exists():
-        return
+        return None, None
     creds = {}
     for _line in env_file.read_text().splitlines():
         if "=" in _line and not _line.startswith("#"):
             _k, _v = _line.split("=", 1)
             creds[_k.strip()] = _v.strip()
-
     token   = creds.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = creds.get("TELEGRAM_UPLOADS_CHANNEL") or creds.get("TELEGRAM_HOME_CHANNEL", "")
     if not token or not chat_id:
+        return None, None
+    return token, chat_id
+
+
+def _send_telegram_message(text, parse_mode="HTML"):
+    import urllib.parse as _uparse
+    import urllib.request as _ureq
+
+    token, chat_id = _telegram_creds()
+    if not token:
+        return
+    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    try:
+        _ureq.urlopen(_ureq.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage", _uparse.urlencode(payload).encode()
+        ), timeout=10)
+        print("  Telegram message sent.")
+    except Exception as _e:
+        print(f"  WARNING: Telegram notification failed: {_e}")
+
+
+def send_preflight_notification(needed_platforms, failed_logins):
+    """Always post the pre-flight login-check result, pass or fail.
+
+    Previously a failed check just printed to the terminal and called
+    sys.exit(1) before any row processing (and before send_run_summary()
+    could ever run) — a login failure was 100% silent on Telegram. Posting
+    unconditionally here means both outcomes are visible, not just success.
+    """
+    platform_order = ["500PX", "35P", "VK", "X", "BSKY", "FB", "DA"]
+    ordered = [p for p in platform_order if p in needed_platforms]
+    if not ordered:
+        return
+    n_ok = len(ordered) - len(failed_logins)
+    header = (f"✅ Pre-flight OK — {n_ok}/{len(ordered)} platforms logged in"
+              if not failed_logins else
+              f"❌ Pre-flight FAILED — {n_ok}/{len(ordered)} platforms logged in")
+    lines = [f"{'❌' if p in failed_logins else '✅'} {p}" for p in ordered]
+    msg = header + "\n\n" + "\n".join(lines)
+    if failed_logins:
+        msg += "\n\nRun: python upload.py --login"
+    _send_telegram_message(msg, parse_mode=None)
+
+
+def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_start):
+    """Send upload summary to Telegram as a timestamped log table."""
+    token, _chat_id = _telegram_creds()
+    if not token:
         return
 
     elapsed  = int(time.time() - run_start)
@@ -123,6 +170,10 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
         vk_first_t     = None
         vk_group_count = 0
         vk_group_ok    = 0
+        login_first_t  = None
+        login_last_t   = None
+        login_ok       = 0
+        login_total    = 0
         _line_re = re.compile(
             r'\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\s+(\S+)\s+PID=\S+(.*)'
         )
@@ -134,6 +185,17 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
 
             if ev == 'START':
                 table_rows.append(f"{t}  START")
+            elif ev == 'LOGIN_CHECK':
+                # rest is "<PLATFORM> checking" or "<PLATFORM> PASS/FAIL" —
+                # only the result lines carry a status to aggregate.
+                _parts = rest.split()
+                if len(_parts) == 2 and _parts[1] in ('PASS', 'FAIL'):
+                    if login_first_t is None:
+                        login_first_t = t
+                    login_last_t = t
+                    login_total += 1
+                    if _parts[1] == 'PASS':
+                        login_ok += 1
             elif ev == 'RESTART':
                 label = ('pre-VK' if 'VK' in rest else
                          'pre-DA' if 'DA' in rest else
@@ -165,6 +227,13 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
             elif ev == 'DONE':
                 table_rows.append(f"{t}  DONE      all {n_ok} platforms ✓")
 
+        if login_total:
+            ok_str = (f"{login_ok}/{login_total} OK" if login_ok < login_total
+                      else f"{login_total} OK")
+            preflight_line = f"{login_first_t}–{login_last_t}  PREFLIGHT {ok_str}"
+            insert_at = 1 if table_rows and table_rows[0].endswith('START') else 0
+            table_rows.insert(insert_at, preflight_line)
+
     # ── Compose message ───────────────────────────────────────────────────────
     if not any_failed:
         header = f"✅ Complete success. All {n_total} platforms done in {duration}."
@@ -190,17 +259,7 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
         + "</pre>"
     )
 
-    payload = _uparse.urlencode({
-        "chat_id": chat_id, "text": msg,
-        "parse_mode": "HTML", "disable_web_page_preview": "true",
-    }).encode()
-    try:
-        _ureq.urlopen(_ureq.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage", payload
-        ), timeout=10)
-        print("  Telegram summary sent.")
-    except Exception as _e:
-        print(f"  WARNING: Telegram notification failed: {_e}")
+    _send_telegram_message(msg)
 
 def find_chrome():
     """Return path to real Chrome binary, or None to use Playwright's bundled Chromium."""
@@ -4578,6 +4637,7 @@ def main():
         if not args.skip_login_check:
             needed_platforms = collect_required_platforms(target_rows)
             failed_logins = run_login_checks(page, needed_platforms)
+            send_preflight_notification(needed_platforms, failed_logins)
             if failed_logins:
                 print("ERROR: Not logged in to: " + ", ".join(failed_logins))
                 print("Run:   python upload.py --login")
