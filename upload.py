@@ -2191,6 +2191,14 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
             print(f"    Hosted at: {image_url}")
         except Exception as e:
             return {"success": False, "url_ig": "", "error": f"Cloudinary upload failed: {e}"}
+        # Give Cloudinary's CDN a moment to propagate before Facebook's
+        # fetcher tries to pull it -- observed live 2026-09-17 (PH-2026-195):
+        # container creation failed with "media could not be fetched" ~2s
+        # after upload, on an image_url that returned a clean 200 moments
+        # later (checked manually, including with facebookexternalhit's UA).
+        # 4s wasn't enough -- same-day retest still failed first-attempt at
+        # 4s and only succeeded on the existing 10s retry pass.
+        time.sleep(10)
     else:
         print("  Uploading image to imgbb (fallback)...")
         try:
