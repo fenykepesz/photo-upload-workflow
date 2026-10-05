@@ -2929,7 +2929,45 @@ def upload_to_x(page, post_text, image_path, no_submit=False):
 
 
 # ── Bluesky Upload ──────────────────────────────────────────────
-def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, bsky_handle="", dev_bsky_handle=""):
+def bsky_recent_posts(account_handle):
+    """Newest own posts on the account, via Bluesky's public (no-auth) API.
+
+    Returns {at_uri: post_url}, or None when the API could not be reached —
+    callers must treat None as "unknown", never as "no posts".
+    """
+    h = (account_handle or "").strip().lstrip("@")
+    if not h:
+        return None
+    try:
+        r = requests.get(
+            "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed",
+            params={"actor": h, "limit": 10, "filter": "posts_no_replies"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        posts = {}
+        for item in r.json().get("feed", []):
+            if item.get("reason"):  # repost of someone else's post
+                continue
+            uri = item.get("post", {}).get("uri", "")
+            if uri:
+                posts[uri] = f"https://bsky.app/profile/{h}/post/{uri.rsplit('/', 1)[-1]}"
+        return posts
+    except Exception:
+        return None
+
+
+def bsky_screenshot(page, tag):
+    """Save logs/bsky_<tag>_<timestamp>.png — never raises."""
+    try:
+        _d = Path(__file__).parent / "logs"
+        _d.mkdir(exist_ok=True)
+        page.screenshot(path=str(_d / f"bsky_{tag}_{datetime.now():%Y%m%d_%H%M%S}.png"))
+    except Exception:
+        pass
+
+
+def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, bsky_handle="", dev_bsky_handle="", account_handle=""):
     """
     Post a photo with text to Bluesky via browser automation.
     Flow: home → New Post → write text → attach photo → (NSFW label) → Post.
@@ -3102,26 +3140,72 @@ def upload_to_bsky(page, post_text, image_path, is_nsfw=False, no_submit=False, 
         print("  --no-submit: skipping post")
         return {"success": True, "url_bsky": "NO_SUBMIT", "error": ""}
 
-    # Click "Post" — use JS for exact viewport coordinates then real mouse click,
-    # then wait up to 30s for the composer to close (server-side submission takes time).
+    # Click "Post", then VERIFY it actually went out. Until 2026-10-05 this just
+    # clicked, slept 10s and reported success — PH-2026-212 was logged as
+    # SUCCESS while nothing was ever posted. Now: wait for the Post button to be
+    # enabled, click, require the composer to close, then confirm the new post
+    # shows up on the account via the public API.
     print("  Posting...")
     page.wait_for_timeout(1000)
-    coords = page.evaluate("""() => {
-        const btn = document.querySelector('[aria-label="Publish post"]');
-        if (!btn) return null;
-        const r = btn.getBoundingClientRect();
-        return {x: r.left + r.width / 2, y: r.top + r.height / 2};
-    }""")
+    before = bsky_recent_posts(account_handle)
+
+    def _publish_btn():
+        return page.evaluate("""() => {
+            const btn = document.querySelector('[aria-label="Publish post"]');
+            if (!btn) return null;
+            const r = btn.getBoundingClientRect();
+            return {x: r.left + r.width / 2, y: r.top + r.height / 2,
+                    disabled: btn.disabled === true || btn.getAttribute('aria-disabled') === 'true'};
+        }""")
+
+    coords = _publish_btn()
     if not coords:
-        print("  Bluesky post published (composer already closed)")
-        return {"success": True, "url_bsky": "UPLOADED", "error": ""}
+        bsky_screenshot(page, "fail")
+        return {"success": False, "url_bsky": "", "error": "Post button not found — composer not open"}
+    for _ in range(30):  # up to 60s for the image to finish processing
+        if not coords.get("disabled"):
+            break
+        page.wait_for_timeout(2000)
+        coords = _publish_btn() or coords
+    if coords.get("disabled"):
+        bsky_screenshot(page, "fail")
+        return {"success": False, "url_bsky": "", "error": "Post button still disabled after 60s"}
+    bsky_screenshot(page, "prepost")
     print(f"    Clicking Post at ({coords['x']:.0f}, {coords['y']:.0f})")
     page.mouse.click(coords["x"], coords["y"])
-    # Wait 10s for the post to reach the server before moving on
+
+    # The image is sent to the server at this point, so a large file can take a while.
     print("  Waiting for post to submit...")
-    page.wait_for_timeout(10000)
-    print("  Bluesky post published")
-    return {"success": True, "url_bsky": "UPLOADED", "error": ""}
+    closed = False
+    for _ in range(45):  # up to 90s
+        page.wait_for_timeout(2000)
+        if not _publish_btn():
+            closed = True
+            break
+    if not closed:
+        bsky_screenshot(page, "fail")
+        return {"success": False, "url_bsky": "", "error": "Composer still open 90s after clicking Post — not published"}
+    print("    Composer closed")
+
+    if before is None:
+        print("    WARNING: could not reach Bluesky public API — post NOT verified")
+        return {"success": True, "url_bsky": "UPLOADED", "error": ""}
+    api_ok = False
+    for _ in range(12):  # up to 60s for the post to be indexed
+        page.wait_for_timeout(5000)
+        after = bsky_recent_posts(account_handle)
+        if after is None:
+            continue
+        api_ok = True
+        new = [url for uri, url in after.items() if uri not in before]
+        if new:
+            print(f"  Bluesky post published and verified: {new[0]}")
+            return {"success": True, "url_bsky": new[0], "error": ""}
+    if not api_ok:
+        print("    WARNING: Bluesky public API unreachable after posting — post NOT verified")
+        return {"success": True, "url_bsky": "UPLOADED", "error": ""}
+    bsky_screenshot(page, "fail")
+    return {"success": False, "url_bsky": "", "error": "Composer closed but no new post appeared on the account within 60s"}
 
 
 # ── Facebook Upload ──────────────────────────────────────────────
@@ -5363,7 +5447,7 @@ def main():
                         print(f"    Post text ({len(post_text)} chars): {post_text}")
 
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=_bsky_handle)
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=_bsky_handle, account_handle=config.get("accounts", {}).get("bluesky", ""))
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
 
@@ -5784,7 +5868,7 @@ def main():
                             bsky_handle=_bsky_handle,
                         )
                         try:
-                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=_bsky_handle)
+                            result_bsky = upload_to_bsky(page, post_text, image_path, is_nsfw, args.no_submit, bsky_handle=_bsky_handle, account_handle=config.get("accounts", {}).get("bluesky", ""))
                         except Exception as e:
                             result_bsky = {"success": False, "url_bsky": "", "error": f"Unexpected: {e}"}
                         if result_bsky["success"]:
