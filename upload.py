@@ -2468,7 +2468,10 @@ def build_bsky_post_text(title, keywords_str, model_name="", film_info="", capti
     handle_reserve = 0
     for h in [bsky_handle, dev_bsky_handle]:
         if h and h.strip():
-            handle_reserve += 1 + 1 + len(h.strip().lstrip("@"))  # \n + @ + handle
+            # \n + @ + handle + the trailing space Bluesky's autocomplete inserts
+            # after a selected mention (without it a full-length post lands on 301
+            # chars and the Post button stays disabled — PH-2026-212, 2026-10-05)
+            handle_reserve += 1 + 1 + len(h.strip().lstrip("@")) + 1
     effective_limit = BSKY_CHAR_LIMIT - handle_reserve
     if model_name and model_name.strip():
         credit = f"Model: {model_name.strip()}\n"
