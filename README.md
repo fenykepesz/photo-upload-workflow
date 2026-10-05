@@ -1,16 +1,16 @@
 # Daily Photo Upload Workflow
 
-Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, **VK**, **X.com**, **Bluesky**, and **Facebook** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
+Automated photo publishing to **DeviantArt**, **500px**, **35photo.pro**, **VK**, **X.com**, **Bluesky**, **Instagram**, and **Facebook** using Playwright browser automation. Photos are staged on Sta.sh, scheduled via a CSV queue, and published through `upload.py`.
 
 ---
 
 ## How It Works
 
-`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → **[browser restart]** → VK → X → Bluesky → Facebook → **[browser restart]** → DA last (publishing DA consumes the Sta.sh staging item). Two intentional browser restarts per run: before VK (clears memory from 35photo's tag-filling loop) and before DA (gives DA the cleanest possible browser for its complex multi-step form).
+`upload.py` reads the upload queue CSV, finds rows with status `Approved`, downloads the original image from Sta.sh (preserving EXIF), and publishes to each platform listed in the row's `platforms` field. Upload order: 500px → 35photo → **[browser restart]** → VK → X → Bluesky → Instagram → Facebook → **[browser restart]** → DA last (publishing DA consumes the Sta.sh staging item). Two intentional browser restarts per run: before VK (clears memory from 35photo's tag-filling loop) and before DA (gives DA the cleanest possible browser for its complex multi-step form).
 
 ```
 Sta.sh (staging) -> upload.py reads queue -> Downloads image with EXIF
--> 500px -> 35photo -> [restart] -> VK -> X -> Bluesky -> Facebook -> [restart] -> DeviantArt (last)
+-> 500px -> 35photo -> [restart] -> VK -> X -> Bluesky -> Instagram -> Facebook -> [restart] -> DeviantArt (last)
 -> CSV updated after each platform
 -> Telegram summary sent to uploads channel (even on crash or SIGTERM)
 ```
@@ -383,6 +383,26 @@ Each run writes a timestamped log to `logs/run_YYYYMMDD_HHMMSS.log` with one lin
 2026-07-07 10:09:10  VK/nuart.photo  PID=456 OK
 ...
 ```
+
+---
+
+## Stability & Recovery
+
+### Memory management (VPS)
+
+- A **6 GB swap file** (`/swapfile`) is active and persisted in `/etc/fstab`. This prevents the Linux OOM killer from terminating Chromium during memory spikes.
+- The **browser restarts automatically after VK** (before X). VK's group submissions — up to 14 consecutive page loads with file uploads — are the heaviest browser operation. Restarting here releases accumulated memory. All cookies and sessions are persisted to the `chrome-profile/` directory, so no re-login is needed.
+
+### Chrome crash recovery
+
+If a run fails with *"Opening in existing browser session"* or *"Target page, context or browser has been closed"*:
+
+```bash
+pkill -f chrome-profile
+rm -f /root/photo-upload-workflow/chrome-profile/Singleton*
+```
+
+Then retry the upload with `--row ID`.
 
 ---
 

@@ -745,7 +745,18 @@ def verify_login(page, platform):
     if platform not in checks:
         return True
     try:
-        page.goto(checks[platform], wait_until="domcontentloaded", timeout=20000)
+        try:
+            page.goto(checks[platform], wait_until="domcontentloaded", timeout=20000)
+        except PlaywrightTimeout:
+            # VK and DA in particular can be slow to respond (same class of
+            # issue already confirmed and fixed in login_step() -- see
+            # 2026-08-31). Without this retry, a single slow load here gets
+            # silently treated as "not logged in" with no way to tell it
+            # apart from a genuinely expired session -- confirmed in
+            # production: 35P failed pre-flight once, then passed cleanly
+            # on the very next run with no re-login in between.
+            print(f"  ({platform} slow to load, retrying with a longer timeout...)")
+            page.goto(checks[platform], wait_until="domcontentloaded", timeout=40000)
         page.wait_for_timeout(2000)
         url = page.url.lower()
 
@@ -1152,23 +1163,37 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     except Exception:
         pass
 
-    # Hover Upload button → click dropdown item → modal opens
-    upload_btn = page.locator("button:has-text('Upload'), a:has-text('Upload')").first
-    upload_btn.hover()
-    page.wait_for_timeout(1500)
+    # Click Upload icon button → click "Upload Photo" menu item → modal opens.
+    # 500px rebuilt its header in Material-UI (confirmed live 2026-09-10,
+    # PH-2026-189): the old text-labeled "Upload" button/Ant-Design dropdown
+    # is gone. It's now an icon-only IconButton with aria-label="Upload"
+    # (no visible text, so :has-text('Upload') matches nothing and the old
+    # hover-based dropdown never appears — the hover call above wasn't even
+    # the wrong action, it was hovering an empty locator). Clicking it opens
+    # a MUI Menu with items "Upload Photo" / "Create a Story" / "Submit for
+    # Licensing" / "Upload Video" (role="menuitem"). Old Ant-Design fallback
+    # kept second in case 500px reverts or A/B tests the header.
     try:
-        dropdown_item = page.locator('.ant-dropdown a, .ant-dropdown-menu-item').filter(has_text="Upload").first
-        dropdown_item.click(timeout=5000)
+        page.get_by_role("button", name="Upload", exact=True).click(timeout=5000)
+        page.wait_for_timeout(800)
+        page.get_by_role("menuitem", name="Upload Photo", exact=True).click(timeout=5000)
     except Exception:
-        # Fallback: JS click on dropdown item
-        page.evaluate("""
-            (() => {
-                const items = document.querySelectorAll('.ant-dropdown a, .ant-dropdown-menu-item');
-                for (const item of items) {
-                    if (item.textContent.trim() === 'Upload') { item.click(); return; }
-                }
-            })()
-        """)
+        try:
+            upload_btn = page.locator("button:has-text('Upload'), a:has-text('Upload')").first
+            upload_btn.hover()
+            page.wait_for_timeout(1500)
+            dropdown_item = page.locator('.ant-dropdown a, .ant-dropdown-menu-item').filter(has_text="Upload").first
+            dropdown_item.click(timeout=5000)
+        except Exception:
+            # Fallback: JS click on dropdown item
+            page.evaluate("""
+                (() => {
+                    const items = document.querySelectorAll('.ant-dropdown a, .ant-dropdown-menu-item');
+                    for (const item of items) {
+                        if (item.textContent.trim() === 'Upload') { item.click(); return; }
+                    }
+                })()
+            """)
 
     # Wait for the upload modal to appear
     try:
@@ -1198,88 +1223,58 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     # Wait for upload to process (500px extracts EXIF server-side)
     page.wait_for_timeout(WAIT_TIMES["500px"])
 
+    # 500px rebuilt its uploader in Material-UI (confirmed live 2026-09-10):
+    # the file lands on an interstitial "Approved (1) — Ready to upload to
+    # the community" screen with just the thumbnail and a "Submit N
+    # photo(s)" button; the Information/metadata panel only appears after
+    # that click. The old flow went straight from file-select to inline
+    # metadata fields in the same modal — this extra step didn't exist.
+    print("  Confirming upload...")
+    page.locator('button').filter(has_text="photo(").first.click(timeout=10000)
+    page.wait_for_timeout(1500)
+
     # ── Fill metadata fields ────────────────────────────────
     title = get_effective_title(row)
-    nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
 
-    # Title — React controlled input, use native setter + events.
-    # Text is passed as an evaluate argument (never interpolated into JS
-    # source) so no character in a title can break the script.
-    print("  Setting metadata: title, description, category, keywords...")
-    page.evaluate("""(text) => {
-        const el = document.querySelector('#editpanel-title');
-        if (!el) return;
-        el.focus();
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        setter.call(el, text);
-        el.dispatchEvent(new Event('input', {bubbles: true}));
-        el.dispatchEvent(new Event('change', {bubbles: true}));
-        el.dispatchEvent(new Event('blur', {bubbles: true}));
-    }""", title)
-    page.wait_for_timeout(500)
-
-    # Description — React controlled textarea, use native setter + events
-    page.evaluate("""(text) => {
-        const el = document.querySelector('#edit-panel-description');
-        if (!el) return;
-        el.focus();
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-        setter.call(el, text);
-        el.dispatchEvent(new Event('input', {bubbles: true}));
-        el.dispatchEvent(new Event('change', {bubbles: true}));
-        el.dispatchEvent(new Event('blur', {bubbles: true}));
-    }""", desc_full)
-    page.wait_for_timeout(500)
-
-    # Category — use JS click to bypass overlay (image preview intercepts pointer events)
-    if category:
-        page.click('#category-input')
-        page.wait_for_timeout(500)
-        try:
-            # Get position of the dropdown to hover over it for scrolling
-            first_opt = page.locator('[class*="DropdownOption"], [role="option"]').first
-            box = first_opt.bounding_box()
-            selected = False
-            if box:
-                # Hover over the dropdown area
-                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-                for _scroll in range(25):
-                    result = page.evaluate("""(cat) => {
-                        const options = document.querySelectorAll('[class*="DropdownOption"], [role="option"]');
-                        for (const item of options) {
-                            if (item.textContent.trim() === cat) { item.click(); return true; }
-                        }
-                        return false;
-                    }""", category)
-                    if result:
-                        selected = True
-                        break
-                    # Mouse wheel scroll down over the dropdown
-                    page.mouse.wheel(0, 120)
-                    page.wait_for_timeout(200)
-            if not selected:
-                print(f"    WARNING: Could not select category '{category}' via JS")
-        except Exception as e:
-            print(f"    WARNING: Could not select category '{category}': {e}")
-        page.wait_for_timeout(300)
-
-    # Keywords
-    keywords_input = page.locator('#editpanel-keywords')
-    keywords_input.scroll_into_view_if_needed()
-    keywords_input.click()
+    # Title / Description are now plain MUI text fields, found by
+    # placeholder (their `id` is a React useId() value that changes every
+    # render, so it can't be hardcoded). Description's placeholder frames
+    # it as an AI-prompt box ("Enter a prompt to generate a description
+    # with AI.") but typing the real description directly into it still
+    # works as a literal value — confirmed via a real live publish
+    # (PH test "Noemi", 2026-09-10): no AI text was generated, the typed
+    # description went through verbatim.
+    print("  Setting metadata: title, description...")
+    page.get_by_placeholder("Untitled").fill(title)
     page.wait_for_timeout(300)
-    for tag in tags:
-        page.keyboard.type(tag, delay=50)
-        page.keyboard.press('Enter')
-        page.wait_for_timeout(300)
+    page.get_by_placeholder("Enter a prompt to generate a description with AI.").fill(desc_full)
+    page.wait_for_timeout(300)
 
-    # NSFW
-    if nsfw:
-        try:
-            nsfw_toggle = page.locator('[class*="nsfw"], [class*="safe"], label:has-text("NSFW"), label:has-text("Not Safe")').first
-            nsfw_toggle.click(timeout=3000)
-        except Exception as e:
-            print(f"    WARNING: Could not find NSFW toggle: {e}")
+    # Category and Keywords/Tags no longer exist anywhere in the upload
+    # flow -- confirmed via a full-page DOM text search (2026-09-10) and
+    # by Erik's own live test publish showing no such fields at all. Not
+    # relocated, genuinely removed from 500px's side. Commented out
+    # rather than deleted in case they reappear; category/tags params are
+    # still accepted by this function so callers don't need to change.
+    #
+    # if category:
+    #     page.click('#category-input')
+    #     ... (see git history / backups prior to 2026-09-10 for the full
+    #     dropdown-scroll-select implementation)
+    #
+    # keywords_input = page.locator('#editpanel-keywords')
+    # for tag in tags:
+    #     ...
+
+    # NSFW: 500px now auto-detects and flags NSFW content itself on
+    # publish (confirmed live 2026-09-10 -- the test photo was tagged
+    # "NSFW" automatically with no manual toggle touched). The former
+    # NSFW toggle doesn't exist in this UI. "Photo Permissions"
+    # (Public/Restrict) is a separate, unrelated setting -- Erik's call:
+    # leave it at its default (Public) rather than guessing what
+    # "Restrict" does.
+    # if nsfw:
+    #     ... (removed 2026-09-10, see above)
 
     # Location — skip if EXIF already populated or no location in CSV
     location = row.get("location_500px", "").strip()
@@ -1296,70 +1291,35 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 loc_input.click()
                 page.wait_for_timeout(300)
                 page.keyboard.type(location, delay=50)
-                page.wait_for_timeout(8000)  # wait for autocomplete suggestions
+                page.wait_for_timeout(2000)  # wait for autocomplete suggestions
 
-                # First attempt: JS click on matching suggestion
-                clicked = page.evaluate(r"""(query) => {
-                    const input = document.querySelector('input[placeholder*="Location"]');
-                    if (!input) return {ok: false, reason: 'no input'};
-                    const rect = input.getBoundingClientRect();
-                    const words = query.toLowerCase().replace(/[,-]/g, ' ').split(/\s+/).filter(w => w.length > 0);
-                    const matchesQuery = (text) => {
-                        const lt = text.toLowerCase();
-                        return words.every(w => lt.includes(w));
-                    };
-                    const all = document.querySelectorAll('div, li, a, span');
-                    for (const el of all) {
-                        const r = el.getBoundingClientRect();
-                        const text = el.textContent.trim();
-                        if (r.top >= rect.bottom + 2 && r.top < rect.bottom + 400
-                            && r.height > 20 && r.height < 80 && r.width > 100
-                            && matchesQuery(text)) {
-                            el.click();
-                            return {ok: true, text: text.substring(0, 60)};
-                        }
-                    }
-                    return {ok: false, reason: 'no matching suggestions'};
-                }""", location)
-
-                if clicked.get("ok"):
-                    print(f"    Selected: {clicked.get('text')}")
-                    page.wait_for_timeout(1000)
-                else:
-                    # Fallback: keyboard navigation — ArrowDown to first suggestion + Enter
-                    print(f"    JS click failed ({clicked.get('reason')}) — trying keyboard navigation")
-                    page.keyboard.press("ArrowDown")
-                    page.wait_for_timeout(500)
-                    # Check if a suggestion is now highlighted
-                    highlighted = page.evaluate(r"""() => {
-                        const all = document.querySelectorAll('[class*="highlight"], [class*="active"], [class*="focused"], [aria-selected="true"]');
-                        for (const el of all) {
-                            const t = el.textContent.trim();
-                            if (t.length > 3) return t.substring(0, 60);
-                        }
-                        return null;
+                # Click the first real suggestion by ARIA role, not screen
+                # position. The old position-based matcher only accepted
+                # elements below the input's bounding box -- confirmed live
+                # 2026-09-10 that 500px's MUI Autocomplete now flips the
+                # popper to open UPWARD when there isn't room below, so
+                # every real suggestion failed that check and the code fell
+                # through to a wrong/last-resort pick (selected "Santa
+                # Clara, Durango, MEX" instead of California). 500px's own
+                # geocoder already ranks results by relevance -- for a
+                # plain city query the first `role="option"` IS the
+                # intended match (confirmed live: 9 "Santa Clara" results
+                # worldwide, "Santa Clara, CA, USA" genuinely first) --
+                # so just take it directly, no text/position heuristics.
+                try:
+                    page.get_by_role("option").first.click(timeout=5000)
+                    selected_text = page.evaluate("""() => {
+                        const el = document.querySelector('input[placeholder*="Location"]');
+                        return el ? el.value.trim() : '';
                     }""")
-                    if highlighted:
-                        page.keyboard.press("Enter")
-                        print(f"    Selected via keyboard: {highlighted}")
-                        page.wait_for_timeout(1000)
-                    else:
-                        # Last resort: just press Enter on whatever is first
-                        page.keyboard.press("Enter")
-                        page.wait_for_timeout(1000)
-                        # Verify something was selected
-                        val = page.evaluate("""() => {
-                            const el = document.querySelector('input[placeholder*="Location"]');
-                            return el ? el.value.trim() : '';
-                        }""")
-                        if val and val.lower() != location.lower():
-                            print(f"    Selected via Enter: {val}")
-                        else:
-                            print(f"    WARNING: Could not select location — clearing field and continuing without location")
-                            loc_input.triple_click()
-                            page.keyboard.press("Delete")
-                            page.keyboard.press("Escape")
-                            page.wait_for_timeout(500)
+                    print(f"    Selected: {selected_text}")
+                    page.wait_for_timeout(1000)
+                except Exception as e:
+                    print(f"    WARNING: Could not select location — clearing field and continuing without location: {e}")
+                    loc_input.triple_click()
+                    page.keyboard.press("Delete")
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(500)
             else:
                 print(f"  Location already set (EXIF): {has_location}")
         except Exception as e:
@@ -1371,30 +1331,32 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
         print("  --no-submit: skipping publish")
         return {"success": True, "url_500px": "NO_SUBMIT", "error": ""}
 
-    # Advance wizard: Details → Additional info → Upload
+    # Publish. The old multi-step wizard (Details → Additional info →
+    # Upload, hunting through Publish/Submit/Save/Post/Done labels) is
+    # gone -- the new Information panel has exactly one final action,
+    # "Upload N photo(s)" (confirmed live 2026-09-10, and via Erik's own
+    # real test publish). Fall back to the old label hunt only if that
+    # exact button isn't found, in case 500px reverts or A/B tests this.
     print("  Publishing...")
-    next_btn = page.locator('button:has-text("Next")').first
-    if next_btn.count() > 0:
-        next_btn.click()
-        page.wait_for_timeout(4000)
-
-    # Click final Upload button (.last to avoid nav bar match)
     publish_clicked = False
-    for label in ("Publish", "Submit", "Save", "Post", "Done"):
-        btn = page.locator(f'button:has-text("{label}")').first
-        if btn.count() > 0:
-            btn.click()
-            publish_clicked = True
-            break
-
-    if not publish_clicked:
-        upload_btns = page.locator('button:has-text("Upload")')
-        if upload_btns.count() > 1:
-            upload_btns.last.click()
-            publish_clicked = True
-        elif upload_btns.count() == 1:
-            upload_btns.first.click()
-            publish_clicked = True
+    try:
+        page.locator('button').filter(has_text="photo(").first.click(timeout=5000)
+        publish_clicked = True
+    except Exception:
+        for label in ("Publish", "Submit", "Save", "Post", "Done"):
+            btn = page.locator(f'button:has-text("{label}")').first
+            if btn.count() > 0:
+                btn.click()
+                publish_clicked = True
+                break
+        if not publish_clicked:
+            upload_btns = page.locator('button:has-text("Upload")')
+            if upload_btns.count() > 1:
+                upload_btns.last.click()
+                publish_clicked = True
+            elif upload_btns.count() == 1:
+                upload_btns.first.click()
+                publish_clicked = True
 
     if not publish_clicked:
         return {"success": False, "url_500px": "", "error": "No Publish button found"}
@@ -1597,26 +1559,132 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     # Navigate to VK feed
     print("  Opening VK feed...")
     try:
-        page.goto("https://vk.com/feed", wait_until="domcontentloaded", timeout=30000)
+        page.goto("https://vk.com/feed", wait_until="domcontentloaded", timeout=45000)
     except PlaywrightTimeout:
-        return {"success": False, "url_vk": "", "error": "Timeout loading VK feed"}
+        # The VK retry pass runs in the same browser session as the failed
+        # first attempt (no restart between retries -- that only happens
+        # once, pre-VK), so a slow/contended session can blow past even a
+        # generous goto timeout. Observed live 2026-09-17 (PH-2026-195,
+        # retry pass): reload once before giving up entirely.
+        print("    Feed load timed out — reloading once...")
+        try:
+            page.goto("https://vk.com/feed", wait_until="domcontentloaded", timeout=45000)
+        except PlaywrightTimeout:
+            return {"success": False, "url_vk": "", "error": "Timeout loading VK feed"}
     page.wait_for_timeout(3000)
 
     # Check if logged in (VK redirects to login page if not)
     if "/login" in page.url or "/authorize" in page.url:
         return {"success": False, "url_vk": "", "error": "Not logged into VK — run --login first"}
 
-    # Click "Create post" button
+    # VK's feed can finish "domcontentloaded" while the actual feed content
+    # (and the "Create" trigger) is still hydrating -- observed live
+    # 2026-09-10 as the page appearing stuck before the Create dropdown
+    # ever showed up. Wait explicitly for something feed-shaped to appear,
+    # and reload once if it doesn't, instead of relying on a single fixed
+    # sleep and hoping the click below happens to land on time.
+    # NOTE: `text=` shorthand cannot be mixed into a comma-joined CSS
+    # selector string (confirmed live 2026-09-06: "Unexpected token '='")
+    # -- each selector engine needs its own locator call.
+    def _create_trigger_visible(timeout_ms):
+        for selector in ('text="Create post"', 'button:has-text("Create")', '[role="button"]:has-text("Create")'):
+            try:
+                page.locator(selector).first.wait_for(state="visible", timeout=timeout_ms)
+                return True
+            except PlaywrightTimeout:
+                continue
+        return False
+
+    if not _create_trigger_visible(10000):
+        print("    Feed still not ready after 10s — reloading...")
+        try:
+            page.reload(wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+        except Exception:
+            pass
+        _create_trigger_visible(15000)  # fall through regardless — the Create-click block below has its own diagnostics/fallbacks
+
+    # Click "Create" button, then select "Post" from the dropdown.
+    # VK's UI changed from a single "Create post" button to a "Create"
+    # dropdown with Post/Clips/Videos/Story options (confirmed live via
+    # screenshot, 2026-09-01). The old fallback selector here matched the
+    # "Create" button, opened the dropdown, and stopped -- it never
+    # selected "Post", leaving the page on an unclosed menu instead of the
+    # actual compose form. That's the real cause of the intermittent
+    # wall-post failures (caption box not found, photo never attaching),
+    # not a timing issue.
     print("  Creating new post...")
     try:
         create_btn = page.locator('text="Create post"').first
-        create_btn.click(timeout=5000)
+        create_btn.click(timeout=3000)
     except Exception:
+        # Tag-agnostic: confirmed live 2026-09-06 the "+ Create" trigger is
+        # very likely not a real <button> element (a styled div/component
+        # is common in VK's UI), which is exactly why the old
+        # `button:has-text("Create")` selector never matched anything.
+        # Try each selector engine separately -- mixing Playwright's
+        # `text=` shorthand into a comma-joined CSS selector string is
+        # invalid (confirmed live 2026-09-06: "Unexpected token '='"),
+        # each style has to be its own locator call, not one combined string.
+        clicked = False
+        for selector in ('button:has-text("Create")', '[role="button"]:has-text("Create")'):
+            try:
+                page.locator(selector).first.click(timeout=2000)
+                clicked = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            try:
+                page.get_by_text("Create", exact=False).first.click(timeout=5000)
+                clicked = True
+            except Exception as e:
+                diag = page.evaluate("""() => {
+                    return Array.from(document.querySelectorAll('button, [role="button"], a, div'))
+                        .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top < 400 && el.children.length <= 2; })
+                        .map(el => el.textContent.trim())
+                        .filter(t => t.length > 0 && t.length < 25)
+                        .slice(0, 20);
+                }""")
+                print(f"    Visible short-text elements near top of page: {diag}")
+                return {"success": False, "url_vk": "", "error": f"Could not find 'Create' trigger: {e}"}
+        page.wait_for_timeout(800)
+        # "Post" is the first item in the dropdown (icon + label). VK is
+        # mid-migration between component libraries (old "vkui" prefixed
+        # classes vs a new "vkit" prefixed one) and intermittently renders
+        # a second, visually-hidden accessibility span with the same exact
+        # text ("vkuiVisuallyHidden__host") ahead of the real, visible menu
+        # item in DOM order. `.first` on a plain text match grabs that
+        # hidden span and the click times out waiting for it to become
+        # enabled -- confirmed live 2026-09-10 (PH-2026-189): the resolved
+        # element was literally `<span class="vkuiVisuallyHidden__host ...">`.
+        # Iterate matches and click the first one that's actually visible
+        # with real dimensions, instead of trusting DOM order.
         try:
-            create_btn = page.locator('[class*="create"], [class*="new_post"], [data-testid*="post"]').first
-            create_btn.click(timeout=5000)
-        except Exception:
-            return {"success": False, "url_vk": "", "error": "Could not find 'Create post' button"}
+            post_items = page.get_by_text("Post", exact=True)
+            clicked = False
+            for i in range(post_items.count()):
+                candidate = post_items.nth(i)
+                if not candidate.is_visible():
+                    continue
+                box = candidate.bounding_box()
+                if not box or box["width"] < 5 or box["height"] < 5:
+                    continue
+                candidate.click(timeout=5000)
+                clicked = True
+                break
+            if not clicked:
+                raise Exception("No visible 'Post' menu item found among matches")
+        except Exception as e:
+            diag = page.evaluate("""() => {
+                return Array.from(document.querySelectorAll('*'))
+                    .filter(el => { const r = el.getBoundingClientRect(); return el.children.length === 0 && r.width > 0 && r.height > 0; })
+                    .map(el => el.textContent.trim())
+                    .filter(t => t.length > 0 && t.length < 25)
+                    .slice(0, 20);
+            }""")
+            print(f"    Visible leaf-element text after clicking Create: {diag}")
+            return {"success": False, "url_vk": "", "error": f"Found 'Create' but could not click 'Post' in dropdown: {e}"}
     page.wait_for_timeout(2000)
 
     # Handle "saved draft" dialog — click "Start over" if it appears
@@ -1762,9 +1830,28 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
         else:
             return {"success": False, "url_vk": "", "error": "Could not upload file"}
 
-    # Wait for photo to process
+    # Wait for photo to process. A flat sleep here raced VK's actual upload
+    # time live 2026-09-17 (PH-2026-195): "Next" got clicked before the
+    # photo attached, and the post-Next attachment check below then failed
+    # with nothing to attach. Poll for the same <img>-in-compose evidence
+    # that check already uses, so we click "Next" as soon as it's actually
+    # ready instead of on a fixed clock -- faster on a normal run, and
+    # tolerant of a slow one up to WAIT_TIMES["vk"].
     print("  Waiting for photo to process...")
-    page.wait_for_timeout(WAIT_TIMES["vk"])
+
+    def _photo_attached():
+        return page.evaluate("""() => {
+            const compose = document.querySelector('[class*="PostForm"],[class*="wall_post"],[class*="compose"]');
+            return !!(compose && compose.querySelectorAll('img').length > 0);
+        }""")
+
+    _elapsed = 0
+    _poll_ms = 1000
+    while _elapsed < WAIT_TIMES["vk"]:
+        if _photo_attached():
+            break
+        page.wait_for_timeout(_poll_ms)
+        _elapsed += _poll_ms
 
     # Click "Next" button
     print("  Clicking Next...")
@@ -1779,6 +1866,31 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
         print("  --no-submit: skipping publish")
         wall_url = "NO_SUBMIT"
     else:
+        # Verify a photo is actually attached before publishing -- this
+        # function previously had no verification at all (just a flat 5s
+        # wait and an unconditional "success"). Same <img>-detection
+        # pattern already proven in suggest_post_to_vk_group().
+        photo_check = page.evaluate("""() => {
+            const compose = document.querySelector('[class*="PostForm"],[class*="wall_post"],[class*="compose"]');
+            if (compose) {
+                const imgs = compose.querySelectorAll('img');
+                if (imgs.length > 0) return {found: true, count: imgs.length, scope: 'compose'};
+            }
+            const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+            const visible = dialogs.filter(d => {
+                const r = d.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            });
+            if (visible.length > 0) {
+                const imgs = visible[visible.length - 1].querySelectorAll('img');
+                if (imgs.length > 0) return {found: true, count: imgs.length, scope: 'dialog'};
+            }
+            return {found: false, count: 0, scope: 'none'};
+        }""")
+        print(f"    Photo attachment check: {photo_check}")
+        if not photo_check.get("found"):
+            return {"success": False, "url_vk": "", "error": "No photo attachment detected before publish"}
+
         # Click "Publish" button
         print("  Publishing...")
         try:
@@ -1878,7 +1990,14 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     if "/404" in page.url:
         return {"success": False, "error": f"Group not found: {group_slug}"}
 
-    # Click "Suggest post" button — same pattern as "Create post" on the feed page
+    # Click "Suggest post" button — same pattern as "Create post" on the feed page.
+    # Groups where Erik has admin/contributor rights (e.g. club101580879,
+    # confirmed live 2026-09-01) show a direct "Create" button instead of a
+    # suggestion flow -- try that as a last fallback. The submit-button
+    # detection further down already has generic fallbacks (dialog position,
+    # whole-page text) that don't depend on "Suggest post" specifically, so
+    # the rest of the flow should still work even though the entry point
+    # differs here.
     print(f"    Clicking 'Suggest post'...")
     try:
         suggest_btn = page.locator('text="Suggest post"').first
@@ -1892,7 +2011,12 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
                 suggest_btn = page.locator('text="Suggest a post"').first
                 suggest_btn.click(timeout=5000)
             except Exception:
-                return {"success": False, "error": f"Could not find 'Suggest post' button in {group_slug}"}
+                try:
+                    suggest_btn = page.locator('button:has-text("Create"), [role="button"]:has-text("Create")').first
+                    suggest_btn.click(timeout=5000)
+                    print(f"      Used 'Create' button (admin/contributor group)")
+                except Exception:
+                    return {"success": False, "error": f"Could not find 'Suggest post' or 'Create' button in {group_slug}"}
     page.wait_for_timeout(2000)
 
     # Handle stuck draft — click "Start over" if VK shows a saved draft dialog
@@ -2093,7 +2217,7 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
         next_btn.click(timeout=5000)
     except Exception:
         return {"success": False, "error": f"Could not find Next button in {group_slug}"}
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(5000)
 
     if no_submit:
         print(f"    --no-submit: skipping suggest")
@@ -2226,7 +2350,37 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     if not coords:
         return {"success": False, "error": f"Could not find submit button in {group_slug}"}
     print(f"      Found '{coords['text']}' via {coords.get('method','?')} at ({coords['x']:.0f}, {coords['y']:.0f}) — clicking via mouse")
-    page.wait_for_timeout(1000)  # pause before clicking — lets toggle settle and allows visual check
+    page.wait_for_timeout(2000)  # pause before clicking — lets toggle settle and allows visual check
+
+    # Verify a photo is actually attached before submitting -- confirmed
+    # live 2026-09-01: the dialog-close check below can report "success"
+    # even when the photo silently never attached (paprika_mag posted
+    # caption-only twice despite passing that check both times). This
+    # doesn't replace the dialog-close check, it's an earlier, more
+    # specific gate on top of it -- same <img>-detection pattern already
+    # used for the silent-draft check earlier in this function.
+    photo_check = page.evaluate("""() => {
+        const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+        const visible = dialogs.filter(d => {
+            const r = d.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        });
+        if (visible.length > 0) {
+            const dialog = visible[visible.length - 1];
+            const imgs = dialog.querySelectorAll('img');
+            if (imgs.length > 0) return {found: true, count: imgs.length, scope: 'dialog'};
+        }
+        const compose = document.querySelector('[class*="PostForm"],[class*="wall_post"],[class*="compose"]');
+        if (compose) {
+            const imgs = compose.querySelectorAll('img');
+            if (imgs.length > 0) return {found: true, count: imgs.length, scope: 'compose'};
+        }
+        return {found: false, count: 0, scope: 'none'};
+    }""")
+    print(f"      Photo attachment check: {photo_check}")
+    if not photo_check.get("found"):
+        return {"success": False, "error": f"No photo attachment detected before submit in {group_slug} (checked dialog + compose area)"}
+
     page.mouse.click(coords["x"], coords["y"])
 
     # Verify success: the Settings dialog should close within 8s
@@ -2239,6 +2393,13 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
             });
         }""", timeout=8000)
         print(f"    Suggested to {group_slug}")
+        # Extra settle time before moving on to the next group -- the dialog
+        # closing client-side isn't necessarily synced with VK finishing the
+        # photo attachment server-side (confirmed live 2026-09-01: posts
+        # showed up caption-only, no photo, despite this check passing).
+        # Simple interim fix while a real attachment-presence check is
+        # evaluated -- see suggest_post_to_vk_group's docstring/history.
+        page.wait_for_timeout(4000)
         return {"success": True, "error": ""}
     except Exception:
         return {"success": False, "error": f"Dialog did not close after submit click in {group_slug} — wrong button may have been clicked"}
@@ -2515,6 +2676,14 @@ def upload_to_instagram(caption, image_path, ig_config, no_submit=False, collabo
             print(f"    Hosted at: {image_url}")
         except Exception as e:
             return {"success": False, "url_ig": "", "error": f"Cloudinary upload failed: {e}"}
+        # Give Cloudinary's CDN a moment to propagate before Facebook's
+        # fetcher tries to pull it -- observed live 2026-09-17 (PH-2026-195):
+        # container creation failed with "media could not be fetched" ~2s
+        # after upload, on an image_url that returned a clean 200 moments
+        # later (checked manually, including with facebookexternalhit's UA).
+        # 4s wasn't enough -- same-day retest still failed first-attempt at
+        # 4s and only succeeded on the existing 10s retry pass.
+        time.sleep(10)
     else:
         print("  Uploading image to imgbb (fallback)...")
         try:
@@ -2991,37 +3160,100 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
     except Exception as e:
         return {"success": False, "url_fb": "", "error": f"Could not open composer: {e}"}
 
-    # Attach photo FIRST — Facebook resets the text area when a photo is added
+    # Attach photo FIRST — Facebook resets the text area when a photo is added.
+    # All lookups are scoped to the composer dialog: the home page has other hidden
+    # image file inputs, and set_input_files() on one of those attaches nothing.
+    def fb_composer():
+        """Dialog that contains the post textbox (the Create post composer)."""
+        return page.locator('[role="dialog"]:has([contenteditable="true"][role="textbox"])').last
+
+    def fb_photo_attached():
+        """True if the composer dialog shows an attached-photo preview."""
+        try:
+            return bool(fb_composer().evaluate("""(dlg) => {
+                const rm = dlg.querySelector('[aria-label="Remove photo"], [aria-label="Remove photo or video"], [aria-label="Remove"]');
+                if (rm) { const r = rm.getBoundingClientRect(); if (r.width > 0 && r.height > 0) return true; }
+                for (const img of dlg.querySelectorAll('img')) {
+                    const r = img.getBoundingClientRect();
+                    if (r.width >= 80 && r.height >= 80 &&
+                        (img.src.startsWith('blob:') || img.src.startsWith('data:'))) return true;
+                }
+                return false;
+            }"""))
+        except Exception:
+            return False
+
     print("  Uploading photo...")
+    attach_err = None
     try:
-        # Try direct file input first (Facebook often has hidden file inputs)
-        file_input = page.locator('input[type="file"][accept*="image"]')
-        if file_input.count() > 0:
-            file_input.first.set_input_files(image_path)
-            print(f"    Photo attached via file input")
+        dlg_input = fb_composer().locator('input[type="file"][accept*="image"]')
+        if dlg_input.count() > 0:
+            dlg_input.first.set_input_files(image_path)
+            print("    Photo attached via composer file input")
         else:
-            # Click the photo/video button to trigger file chooser
             with page.expect_file_chooser(timeout=5000) as fc_info:
-                photo_btn = page.locator(
+                fb_composer().locator(
                     '[aria-label="Photo/video"], [aria-label="Photo/Video"], '
-                    '[aria-label*="photo"], [aria-label*="Photo"]'
-                ).first
-                photo_btn.click(timeout=3000)
-            file_chooser = fc_info.value
-            file_chooser.set_files(image_path)
-            print(f"    Photo attached via file chooser")
+                    '[aria-label*="photo" i]'
+                ).first.click(timeout=3000)
+            fc_info.value.set_files(image_path)
+            print("    Photo attached via file chooser")
     except Exception as e:
-        # Last fallback: try any file input that appeared
-        file_input = page.locator('input[type="file"]')
-        if file_input.count() > 0:
-            file_input.first.set_input_files(image_path)
-            print(f"    Fallback: photo set on input directly")
-        else:
-            return {"success": False, "url_fb": "", "error": f"Could not attach photo: {e}"}
+        attach_err = e
+        print(f"    WARNING: scoped attach failed: {e}")
 
     # Wait for photo to upload/process
     print("  Waiting for photo to process...")
     page.wait_for_timeout(WAIT_TIMES["facebook"])
+
+    if not fb_photo_attached():
+        # Last resort: any image file input on the page, then re-check
+        try:
+            any_input = page.locator('input[type="file"]')
+            if any_input.count() > 0:
+                any_input.first.set_input_files(image_path)
+                print("    Fallback: photo set on page-level input")
+                page.wait_for_timeout(WAIT_TIMES["facebook"])
+        except Exception as e:
+            print(f"    WARNING: fallback attach failed: {e}")
+    if not fb_photo_attached():
+        return {"success": False, "url_fb": "",
+                "error": f"Photo not attached in composer (would post text-only); attach error: {attach_err}"}
+    print("    Photo preview confirmed in composer")
+
+    def fb_chip_pos(texts):
+        """Find a top-of-composer chip (People / Feeling/activity / Location) by visible text.
+        Facebook's 2026-09 composer redesign replaced the aria-label icons in the
+        'Add to your post' bar with these text chips."""
+        return page.evaluate(r"""(texts) => {
+            const want = texts.map(t => t.toLowerCase());
+            const boxes = document.querySelectorAll('[contenteditable="true"][role="textbox"]');
+            let root = document;
+            for (const b of boxes) { const d = b.closest('[role="dialog"]'); if (d) root = d; }
+            for (const el of root.querySelectorAll('[role="button"], button, [aria-label]')) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                const label = (el.textContent || '').trim().toLowerCase();
+                const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+                if (!want.includes(label) && !want.includes(aria)) continue;
+                const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+                for (const ov of document.elementsFromPoint(cx, cy)) {
+                    if (ov === el || el.contains(ov) || ov.contains(el)) break;
+                    ov.style.pointerEvents = 'none';
+                }
+                return {ok: true, x: cx, y: cy, btnY: Math.round(cy)};
+            }
+            return {ok: false, reason: 'no chip found for ' + texts.join('/')};
+        }""", texts)
+
+    def fb_shot(tag):
+        """Debug screenshot of the composer state, saved under logs/."""
+        try:
+            _d = Path(__file__).parent / "logs"
+            _d.mkdir(exist_ok=True)
+            page.screenshot(path=str(_d / f"fb_{tag}_{datetime.now():%Y%m%d_%H%M%S}.png"))
+        except Exception:
+            pass
 
     # Location — click the red pin icon ("Check in") in the composer's "Add to your post" bar.
     # IMPORTANT: Multiple [aria-label="Check in"] exist on page. We must find the one INSIDE
@@ -3066,12 +3298,15 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
                         btnY: Math.round(cy)};
             }""")
             if not btn_pos.get("ok"):
+                btn_pos = fb_chip_pos(["Location", "Check in"])
+            if not btn_pos.get("ok"):
                 raise Exception(btn_pos.get("reason"))
             print(f"    Clicked Check-in pin at y={btn_pos['btnY']}")
             page.mouse.click(btn_pos["x"], btn_pos["y"])
 
             # Wait for the location search panel to appear
             page.wait_for_timeout(3000)
+            fb_shot("location_panel")
 
             # Step 2: Type location in the search field
             page.keyboard.type(location, delay=50)
@@ -3177,10 +3412,13 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
             }""")
 
             if not btn_pos.get("ok"):
+                btn_pos = fb_chip_pos(["Feeling/activity", "Feeling/Activity"])
+            if not btn_pos.get("ok"):
                 raise Exception(btn_pos.get("reason"))
             print(f"    Clicked Feeling/activity at y={btn_pos['btnY']}")
             page.mouse.click(btn_pos["x"], btn_pos["y"])
             page.wait_for_timeout(3000)
+            fb_shot("feeling_panel")
 
             picked = page.evaluate(r"""(target) => {
                 const q = target.toLowerCase().trim();
@@ -3262,10 +3500,13 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
                 }""")
 
                 if not btn_pos.get("ok"):
+                    btn_pos = fb_chip_pos(["People", "Tag people"])
+                if not btn_pos.get("ok"):
                     raise Exception(btn_pos.get("reason"))
                 print(f"    Clicked Tag people at y={btn_pos['btnY']}")
                 page.mouse.click(btn_pos["x"], btn_pos["y"])
                 page.wait_for_timeout(3000)
+                fb_shot("people_panel")
 
                 for i, handle in enumerate(handles):
                     print(f"    Searching for: {handle}")
@@ -3512,6 +3753,12 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
     # Submit — Facebook has overlay divs that intercept pointer events.
     # Use elementsFromPoint() to find and disable ALL overlays above the button.
     print("  Posting...")
+    try:
+        _d = Path(__file__).parent / "logs"
+        _d.mkdir(exist_ok=True)
+        page.screenshot(path=str(_d / f"fb_prepost_{datetime.now():%Y%m%d_%H%M%S}.png"))
+    except Exception:
+        pass
 
     def fb_find_and_click_submit(label):
         """
@@ -3769,6 +4016,19 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     # ── Fill form fields ─────────────────────────────────────
     print("\n  Filling form...")
     title = get_effective_title(row)
+    # DA's title input has a hard maxlength=50 (confirmed directly from its
+    # DOM, 2026-08-31). The submission form now blocks new rows from
+    # exceeding this, but older rows already in the queue can still carry
+    # an over-length title -- drop the "(Serial)" suffix rather than
+    # truncate mid-word, matching the queue_manager.html form's own
+    # over-limit handling. If the bare title (no suffix) is STILL over 50,
+    # leave it as-is; the validation further down will catch and fail the
+    # row safely rather than publish something silently cut short.
+    DA_TITLE_LIMIT = 50
+    if len(title) > DA_TITLE_LIMIT:
+        bare_title = row.get("title", "").strip()
+        print(f"  Title is {len(title)} chars (DA limit {DA_TITLE_LIMIT}) -- dropping serial suffix, using bare title ({len(bare_title)} chars)")
+        title = bare_title
     nsfw_flag = row.get("da_nsfw_flag", "FALSE").strip().upper()
 
     # 1. TITLE — input[name="title"] (React controlled). Text passed as an
@@ -4146,6 +4406,32 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
     except Exception as e:
         print(f"    WARNING: Advanced settings: {e}")
 
+    # ── Verify the title stuck; fall back to real keystrokes if not ────
+    # DA's own React app appears to sometimes reassert its default title
+    # (the original uploaded file's name) over our JS-level set -- confirmed
+    # in production at least 4 times (PH-2026-150, 151, 164, 179). But this
+    # is the exception, not the rule -- the JS-level set (native setter +
+    # dispatchEvent) works correctly on the vast majority of uploads, so it
+    # stays the primary method. Only if a post-set check shows it didn't
+    # stick do we fall back to Playwright's own locator.fill(), which
+    # injects input via CDP (a real, trusted browser-level interaction,
+    # unlike a JS-dispatched synthetic event) -- mechanistically different
+    # from what's already been tried, rather than just repeating the same
+    # method that we know can lose deterministically (confirmed 2026-08-31:
+    # 8 straight retries of the JS method all reverted identically).
+    current = page.evaluate("""
+        (() => {
+            const el = document.querySelector('input[name="title"]');
+            return el ? el.value.trim() : '';
+        })()
+    """)
+    if current.strip() != title.strip():
+        print(f"  Title shows '{current[:40]}', not what we set -- falling back to real keystrokes...")
+        title_input = page.locator('input[name="title"]')
+        title_input.click()
+        title_input.fill(title)
+        page.wait_for_timeout(500)
+
     # ── Validate before submit ────────────────────────────────
     validation = page.evaluate("""
         (() => {
@@ -4161,6 +4447,14 @@ def upload_to_da(page, row, desc_full, tags, groups, no_submit=False):
 
     if not validation["title"]:
         return {"success": False, "deviation_url": "", "error": "NO_TITLE — title field is empty"}
+
+    # Confirm the field actually matches what we intended -- catches the
+    # case where DA's own default silently overwrote our value despite
+    # the field being non-empty (exactly what happened in the 3 known
+    # cases above -- all published successfully with no error).
+    if validation["title"].strip() != title.strip():
+        return {"success": False, "deviation_url": "",
+                "error": f"TITLE_MISMATCH — expected '{title[:60]}', field shows '{validation['title'][:60]}'"}
 
     # ── Submit ────────────────────────────────────────────────
     if no_submit:
@@ -4343,7 +4637,16 @@ def main():
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             apply_stealth(page)
             def login_step(url, msg, next_msg):
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                except PlaywrightTimeout:
+                    # VK and DeviantArt in particular can be slow to respond
+                    # (confirmed 2026-08-30) -- a single slow load used to
+                    # crash the whole 8-step login flow and force starting
+                    # over from 500px. Give it one longer retry before
+                    # actually giving up.
+                    print(f"  ({url} slow to load, retrying with a longer timeout...)")
+                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 print(msg)
                 print(f"Press ENTER when done ({next_msg})...")
                 input()
@@ -4357,7 +4660,11 @@ def main():
             login_step("https://500px.com/login",         "Log into 500px in the browser window.",    "will open 35photo next")
             login_step("https://35photo.pro/login/",      "Log into 35photo in the browser window.",  "will open VK next")
             login_step("https://vk.com/login",            "Log into VK in the browser window.",       "will open X next")
-            page.goto("https://x.com", wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.goto("https://x.com", wait_until="domcontentloaded", timeout=30000)
+            except PlaywrightTimeout:
+                print("  (x.com slow to load, retrying with a longer timeout...)")
+                page.goto("https://x.com", wait_until="domcontentloaded", timeout=60000)
             print("Log into X.com in the browser window.")
             print("  → Click 'Sign in' on the page yourself")
             print("Press ENTER when done (will open Bluesky next)...")

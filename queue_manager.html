@@ -1444,7 +1444,7 @@
           <div class="form-full" id="ai-panel-container" style="display:none"></div>
           <div class="form-full">
             <div class="auto-row">
-              <div class="fg"><label>Title</label><input type="text" id="m-title" placeholder="e.g. Morning Light Study"></div>
+              <div class="fg"><label>Title <span id="m-title-counter" style="font-weight:400;color:var(--muted)"></span></label><input type="text" id="m-title" placeholder="e.g. Morning Light Study" oninput="updateTitleCounter()"></div>
               <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap"
                 onclick="document.getElementById('m-title').value=''">Clear</button>
             </div>
@@ -1467,7 +1467,7 @@
           </div>
           <div class="fg form-full">
             <label>Serial Title <span style="color:var(--accent)">*</span> <span style="font-weight:400;opacity:.6;font-size:11px">Appended to title: "Title (Serial Title)"</span></label>
-            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off">
+            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off" oninput="updateTitleCounter()">
             <datalist id="serial-title-list"></datalist>
           </div>
           <div class="form-full">
@@ -1546,8 +1546,8 @@
           <div class="form-section">Per-Platform Metadata</div>
           <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">500px</div>
           <div class="fg">
-            <label>500px Category</label>
-            <select id="m-cat-500px">
+            <label>500px Category (unused — 500px removed category selection from its upload flow, 2026-09-10)</label>
+            <select id="m-cat-500px" disabled title="500px no longer supports setting a category at upload; this field is kept for old rows' historical data only.">
               <option value="">— select —</option>
               <option>City and Architecture</option>
               <option>Nude</option>
@@ -2629,6 +2629,7 @@
       document.getElementById('m-safe').value = r.stash_url_safe || '';
       document.getElementById('m-title').value = r.title || '';
       document.getElementById('m-serial-title').value = r.serial_title || '';
+      updateTitleCounter();
       document.getElementById('m-caption').value = r.caption || '';
       document.getElementById('m-keywords').value = r.keywords || '';
       document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
@@ -2717,10 +2718,18 @@
       const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY', 'IG'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky', 'p-ig'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
       if (!document.getElementById('m-title').value.trim()) { toast('Title is required', 'error'); return; }
-      if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
+      // 500px category requirement removed 2026-09-10 -- 500px dropped category
+      // selection from its own upload flow, so upload.py no longer sets it.
       if (platforms.includes('35P') && !document.getElementById('m-cat-35p').value) { toast('35photo category is required', 'error'); return; }
       if (needsModelName() && !document.getElementById('m-model-name').value.trim()) { toast('Model name is required for this category', 'error'); return; }
       if (!document.getElementById('m-serial-title').value.trim()) { toast('Serial Title is required', 'error'); return; }
+      {
+        const combined = effectiveTitle(document.getElementById('m-title').value, document.getElementById('m-serial-title').value);
+        if (combined.length > DA_TITLE_LIMIT) {
+          toast(`Title + serial is ${combined.length} chars, DeviantArt's limit is ${DA_TITLE_LIMIT} -- shorten the title or the serial`, 'error');
+          return;
+        }
+      }
       if (document.getElementById('m-film-used').checked) {
         if (!document.getElementById('m-film-camera').value.trim()) { toast('Camera is required when Film Used is checked', 'error'); return; }
         if (!document.getElementById('m-film-stock').value.trim()) { toast('Film Stock is required when Film Used is checked', 'error'); return; }
@@ -3134,7 +3143,7 @@
     function getAiModel() { const m = localStorage.getItem('ai_model'); return (m && AI_MODELS[m]) ? m : AI_MODEL_DEFAULT; }
     const AI_PROMPT_DEFAULT = `You are a metadata generator for fine art photography. Analyze this photo and generate:
 
-1. THREE title options (3-8 words each), one in each style:
+1. THREE title options (3-8 words each), one in each style. IMPORTANT: DeviantArt has a hard 50-character limit on "Title (Serial)" combined, and the serial suffix (e.g. " (Sienna 65)") typically takes up 10-18 characters -- keep each title to 32 characters or fewer so there's room for it. Titles over this will get rejected downstream.
    - Title 1 — Poetic/Artistic: evocative, emotional, metaphorical (e.g. "The Weight of Stillness", "Where Light Learns to Breathe")
    - Title 2 — Poetic Minimalist: artistic yet understated, clean, 3-5 words (e.g. "Morning, Film", "Still", "Quiet Corner")
    - Title 3 — Technical: descriptive, referencing gear or technique (e.g. "Kodak Tri-X at Golden Hour", "50mm Street Study")
@@ -3150,12 +3159,10 @@
    - No spaces or hyphens within tags
    - Cover these categories as appropriate: location, subject, technique, mood/aesthetic, composition, genre, discovery terms, gear
 
-4. Suggested 500px category (exactly one of: City and Architecture, Nude, People, Street)
-
-5. Suggested 35photo category (exactly one of: Female portrait, City/Architecture, Fine Nudes, Portrait)
+4. Suggested 35photo category (exactly one of: Female portrait, City/Architecture, Fine Nudes, Portrait)
 
 Return ONLY valid JSON, no markdown fences:
-{"titles":["...","...","..."],"captions":["...","...","..."],"keywords":["tag1","tag2",...30 tags],"category_500px":"...","category_35p":"..."}`;
+{"titles":["...","...","..."],"captions":["...","...","..."],"keywords":["tag1","tag2",...30 tags],"category_35p":"..."}`;
 
     function getAiKey() { return localStorage.getItem('anthropic_api_key') || ''; }
     function getAiPrompt() { return localStorage.getItem('ai_prompt') || AI_PROMPT_DEFAULT; }
@@ -3798,59 +3805,77 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('model-lookup-form').style.display = 'none';
     }
 
+    // DeviantArt's title input has a hard maxlength=50 (confirmed directly
+    // from its DOM, 2026-08-31) -- exceeding it silently breaks the upload
+    // automation (confirmed in production on PH-2026-150, 151, 164, 179:
+    // DA either reverts the whole title to the file's raw name, or the
+    // fallback method truncates it mid-word). Catching this here, at entry
+    // time, is much better than handling it downstream in the pipeline.
+    const DA_TITLE_LIMIT = 50;
+    function effectiveTitle(title, serial) {
+      title = (title || '').trim();
+      serial = (serial || '').trim();
+      return serial ? `${title} (${serial})`.trim() : title;
+    }
+    function updateTitleCounter() {
+      const el = document.getElementById('m-title-counter');
+      if (!el) return;
+      const title = document.getElementById('m-title').value;
+      const serial = document.getElementById('m-serial-title').value;
+      const len = effectiveTitle(title, serial).length;
+      el.textContent = `${len}/${DA_TITLE_LIMIT}`;
+      el.style.color = len > DA_TITLE_LIMIT ? 'var(--error)' : 'var(--muted)';
+    }
+
     // Auto-fill form fields when model name is selected
     function applyModelLookup(modelName) {
       if (!modelName) return;
       const arr = getModelLookup();
-      const m = arr.find(x => x.name.toLowerCase() === modelName.toLowerCase());
-      if (!m) return;
+      // Supports a comma-separated list for shoots with more than one model,
+      // e.g. "Avital Bartz, Noy Harel" -- each name is looked up separately
+      // and the results are merged (see per-field handling below).
+      const names = modelName.split(',').map(n => n.trim()).filter(Boolean);
+      const matches = names.map(n => arr.find(x => x.name.toLowerCase() === n.toLowerCase())).filter(Boolean);
+      if (!matches.length) return;
 
-      // DA Gallery — check the matching gallery checkbox (in addition to Featured)
-      if (m.da_gallery) {
-        document.querySelectorAll('#m-da-gallery-list input').forEach(cb => {
-          if (cb.value === m.da_gallery) cb.checked = true;
-        });
-      }
+      // DA Gallery — check every matched model's gallery checkbox (in addition
+      // to Featured). Additive by nature (checking one box doesn't uncheck
+      // another), so this works the same whether there's one model or several.
+      matches.forEach(m => {
+        if (m.da_gallery) {
+          document.querySelectorAll('#m-da-gallery-list input').forEach(cb => {
+            if (cb.value === m.da_gallery) cb.checked = true;
+          });
+        }
+      });
 
-      // Serial title — derive prefix from DA gallery, match "Gallery N" or "Gallery #N"
-      if (m.da_gallery) {
-        const escaped = m.da_gallery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Serial title — derived from the FIRST matched model's DA gallery
+      // prefix only. A shared shoot doesn't get its own serial convention;
+      // it just continues the first-listed model's numbering.
+      const primary = matches[0];
+      if (primary.da_gallery) {
+        const escaped = primary.da_gallery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = new RegExp('^' + escaped + '\\s+#?(\\d+)$', 'i');
         let maxN = 0;
         rows.forEach(r => { const match = (r.serial_title || '').match(re); if (match) maxN = Math.max(maxN, parseInt(match[1])); });
         const serialEl = document.getElementById('m-serial-title');
-        if (serialEl) serialEl.value = m.da_gallery + ' ' + (maxN + 1);
+        if (serialEl) serialEl.value = primary.da_gallery + ' ' + (maxN + 1);
       }
 
-      // FB tags — set if empty
-      if (m.fb_tags) {
-        const fbEl = document.getElementById('m-fb-tag-people');
-        if (fbEl && !fbEl.value.trim()) fbEl.value = m.fb_tags;
+      // Social handles — combine every matched model's handle per platform
+      // (comma-joined), only filling a field that's currently empty so a
+      // manual edit is never overwritten.
+      function fillCombined(elId, key) {
+        const el = document.getElementById(elId);
+        if (!el || el.value.trim()) return;
+        const vals = matches.map(m => m[key]).filter(Boolean);
+        if (vals.length) el.value = vals.join(', ');
       }
-
-      // VK tags — set if empty
-      if (m.vk_tags) {
-        const vkEl = document.getElementById('m-vk-tag-people');
-        if (vkEl && !vkEl.value.trim()) vkEl.value = m.vk_tags;
-      }
-
-      // X handle — set if empty
-      if (m.x_handle) {
-        const xEl = document.getElementById('m-x-tag-people');
-        if (xEl && !xEl.value.trim()) xEl.value = m.x_handle;
-      }
-
-      // Bluesky handle — set if empty
-      if (m.bsky_handle) {
-        const bskyEl = document.getElementById('m-bsky-tag-people');
-        if (bskyEl && !bskyEl.value.trim()) bskyEl.value = m.bsky_handle;
-      }
-
-      // Instagram handle — set if empty
-      if (m.ig_handle) {
-        const igEl = document.getElementById('m-ig-tag-people');
-        if (igEl && !igEl.value.trim()) igEl.value = m.ig_handle;
-      }
+      fillCombined('m-fb-tag-people', 'fb_tags');
+      fillCombined('m-vk-tag-people', 'vk_tags');
+      fillCombined('m-x-tag-people', 'x_handle');
+      fillCombined('m-bsky-tag-people', 'bsky_handle');
+      fillCombined('m-ig-tag-people', 'ig_handle');
     }
 
     // ── LOCATION LOOKUP ───────────────────────────────────────────────────────────

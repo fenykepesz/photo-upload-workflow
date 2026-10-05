@@ -61,3 +61,21 @@ VK_data.json
 # Backup files
 *.bak
 *.bak2
+
+# restart_vnc.sh gets the same VPS-only treatment as run_upload.sh etc. above
+restart_vnc.sh
+
+# Server-only backend (Tailscale-bound Flask app) — deliberately never
+# committed to this public repo; covered by the private hermes-config-backup
+# repo instead.
+queue_server.py
+
+# Runtime artifacts / caches — regenerated, never meaningful to diff
+hermes_version_cache.json
+infra_update_cache.json
+upload_queue.csv.lock
+logs/
+
+# Old manual backup files, predates the ~/.hermes-manual-backups/ convention
+upload.py.main-backup
+upload.py.pre-reliability-merge-*
