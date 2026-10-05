@@ -52,3 +52,26 @@ VK_data.json
 # Backup files
 *.bak
 *.bak2
+
+# VPS-only wrapper/integration scripts — deliberately never committed
+run_upload.sh
+run_login.sh
+run_nosubmit.sh
+erikrozman_publish.py
+restart_vnc.sh
+
+# Server-only backend (Tailscale-bound Flask app) — deliberately never
+# committed to this public repo; covered by the private hermes-config-backup
+# repo instead.
+queue_server.py
+
+# Runtime artifacts / caches — regenerated, never meaningful to diff
+image_cache_stats.json
+hermes_version_cache.json
+infra_update_cache.json
+upload_queue.csv.lock
+logs/
+
+# Old manual backup files, predates the ~/.hermes-manual-backups/ convention
+upload.py.main-backup
+upload.py.pre-reliability-merge-*

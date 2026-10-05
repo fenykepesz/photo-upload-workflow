@@ -846,6 +846,33 @@
       border-left: 3px solid var(--accent);
     }
 
+    /* ── SAVE-FAIL BANNER ── */
+    /* Persistent (no auto-dismiss, unlike .toast) -- stays up until a save
+       actually succeeds again, so a save failure can't quietly get missed
+       the way a 3.5s toast can during heads-down data entry. */
+    .save-fail-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      background: var(--error);
+      color: #fff;
+      padding: 10px 20px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .save-fail-banner .btn {
+      background: #fff;
+      color: var(--error);
+      border: none;
+    }
+
     @keyframes slide-in {
       from {
         transform: translateX(16px);
@@ -1035,7 +1062,7 @@
         <circle cx="8.5" cy="8.5" r="1.5" />
         <polyline points="21 15 16 10 5 21" />
       </svg>
-      Photo Upload Queue <span>· v2.7.1</span>
+      Photo Upload Queue <span>· v2.8.6</span>
     </div>
     <button class="icon-btn ai-key-btn" id="ai-key-btn" onclick="openSettings('ai')" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
@@ -1417,7 +1444,7 @@
           <div class="form-full" id="ai-panel-container" style="display:none"></div>
           <div class="form-full">
             <div class="auto-row">
-              <div class="fg"><label>Title</label><input type="text" id="m-title" placeholder="e.g. Morning Light Study"></div>
+              <div class="fg"><label>Title <span id="m-title-counter" style="font-weight:400;color:var(--muted)"></span></label><input type="text" id="m-title" placeholder="e.g. Morning Light Study" oninput="updateTitleCounter()"></div>
               <button class="btn btn-sm btn-ghost" style="margin-top:22px;white-space:nowrap"
                 onclick="document.getElementById('m-title').value=''">Clear</button>
             </div>
@@ -1440,7 +1467,7 @@
           </div>
           <div class="fg form-full">
             <label>Serial Title <span style="color:var(--accent)">*</span> <span style="font-weight:400;opacity:.6;font-size:11px">Appended to title: "Title (Serial Title)"</span></label>
-            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off">
+            <input type="text" id="m-serial-title" placeholder="e.g. No. 3 or — Bangkok Series" list="serial-title-list" autocomplete="off" oninput="updateTitleCounter()">
             <datalist id="serial-title-list"></datalist>
           </div>
           <div class="form-full">
@@ -1519,8 +1546,8 @@
           <div class="form-section">Per-Platform Metadata</div>
           <div class="form-section" style="grid-column:1/-1;color:var(--accent);opacity:.8">500px</div>
           <div class="fg">
-            <label>500px Category</label>
-            <select id="m-cat-500px">
+            <label>500px Category (unused — 500px removed category selection from its upload flow, 2026-09-10)</label>
+            <select id="m-cat-500px" disabled title="500px no longer supports setting a category at upload; this field is kept for old rows' historical data only.">
               <option value="">— select —</option>
               <option>City and Architecture</option>
               <option>Nude</option>
@@ -1887,12 +1914,12 @@
       <!-- ── Studios panel ── -->
       <div class="s-panel" id="s-tab-studio">
         <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
-          Map studio names to platform handles for tagging. Set <strong>Studio</strong> in the photo form to include a studio credit line and auto-tag them on upload.
+          Map studio names to platform handles for tagging and a default location. Set <strong>Studio</strong> in the photo form to include a studio credit line, auto-tag them on upload, and auto-fill the Location field if it's still empty.
         </div>
         <div class="s-section-title">Studio Lookup Table</div>
         <table class="s-data-table" id="studio-lookup-table">
-          <thead><tr><th>Name</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th>FB Tags</th><th style="width:90px"></th></tr></thead>
-          <tbody id="studio-lookup-tbody"><tr><td colspan="7" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr></tbody>
+          <thead><tr><th>Name</th><th>Location</th><th>X Handle</th><th>BSKY Handle</th><th>IG Handle</th><th>VK Handle</th><th>FB Tags</th><th style="width:90px"></th></tr></thead>
+          <tbody id="studio-lookup-tbody"><tr><td colspan="8" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr></tbody>
         </table>
         <div style="margin-top:10px"><button class="btn btn-sm" onclick="studioAddNew()">+ Add Studio</button></div>
 
@@ -1900,6 +1927,7 @@
           <div class="s-section-title" style="margin-bottom:8px" id="studio-form-title">Add Studio</div>
           <input type="hidden" id="studio-edit-name">
           <div class="s-field"><span class="s-field-label">Name</span><input type="text" id="studio-name" placeholder="e.g. Studio Lumière" autocomplete="off"></div>
+          <div class="s-field"><span class="s-field-label">Location</span><input type="text" id="studio-location" placeholder="e.g. Budapest, Hungary" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">X Handle</span><input type="text" id="studio-x-handle" placeholder="e.g. studiolumiere (without @)" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">BSKY Handle</span><input type="text" id="studio-bsky-handle" placeholder="e.g. studiolumiere.bsky.social" autocomplete="off"></div>
           <div class="s-field"><span class="s-field-label">IG Handle</span><input type="text" id="studio-ig-handle" placeholder="e.g. studiolumiere (without @)" autocomplete="off"></div>
@@ -1924,6 +1952,11 @@
   </div>
 
   <div class="toasts" id="toasts"></div>
+
+  <div id="save-fail-banner" class="save-fail-banner" style="display:none">
+    <span>⚠ Not saved to server — check your connection. Last attempt failed at <span id="save-fail-time"></span>.</span>
+    <button class="btn btn-sm" onclick="retrySave()">Retry now</button>
+  </div>
 
   <script>
     // ── STATE ──────────────────────────────────────────────────────────────────────
@@ -2054,8 +2087,26 @@
       } catch (e) { if (e.name !== 'AbortError') toast('Load error: ' + e.message, 'error'); }
     }
     let _pendingReconnectHandle = null;
+    let _loadedFromServer = false;
+    let _loadedConfigFromServer = false;
+    let _loadedDAFromServer = false;
+    let _loadedVKFromServer = false;
     async function autoLoadCSV() {
-      // Try to re-read from disk using stored fileHandle (always fresh)
+      // 1. Try HTTP fetch from server (works when served via queue_server.py)
+      try {
+        const res = await fetch('/upload_queue.csv', { cache: 'no-store' });
+        if (res.ok) {
+          const txt = await res.text();
+          rows = parseCSV(txt);
+          cacheCSV(txt, 'upload_queue.csv');
+          document.getElementById('file-label').textContent = '📄 upload_queue.csv (server)';
+          document.getElementById('btn-save').disabled = false;
+          _loadedFromServer = true;
+          refresh();
+          return;
+        }
+      } catch (e) { /* not served via HTTP — fall through */ }
+      // 2. Try to re-read from disk using stored fileHandle (always fresh)
       const storedFH = await getStoredFileHandle();
       if (storedFH) {
         try {
@@ -2111,9 +2162,52 @@
         loadCSV();
       }
     }
+    // Tracks whether the most recent save attempt failed, so repeated
+    // failures during an outage update the same persistent banner instead
+    // of stacking alert() popups or relying on an easy-to-miss toast.
+    let _saveFailing = false;
+
+    function onSaveOk() {
+      if (_saveFailing) {
+        _saveFailing = false;
+        document.getElementById('save-fail-banner').style.display = 'none';
+        toast('Reconnected — saved ✓', 'success');
+      } else {
+        toast('Saved to server ✓', 'success');
+      }
+    }
+
+    function onSaveFail(detail) {
+      const firstFailure = !_saveFailing;
+      _saveFailing = true;
+      document.getElementById('save-fail-time').textContent = new Date().toLocaleTimeString();
+      document.getElementById('save-fail-banner').style.display = 'flex';
+      if (firstFailure) {
+        alert('Save failed: ' + detail + '\n\nYour change is still here in the browser, but it has NOT reached the server. Keep this tab open and click "Retry now" (top of page) once your connection is back.');
+      }
+    }
+
+    async function retrySave() {
+      await saveCSV();
+    }
+
+    // True while a save-csv request is in flight, so the background poller
+    // (below) never refreshes `rows` out from under an edit that's on its
+    // way to the server but hasn't landed yet.
+    let _savingInFlight = false;
+
     async function saveCSV() {
       const csv = toCSV(rows);
       cacheCSV(csv, localStorage.getItem('csv_filename') || 'upload_queue.csv');
+      if (_loadedFromServer) {
+        _savingInFlight = true;
+        try {
+          const res = await fetch('/save-csv', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: csv });
+          if (res.ok) { onSaveOk(); return true; }
+          else { onSaveFail('server returned ' + res.status); return false; }
+        } catch (e) { onSaveFail(e.message); return false; }
+        finally { _savingInFlight = false; }
+      }
       try {
         if (!fileHandle && 'showSaveFilePicker' in window) {
           fileHandle = await showSaveFilePicker({
@@ -2124,14 +2218,19 @@
         if (fileHandle) {
           const w = await fileHandle.createWritable();
           await w.write(csv); await w.close();
-          toast('Saved ✓', 'success');
+          onSaveOk();
+          return true;
         } else {
           const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
           Object.assign(document.createElement('a'), { href: url, download: 'upload_queue.csv' }).click();
           URL.revokeObjectURL(url);
           toast('Downloaded CSV', 'info');
+          return true;
         }
-      } catch (e) { if (e.name !== 'AbortError') toast('Save error: ' + e.message, 'error'); }
+      } catch (e) {
+        if (e.name !== 'AbortError') { onSaveFail(e.message); return false; }
+        return false;
+      }
     }
 
     // ── RENDER ─────────────────────────────────────────────────────────────────────
@@ -2400,15 +2499,15 @@
       toast('Status → ' + s, 'info');
     }
     function deleteSel() { if (selId) deleteById(selId); }
-    function deleteById(id) {
+    async function deleteById(id) {
       if (!confirm(`Delete ${id}?`)) return;
       rows = rows.filter(r => r.upload_id !== id);
       if (selId === id) closeDetail();
-      refresh(); toast('Deleted', 'info');
-      saveCSV();
+      refresh();
+      if (await saveCSV()) toast('Deleted', 'info');
     }
 
-    function resetById(id) {
+    async function resetById(id) {
       const r = rows.find(x => x.upload_id === id);
       if (!r) return;
       const urls = ['da_deviation_url','url_500px','url_35p','url_vk','url_x','url_bsky','url_fb','url_ig']
@@ -2421,11 +2520,11 @@
         r[k] = '';
       }
       r.status = 'Approved';
-      selectRow(id); refresh(); saveCSV();
-      toast(`Reset ${id} — ready for re-upload`, 'success');
+      selectRow(id); refresh();
+      if (await saveCSV()) toast(`Reset ${id} — ready for re-upload`, 'success');
     }
 
-    function retryFailed(id) {
+    async function retryFailed(id) {
       const r = rows.find(x => x.upload_id === id);
       if (!r) return;
       if (r.status !== 'Partial' && r.status !== 'Failed') {
@@ -2450,8 +2549,8 @@
       if (!confirm(msg)) return;
       r.error_log = '';
       r.status = 'Approved';
-      selectRow(id); refresh(); saveCSV();
-      toast(`${id} — retrying ${willRetry.join(', ')}`, 'success');
+      selectRow(id); refresh();
+      if (await saveCSV()) toast(`${id} — retrying ${willRetry.join(', ')}`, 'success');
     }
 
     // ── MODAL ──────────────────────────────────────────────────────────────────────
@@ -2515,6 +2614,7 @@
       document.getElementById('p-da').checked = true;
       updateRequiredFields();
       document.getElementById('overlay').classList.add('open');
+      document.querySelector('.modal-body').scrollTop = 0;
     }
     function openEditModal() { if (selId) openEditById(selId); }
     function openEditById(id) {
@@ -2529,6 +2629,7 @@
       document.getElementById('m-safe').value = r.stash_url_safe || '';
       document.getElementById('m-title').value = r.title || '';
       document.getElementById('m-serial-title').value = r.serial_title || '';
+      updateTitleCounter();
       document.getElementById('m-caption').value = r.caption || '';
       document.getElementById('m-keywords').value = r.keywords || '';
       document.getElementById('m-nsfw-flag').checked = r.da_nsfw_flag === 'TRUE';
@@ -2604,9 +2705,10 @@
       if (r.mua_name) applyMuaLookup(r.mua_name);
       if (r.studio_name) applyStudioLookup(r.studio_name);
       document.getElementById('overlay').classList.add('open');
+      document.querySelector('.modal-body').scrollTop = 0;
     }
     function closeModal() { document.getElementById('overlay').classList.remove('open'); editId = null; }
-    function saveEntry() {
+    async function saveEntry() {
       const date = document.getElementById('m-date').value;
       const nsfw = document.getElementById('m-nsfw').value.trim();
       if (!date) { toast('Please set a scheduled date', 'error'); return; }
@@ -2616,10 +2718,18 @@
       const platforms = ['DA', '500PX', 'FB', '35P', 'VK', 'X', 'BSKY', 'IG'].filter((p, i) => document.getElementById(['p-da', 'p-500', 'p-fb', 'p-35', 'p-vk', 'p-x', 'p-bsky', 'p-ig'][i]).checked).join(',');
       if (!platforms) { toast('Select at least one platform', 'error'); return; }
       if (!document.getElementById('m-title').value.trim()) { toast('Title is required', 'error'); return; }
-      if (platforms.includes('500PX') && !document.getElementById('m-cat-500px').value) { toast('500px category is required', 'error'); return; }
+      // 500px category requirement removed 2026-09-10 -- 500px dropped category
+      // selection from its own upload flow, so upload.py no longer sets it.
       if (platforms.includes('35P') && !document.getElementById('m-cat-35p').value) { toast('35photo category is required', 'error'); return; }
       if (needsModelName() && !document.getElementById('m-model-name').value.trim()) { toast('Model name is required for this category', 'error'); return; }
       if (!document.getElementById('m-serial-title').value.trim()) { toast('Serial Title is required', 'error'); return; }
+      {
+        const combined = effectiveTitle(document.getElementById('m-title').value, document.getElementById('m-serial-title').value);
+        if (combined.length > DA_TITLE_LIMIT) {
+          toast(`Title + serial is ${combined.length} chars, DeviantArt's limit is ${DA_TITLE_LIMIT} -- shorten the title or the serial`, 'error');
+          return;
+        }
+      }
       if (document.getElementById('m-film-used').checked) {
         if (!document.getElementById('m-film-camera').value.trim()) { toast('Camera is required when Film Used is checked', 'error'); return; }
         if (!document.getElementById('m-film-stock').value.trim()) { toast('Film Stock is required when Film Used is checked', 'error'); return; }
@@ -2685,13 +2795,12 @@
         error_log: existing?.error_log || '',
       };
 
+      const wasEdit = !!editId;
       if (editId) {
         const idx = rows.findIndex(r => r.upload_id === editId);
         if (idx >= 0) rows[idx] = entry;
-        toast('Updated ✓', 'success');
       } else {
         rows.push(entry);
-        toast(`Added ${entry.upload_id}`, 'success');
       }
 
       saveModelName(entry.model_name);
@@ -2706,7 +2815,12 @@
       document.getElementById('btn-save').disabled = false;
       closeModal(); refresh();
       selectRow(entry.upload_id);
-      saveCSV();
+      // Wait for the save to actually reach the server before calling this
+      // done -- previously fire-and-forget, which is how 6 rows were lost
+      // to a silent connectivity gap on 2026-08-01 with no visible warning.
+      if (await saveCSV()) {
+        toast(wasEdit ? 'Updated ✓' : `Added ${entry.upload_id} ✓ (saved)`, 'success');
+      }
     }
 
     // ── UTILS ──────────────────────────────────────────────────────────────────────
@@ -2808,6 +2922,7 @@
         const res = await fetch('da_data.json');
         if (!res.ok) throw new Error('fetch failed');
         daData = await res.json();
+        _loadedDAFromServer = true;
         cacheDAData();
         populateDAChoices();
         if (interactive) toast('Galleries & Groups synced', 'success');
@@ -2904,6 +3019,7 @@
         const res = await fetch('VK_data.json');
         if (!res.ok) throw new Error('fetch failed');
         vkData = await res.json();
+        _loadedVKFromServer = true;
         cacheVKData();
         populateVKGroupsList();
         if (interactive) toast('VK Groups synced', 'success');
@@ -3027,7 +3143,7 @@
     function getAiModel() { const m = localStorage.getItem('ai_model'); return (m && AI_MODELS[m]) ? m : AI_MODEL_DEFAULT; }
     const AI_PROMPT_DEFAULT = `You are a metadata generator for fine art photography. Analyze this photo and generate:
 
-1. THREE title options (3-8 words each), one in each style:
+1. THREE title options (3-8 words each), one in each style. IMPORTANT: DeviantArt has a hard 50-character limit on "Title (Serial)" combined, and the serial suffix (e.g. " (Sienna 65)") typically takes up 10-18 characters -- keep each title to 32 characters or fewer so there's room for it. Titles over this will get rejected downstream.
    - Title 1 — Poetic/Artistic: evocative, emotional, metaphorical (e.g. "The Weight of Stillness", "Where Light Learns to Breathe")
    - Title 2 — Poetic Minimalist: artistic yet understated, clean, 3-5 words (e.g. "Morning, Film", "Still", "Quiet Corner")
    - Title 3 — Technical: descriptive, referencing gear or technique (e.g. "Kodak Tri-X at Golden Hour", "50mm Street Study")
@@ -3043,12 +3159,10 @@
    - No spaces or hyphens within tags
    - Cover these categories as appropriate: location, subject, technique, mood/aesthetic, composition, genre, discovery terms, gear
 
-4. Suggested 500px category (exactly one of: City and Architecture, Nude, People, Street)
-
-5. Suggested 35photo category (exactly one of: Female portrait, City/Architecture, Fine Nudes, Portrait)
+4. Suggested 35photo category (exactly one of: Female portrait, City/Architecture, Fine Nudes, Portrait)
 
 Return ONLY valid JSON, no markdown fences:
-{"titles":["...","...","..."],"captions":["...","...","..."],"keywords":["tag1","tag2",...30 tags],"category_500px":"...","category_35p":"..."}`;
+{"titles":["...","...","..."],"captions":["...","...","..."],"keywords":["tag1","tag2",...30 tags],"category_35p":"..."}`;
 
     function getAiKey() { return localStorage.getItem('anthropic_api_key') || ''; }
     function getAiPrompt() { return localStorage.getItem('ai_prompt') || AI_PROMPT_DEFAULT; }
@@ -3136,6 +3250,7 @@ Return ONLY valid JSON, no markdown fences:
         const res = await fetch('config.json');
         if (res.ok) {
           configData = await res.json();
+          _loadedConfigFromServer = true;
           sApplyConfig(); sUpdateFileStatus();
           return;
         }
@@ -3304,6 +3419,14 @@ Return ONLY valid JSON, no markdown fences:
       obj.mua_lookup = getMuaLookup();
       obj.studio_lookup = getStudioLookup();
       const text = JSON.stringify(obj, null, 2);
+      if (_loadedConfigFromServer) {
+        try {
+          const res = await fetch('/save-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+          if (res.ok) { if (!silent) toast('config.json saved to server ✓', 'success'); }
+          else { if (!silent) toast('Server config save failed: ' + res.status, 'error'); }
+        } catch (e) { if (!silent) toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       if (!configHandle && typeof showSaveFilePicker !== 'undefined') {
         if (silent) { toast('config.json not linked — open it in Settings → Config to enable auto-save', 'warning'); return; }
         try {
@@ -3404,6 +3527,14 @@ Return ONLY valid JSON, no markdown fences:
       if (!daData) { toast('No DA data loaded', 'error'); return; }
       const text = JSON.stringify(daData, null, 4);
       cacheDAData();
+      if (_loadedDAFromServer) {
+        try {
+          const res = await fetch('/save-da-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+          if (res.ok) { toast('da_data.json saved to server ✓', 'success'); }
+          else { toast('Server save failed: ' + res.status, 'error'); }
+        } catch (e) { toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       if (!daDataHandle && typeof showSaveFilePicker !== 'undefined') {
         try {
           daDataHandle = await showSaveFilePicker({ suggestedName: 'da_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
@@ -3461,6 +3592,14 @@ Return ONLY valid JSON, no markdown fences:
       const text = JSON.stringify(vkData, null, 2);
       cacheVKData();
       populateVKGroupsList();
+      if (_loadedVKFromServer) {
+        try {
+          const res = await fetch('/save-vk-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+          if (res.ok) { toast('VK_data.json saved to server ✓', 'success'); }
+          else { toast('Server save failed: ' + res.status, 'error'); }
+        } catch (e) { toast('Save error: ' + e.message, 'error'); }
+        return;
+      }
       if (!vkDataFileHandle && typeof showSaveFilePicker !== 'undefined') {
         try {
           vkDataFileHandle = await showSaveFilePicker({ suggestedName: 'VK_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
@@ -3666,59 +3805,77 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('model-lookup-form').style.display = 'none';
     }
 
+    // DeviantArt's title input has a hard maxlength=50 (confirmed directly
+    // from its DOM, 2026-08-31) -- exceeding it silently breaks the upload
+    // automation (confirmed in production on PH-2026-150, 151, 164, 179:
+    // DA either reverts the whole title to the file's raw name, or the
+    // fallback method truncates it mid-word). Catching this here, at entry
+    // time, is much better than handling it downstream in the pipeline.
+    const DA_TITLE_LIMIT = 50;
+    function effectiveTitle(title, serial) {
+      title = (title || '').trim();
+      serial = (serial || '').trim();
+      return serial ? `${title} (${serial})`.trim() : title;
+    }
+    function updateTitleCounter() {
+      const el = document.getElementById('m-title-counter');
+      if (!el) return;
+      const title = document.getElementById('m-title').value;
+      const serial = document.getElementById('m-serial-title').value;
+      const len = effectiveTitle(title, serial).length;
+      el.textContent = `${len}/${DA_TITLE_LIMIT}`;
+      el.style.color = len > DA_TITLE_LIMIT ? 'var(--error)' : 'var(--muted)';
+    }
+
     // Auto-fill form fields when model name is selected
     function applyModelLookup(modelName) {
       if (!modelName) return;
       const arr = getModelLookup();
-      const m = arr.find(x => x.name.toLowerCase() === modelName.toLowerCase());
-      if (!m) return;
+      // Supports a comma-separated list for shoots with more than one model,
+      // e.g. "Avital Bartz, Noy Harel" -- each name is looked up separately
+      // and the results are merged (see per-field handling below).
+      const names = modelName.split(',').map(n => n.trim()).filter(Boolean);
+      const matches = names.map(n => arr.find(x => x.name.toLowerCase() === n.toLowerCase())).filter(Boolean);
+      if (!matches.length) return;
 
-      // DA Gallery — check the matching gallery checkbox (in addition to Featured)
-      if (m.da_gallery) {
-        document.querySelectorAll('#m-da-gallery-list input').forEach(cb => {
-          if (cb.value === m.da_gallery) cb.checked = true;
-        });
-      }
+      // DA Gallery — check every matched model's gallery checkbox (in addition
+      // to Featured). Additive by nature (checking one box doesn't uncheck
+      // another), so this works the same whether there's one model or several.
+      matches.forEach(m => {
+        if (m.da_gallery) {
+          document.querySelectorAll('#m-da-gallery-list input').forEach(cb => {
+            if (cb.value === m.da_gallery) cb.checked = true;
+          });
+        }
+      });
 
-      // Serial title — derive prefix from DA gallery, match "Gallery N" or "Gallery #N"
-      if (m.da_gallery) {
-        const escaped = m.da_gallery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Serial title — derived from the FIRST matched model's DA gallery
+      // prefix only. A shared shoot doesn't get its own serial convention;
+      // it just continues the first-listed model's numbering.
+      const primary = matches[0];
+      if (primary.da_gallery) {
+        const escaped = primary.da_gallery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = new RegExp('^' + escaped + '\\s+#?(\\d+)$', 'i');
         let maxN = 0;
         rows.forEach(r => { const match = (r.serial_title || '').match(re); if (match) maxN = Math.max(maxN, parseInt(match[1])); });
         const serialEl = document.getElementById('m-serial-title');
-        if (serialEl) serialEl.value = m.da_gallery + ' ' + (maxN + 1);
+        if (serialEl) serialEl.value = primary.da_gallery + ' ' + (maxN + 1);
       }
 
-      // FB tags — set if empty
-      if (m.fb_tags) {
-        const fbEl = document.getElementById('m-fb-tag-people');
-        if (fbEl && !fbEl.value.trim()) fbEl.value = m.fb_tags;
+      // Social handles — combine every matched model's handle per platform
+      // (comma-joined), only filling a field that's currently empty so a
+      // manual edit is never overwritten.
+      function fillCombined(elId, key) {
+        const el = document.getElementById(elId);
+        if (!el || el.value.trim()) return;
+        const vals = matches.map(m => m[key]).filter(Boolean);
+        if (vals.length) el.value = vals.join(', ');
       }
-
-      // VK tags — set if empty
-      if (m.vk_tags) {
-        const vkEl = document.getElementById('m-vk-tag-people');
-        if (vkEl && !vkEl.value.trim()) vkEl.value = m.vk_tags;
-      }
-
-      // X handle — set if empty
-      if (m.x_handle) {
-        const xEl = document.getElementById('m-x-tag-people');
-        if (xEl && !xEl.value.trim()) xEl.value = m.x_handle;
-      }
-
-      // Bluesky handle — set if empty
-      if (m.bsky_handle) {
-        const bskyEl = document.getElementById('m-bsky-tag-people');
-        if (bskyEl && !bskyEl.value.trim()) bskyEl.value = m.bsky_handle;
-      }
-
-      // Instagram handle — set if empty
-      if (m.ig_handle) {
-        const igEl = document.getElementById('m-ig-tag-people');
-        if (igEl && !igEl.value.trim()) igEl.value = m.ig_handle;
-      }
+      fillCombined('m-fb-tag-people', 'fb_tags');
+      fillCombined('m-vk-tag-people', 'vk_tags');
+      fillCombined('m-x-tag-people', 'x_handle');
+      fillCombined('m-bsky-tag-people', 'bsky_handle');
+      fillCombined('m-ig-tag-people', 'ig_handle');
     }
 
     // ── LOCATION LOOKUP ───────────────────────────────────────────────────────────
@@ -3968,11 +4125,12 @@ Return ONLY valid JSON, no markdown fences:
       if (!tbody) return;
       const arr = getStudioLookup();
       if (!arr.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:8px">No studios configured yet.</td></tr>';
         return;
       }
       tbody.innerHTML = arr.map(m => `<tr>
         <td>${h(m.name)}</td>
+        <td style="font-size:11px">${h(m.location || '—')}</td>
         <td style="font-size:11px">${h(m.x_handle || '—')}</td>
         <td style="font-size:11px">${h(m.bsky_handle || '—')}</td>
         <td style="font-size:11px">${h(m.ig_handle || '—')}</td>
@@ -3987,7 +4145,7 @@ Return ONLY valid JSON, no markdown fences:
     function studioAddNew() {
       document.getElementById('studio-form-title').textContent = 'Add Studio';
       document.getElementById('studio-edit-name').value = '';
-      ['studio-name','studio-x-handle','studio-bsky-handle','studio-ig-handle','studio-vk-handle','studio-fb-tags'].forEach(id => document.getElementById(id).value = '');
+      ['studio-name','studio-location','studio-x-handle','studio-bsky-handle','studio-ig-handle','studio-vk-handle','studio-fb-tags'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('studio-lookup-form').style.display = '';
       document.getElementById('studio-name').focus();
     }
@@ -3997,6 +4155,7 @@ Return ONLY valid JSON, no markdown fences:
       document.getElementById('studio-form-title').textContent = 'Edit Studio';
       document.getElementById('studio-edit-name').value = m.name;
       document.getElementById('studio-name').value = m.name;
+      document.getElementById('studio-location').value = m.location || '';
       document.getElementById('studio-x-handle').value = m.x_handle || '';
       document.getElementById('studio-bsky-handle').value = m.bsky_handle || '';
       document.getElementById('studio-ig-handle').value = m.ig_handle || '';
@@ -4016,6 +4175,7 @@ Return ONLY valid JSON, no markdown fences:
       if (!name) { toast('Name is required', 'error'); return; }
       const entry = {
         name,
+        location:    document.getElementById('studio-location').value.trim(),
         x_handle:    document.getElementById('studio-x-handle').value.trim(),
         bsky_handle: document.getElementById('studio-bsky-handle').value.trim(),
         ig_handle:   document.getElementById('studio-ig-handle').value.trim(),
@@ -4040,6 +4200,10 @@ Return ONLY valid JSON, no markdown fences:
       if (!studioName) return;
       const m = getStudioLookup().find(x => x.name.toLowerCase() === studioName.toLowerCase());
       if (!m) return;
+      if (m.location) {
+        const locEl = document.getElementById('m-loc-500px');
+        if (locEl && !locEl.value.trim()) locEl.value = m.location;
+      }
       function appendHandle(elId, handle) {
         if (!handle) return;
         const el = document.getElementById(elId);
@@ -4565,6 +4729,8 @@ Return ONLY valid JSON, no markdown fences:
 
       closeAiPanel();
       toast('AI metadata applied', 'success');
+      const modelField = document.getElementById('m-model-name');
+      if (modelField) modelField.focus();
     }
 
     function closeAiPanel() {
@@ -4605,6 +4771,31 @@ Return ONLY valid JSON, no markdown fences:
         refresh();
         toast('CSV reloaded', 'info');
       } catch (e) { /* permission revoked or file gone */ }
+    }, 5000);
+
+    // Poll the server every 5s for CSV changes written by upload.py — a tab
+    // left open for hours otherwise keeps a stale in-memory `rows` snapshot,
+    // and any later save (add/edit/delete/reset/retry) blindly overwrites
+    // the whole file with it, silently wiping out whatever upload.py wrote
+    // in between (real incident: 2026-08-01, PH-2026-149's completed upload
+    // status was erased this way by a save from a stale tab hours later).
+    // Skips while a modal is open (mid-edit) or a save is in flight, so this
+    // can never clobber an edit that hasn't reached the server yet.
+    setInterval(async () => {
+      if (!_loadedFromServer) return;
+      if (_savingInFlight) return;
+      if (document.getElementById('overlay').classList.contains('open')) return;
+      try {
+        const res = await fetch('/upload_queue.csv', { cache: 'no-store' });
+        if (!res.ok) return;
+        const txt = await res.text();
+        const cached = localStorage.getItem('csv_cache');
+        if (txt === cached) return;
+        rows = parseCSV(txt);
+        cacheCSV(txt, 'upload_queue.csv');
+        refresh();
+        toast('CSV reloaded — updated by upload script', 'info');
+      } catch (e) { /* offline — next tick will retry */ }
     }, 5000);
 
     // ── COLUMN RESIZER ──────────────────────────────────────────────────────────
