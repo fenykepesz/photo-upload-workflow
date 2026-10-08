@@ -221,16 +221,32 @@ CHECKS = {"35P": check_35p, "X": check_x, "500PX": check_500px, "VK": check_vk, 
 
 # ── Row selection ─────────────────────────────────────────────
 
+def parse_ts(value):
+    """The queue holds two timestamp formats (older rows are DD/MM/YYYY HH:MM),
+    so they have to be compared as dates -- as strings, "22/03/2026" sorts
+    after "2026-10-08"."""
+    value = (value or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+    return None
+
+
 def select_rows(rows, args):
-    done = [r for r in rows if r.get("status") in ("Uploaded", "Partial") and r.get("upload_timestamp", "").strip()]
+    done = [r for r in rows if r.get("status") in ("Uploaded", "Partial") and parse_ts(r.get("upload_timestamp"))]
     if args.row:
         hit = [r for r in rows if r.get("upload_id") == args.row]
         if not hit:
             sys.exit(f"ERROR: row {args.row} not found in queue")
         return hit
     if args.since:
-        return [r for r in done if r["upload_timestamp"] >= args.since]
-    return [max(done, key=lambda r: r["upload_timestamp"])] if done else []
+        since = parse_ts(args.since)
+        if not since:
+            sys.exit(f"ERROR: --since {args.since!r} is not a recognised timestamp")
+        return [r for r in done if parse_ts(r["upload_timestamp"]) >= since]
+    return [max(done, key=lambda r: parse_ts(r["upload_timestamp"]))] if done else []
 
 
 def platforms_to_check(row, only):
@@ -274,7 +290,7 @@ def acquire_lock(max_wait):
             return True
         if time.time() > deadline:
             return False
-        print(f"  Upload running (PID {holder}) — waiting...")
+        print(f"  Browser profile in use (PID {holder}) — waiting...")
         time.sleep(30)
 
 
@@ -341,7 +357,7 @@ def main():
         return 0
 
     if not acquire_lock(max_wait=30 * 60):
-        msg = "⚠️ Upload verification skipped — an upload was still running after 30 min."
+        msg = "⚠️ Upload verification skipped — the browser profile was still in use (upload or another verification) after 30 min."
         print(msg)
         if not args.no_telegram:
             u._send_telegram_message(msg, parse_mode=None)
