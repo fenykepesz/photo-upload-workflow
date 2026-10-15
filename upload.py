@@ -3,7 +3,7 @@
 Playwright-based photo upload automation for DeviantArt, 500px, 35photo, VK, and X.
 Reads upload_queue.csv, uploads to platforms listed in each row's 'platforms' field.
 
-Upload order: 500PX → 35P → VK → X → DA (DA consumes the Sta.sh item on publish, so always last).
+Upload order: 500PX → 35P → YOUPIC → VK → X → DA (DA consumes the Sta.sh item on publish, so always last).
 
 Usage:
     python upload.py                          # all Approved rows with supported platforms
@@ -220,7 +220,7 @@ def send_preflight_notification(needed_platforms, failed_logins):
     could ever run) — a login failure was 100% silent on Telegram. Posting
     unconditionally here means both outcomes are visible, not just success.
     """
-    platform_order = ["500PX", "35P", "VK", "X", "BSKY", "FB", "DA"]
+    platform_order = ["500PX", "35P", "YOUPIC", "VK", "X", "BSKY", "FB", "DA"]
     ordered = [p for p in platform_order if p in needed_platforms]
     if not ordered:
         return
@@ -297,7 +297,7 @@ def _build_table_rows(log_path, n_ok):
                 vk_first_t = None; vk_group_count = 0; vk_group_ok = 0
             else:
                 table_rows.append(f"{t}  VK        {rest}")
-        elif ev in ('500PX', '35PHOTO', 'X', 'BSKY', 'IG', 'FB', 'DA'):
+        elif ev in ('500PX', '35PHOTO', 'YOUPIC', 'X', 'BSKY', 'IG', 'FB', 'DA'):
             status = 'done in first run' if rest == 'skipped' else rest
             table_rows.append(f"{t}  {ev:<9} {status}")
         elif ev == 'DONE':
@@ -329,13 +329,17 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
     model    = row.get("model_name", "").strip()
 
     any_failed = any(v is False for v in ok_map.values())
-    n_ok       = sum(1 for v in ok_map.values() if v)
+    deferred   = [k for k, v in ok_map.items() if v == "deferred"]
+    n_ok       = sum(1 for v in ok_map.values() if v and v != "deferred")
     n_total    = len(ok_map)
 
     table_rows = _build_table_rows(log_path, n_ok)
 
     # ── Compose message ───────────────────────────────────────────────────────
-    if not any_failed:
+    if not any_failed and deferred:
+        header = (f"✅ Done. {n_ok}/{n_total} platforms in {duration} — "
+                  f"{', '.join(deferred)} deferred (free-tier 24h cap).")
+    elif not any_failed:
         header = f"✅ Complete success. All {n_total} platforms done in {duration}."
     elif n_ok:
         header = f"⚠️ Partial. {n_ok}/{n_total} platforms done in {duration}."
@@ -463,7 +467,7 @@ BROWSER_PROFILE = SCRIPT_DIR / "chrome-profile"
 
 TAG_LIMIT = 30
 TAG_LIMIT_500PX = 15
-SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY", "IG"}
+SUPPORTED_PLATFORMS = {"DA", "500PX", "35P", "VK", "X", "FB", "BSKY", "IG", "YOUPIC"}
 TEMP_DIR = SCRIPT_DIR / "temp"
 IMAGE_CACHE_DIR = SCRIPT_DIR / "image_cache"  # persistent — survives re-runs, never auto-deleted
 CACHE_STATS_FILE = SCRIPT_DIR / "image_cache_stats.json"
@@ -514,6 +518,7 @@ WAIT_TIMES = {
     "x":         5000,
     "bluesky":  10000,
     "facebook": 15000,
+    "youpic":   10000,
 }
 
 COLS = [
@@ -529,6 +534,7 @@ COLS = [
     "url_ig",
     "film_used", "film_camera", "film_lens", "film_stock", "film_developed_by", "film_dev_contact",
     "serial_title",
+    "url_youpic",
 ]
 
 SOCIAL_LINK_LABELS = {
@@ -736,6 +742,7 @@ def verify_login(page, platform):
     checks = {
         "500PX": "https://500px.com/",
         "35P":   "https://35photo.pro/",
+        "YOUPIC": "https://youpic.com/organizer",
         "VK":    "https://vk.com/",
         "X":     "https://x.com/",
         "BSKY":  "https://bsky.app/",
@@ -768,6 +775,20 @@ def verify_login(page, platform):
             return not (has_login_link and not has_avatar)
         elif platform == "35P":
             return "login" not in url
+        elif platform == "YOUPIC":
+            if "/organizer" not in url:
+                return False
+            # Logged in = the organizer shows either the upload area or the
+            # free-tier "Next Upload" countdown.
+            for _ in range(10):
+                try:
+                    body = page.inner_text("body", timeout=3000)
+                except Exception:
+                    body = ""
+                if "Upload Media" in body or "Next Upload" in body:
+                    return True
+                page.wait_for_timeout(1000)
+            return False
         elif platform == "VK":
             return "login" not in url and "authorize" not in url
         elif platform == "X":
@@ -792,7 +813,7 @@ def run_login_checks(page, platforms):
     Check login state for each required platform.
     Prints a status table and returns list of failed platform names.
     """
-    platform_order = ["500PX", "35P", "VK", "X", "BSKY", "FB", "DA"]
+    platform_order = ["500PX", "35P", "YOUPIC", "VK", "X", "BSKY", "FB", "DA"]
     ordered = [p for p in platform_order if p in platforms]
 
     print("\n── Pre-flight login check ──────────────────────────────")
@@ -1100,6 +1121,10 @@ def print_dry_run(rows, config):
             already = row.get("url_35p", "").strip()
             if already:
                 print(f"  35photo URL: {already} (already uploaded — will skip)")
+        if "YOUPIC" in platforms:
+            already = row.get("url_youpic", "").strip()
+            if already:
+                print(f"  YouPic URL:  {already} (already uploaded — will skip)")
         if "VK" in platforms:
             already = row.get("url_vk", "").strip()
             if already:
@@ -1580,6 +1605,241 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
     page.wait_for_timeout(5000)
     print("  Upload complete")
     return {"success": True, "url_35p": "UPLOADED", "error": ""}
+
+
+# ── YouPic Upload ─────────────────────────────────────────────
+# Flow mapped live 2026-10-15 (test post uploaded, then deleted):
+#   /organizer → "Upload Media" (native file chooser) → /organizer/draft form →
+#   a.send-button publishes → redirect back to /organizer/.
+# Free account: ONE upload per 24h. While the cap is active the organizer
+# shows a "Next Upload HH:MM" countdown instead of the upload area — that is
+# reported as deferred (not FAILED) and never retried in the same run.
+# "Congrats! <badge>" popups appear at random and block clicks; they are
+# closed via their footer button before every important step.
+YOUPIC_CATEGORY_MAP = {
+    # category_35p → YouPic category label
+    "female portrait":   "Portrait",
+    "portrait":          "Portrait",
+    "fine nudes":        "Nude",
+    "city/architecture": "Architecture",
+}
+YOUPIC_CATEGORY_MAP_500PX = {
+    # fallback when category_35p is empty
+    "people": "Portrait", "nude": "Nude", "city and architecture": "Architecture",
+    "city & street": "Street", "street": "Street", "travel": "Travel", "fashion": "Fashion",
+}
+YOUPIC_TAG_LIMIT = 15
+
+
+def youpic_dismiss_popups(page):
+    """Close any 'Congrats! <badge>' popups. Never raises."""
+    for _ in range(5):
+        try:
+            btn = page.locator("footer a.btn.icon")
+            if btn.count() == 0 or not btn.first.is_visible():
+                return
+            btn.first.click(timeout=3000)
+            page.wait_for_timeout(800)
+        except Exception:
+            return
+
+
+def youpic_photo_ids(page, handle):
+    """Set of (portfolio_id, photo_id) links on the profile page. Never raises."""
+    try:
+        page.goto(f"https://youpic.com/{handle}", wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(4000)
+        hrefs = page.evaluate("() => [...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href'))")
+    except Exception:
+        return set()
+    pat = re.compile(rf"/{re.escape(handle)}/(\d+)/(\d+)/?$", re.I)
+    found = set()
+    for h in hrefs or []:
+        m = pat.search(h or "")
+        if m:
+            found.add((m.group(1), m.group(2)))
+    return found
+
+
+def _youpic_norm(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def upload_to_youpic(page, row, desc_full, tags, image_path, no_submit=False, handle="erozman"):
+    """
+    Automate a YouPic photo upload.
+    Returns {"success": bool, "url_youpic": str, "error": str, "deferred": bool}
+    deferred=True means the free-tier 24h cap is active — not a failure.
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_youpic": "", "error": "No image file available", "deferred": False}
+
+    title = get_effective_title(row)[:100]
+    nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
+    cat35 = row.get("category_35p", "").strip().lower()
+    cat500 = row.get("category_500px", "").strip().lower()
+    category = YOUPIC_CATEGORY_MAP.get(cat35) or YOUPIC_CATEGORY_MAP_500PX.get(cat500) or ""
+    location = row.get("location_500px", "").strip()
+
+    # Existing photo ids, so the new post can be identified after publishing
+    before = set()
+    if not no_submit:
+        before = youpic_photo_ids(page, handle)
+
+    print("  Opening YouPic organizer...")
+    try:
+        page.goto("https://youpic.com/organizer", wait_until="networkidle", timeout=45000)
+    except PlaywrightTimeout:
+        page.goto("https://youpic.com/organizer", wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(3000)
+
+    if "login" in page.url.lower() or "signin" in page.url.lower():
+        return {"success": False, "url_youpic": "", "deferred": False,
+                "error": "Not logged into YouPic — run: python upload.py --login"}
+    youpic_dismiss_popups(page)
+
+    # ── Free-tier cap check ──────────────────────────────────
+    try:
+        body = page.inner_text("body", timeout=5000)
+    except Exception:
+        body = ""
+    if "Next Upload" in body:
+        m = re.search(r"Next Upload\s*([\d:]+)", body)
+        wait = f" (next slot in {m.group(1)})" if m else ""
+        return {"success": False, "url_youpic": "", "deferred": True,
+                "error": f"Free-tier 24h upload cap active{wait}"}
+
+    # ── Choose file ──────────────────────────────────────────
+    print("  Uploading file...")
+    try:
+        with page.expect_file_chooser(timeout=10000) as fc:
+            page.get_by_text("Upload Media", exact=True).first.click(timeout=8000)
+        fc.value.set_files(str(image_path))
+    except Exception as e:
+        return {"success": False, "url_youpic": "", "deferred": False,
+                "error": f"Could not open file chooser: {e}"}
+    try:
+        page.wait_for_url("**/organizer/draft**", timeout=30000)
+    except PlaywrightTimeout:
+        return {"success": False, "url_youpic": "", "deferred": False,
+                "error": "Draft form did not open after choosing the file"}
+    page.wait_for_timeout(WAIT_TIMES.get("youpic", 10000))
+    youpic_dismiss_popups(page)
+
+    # ── Metadata ─────────────────────────────────────────────
+    print("  Setting metadata: title, description, category, location...")
+    try:
+        page.locator('input[maxlength="100"]').first.fill(title, timeout=8000)
+    except Exception as e:
+        print(f"    WARNING: Could not fill title: {e}")
+
+    # Description is a contenteditable; '#word' becomes a tag. Typed line by
+    # line with Shift+Enter (a bare "\n" collapsed in the 2026-10-15 test and
+    # glued the first hashtag onto the last word). Each line keeps a trailing
+    # space so words never fuse even if the editor drops the line break.
+    hashtags = []
+    for t in tags[:YOUPIC_TAG_LIMIT]:
+        h = re.sub(r"[^\w]", "", t, flags=re.UNICODE)
+        if h and h.lower() not in [x.lower() for x in hashtags]:
+            hashtags.append(h)
+    lines = desc_full.split("\n")
+    if hashtags:
+        lines += ["", " ".join(f"#{h}" for h in hashtags)]
+    try:
+        youpic_dismiss_popups(page)
+        ed = page.locator(".editor").nth(0)
+        ed.click(timeout=8000)
+        for i, line in enumerate(lines):
+            if line:
+                page.keyboard.type(line + " ", delay=15)
+            if i < len(lines) - 1:
+                page.keyboard.press("Shift+Enter")
+        page.keyboard.press("Escape")  # close any tag-autocomplete popup
+    except Exception as e:
+        print(f"    WARNING: Could not fill description: {e}")
+
+    if category:
+        try:
+            youpic_dismiss_popups(page)
+            page.locator("select").first.select_option(label=category, timeout=8000)
+        except Exception as e:
+            print(f"    WARNING: Could not select category '{category}': {e}")
+
+    # Location: typed into the second editor, then picked from the
+    # autocomplete — exact match first (same lesson as 500px, 2026-10-11:
+    # "San Francisco" must not pick "San Francisco Coacalco"), then a
+    # prefix match ("Tel-Aviv" → "Tel Aviv-Yafo, Israel"), then the first.
+    if location:
+        try:
+            youpic_dismiss_popups(page)
+            page.locator(".editor").nth(1).click(timeout=8000)
+            page.keyboard.type(location, delay=50)
+            page.wait_for_timeout(2500)
+            opts = page.locator(".CompleterView .entry.place-formatted")
+            n = opts.count()
+            if n:
+                q = _youpic_norm(location)
+                names = [opts.nth(i).inner_text() for i in range(n)]
+                cities = [_youpic_norm(t.split("\n")[0].split(",")[0]) for t in names]
+                idx = next((i for i, c in enumerate(cities) if c == q), None)
+                if idx is None:
+                    idx = next((i for i, c in enumerate(cities) if c.startswith(q)), 0)
+                print(f"    Location: {names[idx].strip()}")
+                opts.nth(idx).click(timeout=5000)
+            else:
+                print(f"    WARNING: no location suggestions for '{location}'")
+        except Exception as e:
+            print(f"    WARNING: Could not set location: {e}")
+
+    if nsfw:
+        try:
+            youpic_dismiss_popups(page)
+            tog = page.locator('label:has(p:text-is("Adult Content (NSFW)")) .Toggle').first
+            if " on" not in f" {tog.get_attribute('class') or ''} ":
+                tog.click(timeout=5000)
+                page.wait_for_timeout(500)
+            state = "on" if " on" in f" {tog.get_attribute('class') or ''} " else "OFF"
+            print(f"    Adult content: {state}")
+            if state != "on":
+                return {"success": False, "url_youpic": "", "deferred": False,
+                        "error": "Could not set Adult Content (NSFW) toggle — not publishing"}
+        except Exception as e:
+            return {"success": False, "url_youpic": "", "deferred": False,
+                    "error": f"Could not set Adult Content (NSFW) toggle — not publishing: {e}"}
+
+    page.wait_for_timeout(1000)
+    if no_submit:
+        print("  --no-submit: skipping publish (draft is discarded when the browser closes)")
+        return {"success": True, "url_youpic": "NO_SUBMIT", "error": "", "deferred": False}
+
+    # ── Publish ──────────────────────────────────────────────
+    print("  Publishing...")
+    published = False
+    for _ in range(3):
+        youpic_dismiss_popups(page)
+        try:
+            page.locator("a.send-button").first.click(timeout=8000)
+        except Exception:
+            continue
+        try:
+            page.wait_for_url(lambda u: "/organizer/draft" not in u, timeout=120000)
+            published = True
+            break
+        except PlaywrightTimeout:
+            continue
+    if not published:
+        return {"success": False, "url_youpic": "", "deferred": False,
+                "error": "Still on the draft form after clicking publish — not published"}
+    page.wait_for_timeout(3000)
+
+    after = youpic_photo_ids(page, handle)
+    new = sorted(after - before, key=lambda x: int(x[1]), reverse=True)
+    if new:
+        url = f"https://youpic.com/{handle}/{new[0][0]}/{new[0][1]}"
+        print(f"  YouPic post published: {url}")
+        return {"success": True, "url_youpic": url, "error": "", "deferred": False}
+    print("    WARNING: published, but the new post's URL could not be found on the profile")
+    return {"success": True, "url_youpic": "UPLOADED", "error": "", "deferred": False}
 
 
 # ── VK Upload (Playwright) ────────────────────────────────────
@@ -4672,6 +4932,7 @@ def main():
                     ok_map = {
                         "500PX": bool(fresh_row.get("url_500px", "").strip()),
                         "35P":   bool(fresh_row.get("url_35p",   "").strip()),
+                        "YOUPIC": bool(fresh_row.get("url_youpic", "").strip()),
                         "VK":    bool(fresh_row.get("url_vk",    "").strip()),
                         "X":     bool(fresh_row.get("url_x",     "").strip()),
                         "BSKY":  bool(fresh_row.get("url_bsky",  "").strip()),
@@ -4781,7 +5042,8 @@ def main():
                 page.wait_for_timeout(1000)
 
             login_step("https://500px.com/login",         "Log into 500px in the browser window.",    "will open 35photo next")
-            login_step("https://35photo.pro/login/",      "Log into 35photo in the browser window.",  "will open VK next")
+            login_step("https://35photo.pro/login/",      "Log into 35photo in the browser window.",  "will open YouPic next")
+            login_step("https://youpic.com/signin",       "Log into YouPic in the browser window.",   "will open VK next")
             login_step("https://vk.com/login",            "Log into VK in the browser window.",       "will open X next")
             try:
                 page.goto("https://x.com", wait_until="domcontentloaded", timeout=30000)
@@ -5075,6 +5337,7 @@ def main():
         WAIT_TIMES["x"]        = int(_wt.get("x",        WAIT_TIMES["x"]        // 1000)) * 1000
         WAIT_TIMES["bluesky"]  = int(_wt.get("bluesky",  WAIT_TIMES["bluesky"]  // 1000)) * 1000
         WAIT_TIMES["facebook"] = int(_wt.get("facebook", WAIT_TIMES["facebook"] // 1000)) * 1000
+        WAIT_TIMES["youpic"]   = int(_wt.get("youpic",   WAIT_TIMES["youpic"]   // 1000)) * 1000
 
     # Auto-refresh Instagram token every 30 days
     _ig_cfg = config.get("accounts", {}).get("instagram", {})
@@ -5181,6 +5444,7 @@ def main():
             print("All login checks passed. Starting uploads...")
 
         results_summary = []
+        _youpic_attempted = False
 
         try:
             for i, row in enumerate(target_rows):
@@ -5212,6 +5476,8 @@ def main():
                 image_path = None
                 ok_500px = False
                 ok_35p = False
+                ok_youpic = False
+                youpic_deferred = False
                 ok_vk = False
                 ok_x = False
                 ok_bsky = False
@@ -5316,6 +5582,66 @@ def main():
                         url_35p = result_35p.get("url_35p", "")
                         if url_35p and url_35p not in ("NO_SUBMIT",):
                             save_row_update(args.csv, row["upload_id"], {"url_35p": url_35p})
+
+                # ── YouPic (after 35photo, before the pre-VK restart) ──
+                if "YOUPIC" in platforms:
+                    already = row.get("url_youpic", "").strip()
+                    if already:
+                        print(f"\n  YouPic: already uploaded ({already}) — skipping")
+                        write_run_log("YOUPIC", "skipped", pid=get_chromium_pid())
+                    elif _youpic_attempted:
+                        # Free account: one upload per 24h — later rows in
+                        # the same run would only hit the cap.
+                        youpic_deferred = True
+                        print("\n  YouPic: deferred — already used this run's upload slot")
+                        write_run_log("YOUPIC", "deferred (24h cap)", pid=get_chromium_pid())
+                        errors.append("YouPic: deferred — free-tier 24h cap (one upload per run)")
+                    else:
+                        print(f"\n  ── YouPic Upload ──")
+                        t0_youpic = time.time()
+                        if not image_path:
+                            stash_url = row.get("stash_url_nsfw", "").strip()
+                            if stash_url:
+                                image_path = download_stash_image(page, stash_url, row["upload_id"])
+                            else:
+                                print("  WARNING: No stash_url_nsfw — cannot download image")
+                        _yp_handle = config.get("accounts", {}).get("youpic", "") or "erozman"
+                        try:
+                            result_youpic = upload_to_youpic(
+                                page, row, desc_full, tags, image_path, args.no_submit, handle=_yp_handle
+                            )
+                        except PlaywrightTimeout as e:
+                            result_youpic = {"success": False, "url_youpic": "", "error": f"Timeout: {e}", "deferred": False}
+                        except Exception as e:
+                            result_youpic = {"success": False, "url_youpic": "", "error": f"Unexpected: {e}", "deferred": False}
+                        if not args.no_submit:
+                            _youpic_attempted = True
+
+                        if result_youpic["success"]:
+                            ok_youpic = True
+                            print(f"  YouPic: SUCCESS ({time.time()-t0_youpic:.0f}s) — {result_youpic.get('url_youpic', '')}")
+                            write_run_log("YOUPIC", "SUCCESS", pid=get_chromium_pid())
+                        elif result_youpic.get("deferred"):
+                            youpic_deferred = True
+                            err = result_youpic.get("error", "")
+                            print(f"  YouPic: DEFERRED — {err}")
+                            write_run_log("YOUPIC", "deferred (24h cap)", pid=get_chromium_pid())
+                            errors.append(f"YouPic: deferred — {err}")
+                        else:
+                            err = result_youpic.get("error", "unknown")
+                            print(f"  YouPic: FAILED ({time.time()-t0_youpic:.0f}s) — {err}")
+                            write_run_log("YOUPIC", "FAILED", pid=get_chromium_pid())
+                            errors.append(f"YouPic: {err}")
+                            shot_path = error_shot_path(row['upload_id'], "youpic")
+                            try:
+                                page.screenshot(path=str(shot_path))
+                                print(f"  Error screenshot: {shot_path}")
+                            except Exception:
+                                pass
+
+                        url_youpic = result_youpic.get("url_youpic", "")
+                        if url_youpic and url_youpic not in ("NO_SUBMIT",):
+                            save_row_update(args.csv, row["upload_id"], {"url_youpic": url_youpic})
 
 
                 # -- Browser restart (pre-VK memory cleanup) --
@@ -6081,6 +6407,8 @@ def main():
                         done_platforms.add("500PX")
                     if "35P" in all_row_platforms and (ok_35p or fresh_row.get("url_35p", "").strip()):
                         done_platforms.add("35P")
+                    if "YOUPIC" in all_row_platforms and (ok_youpic or fresh_row.get("url_youpic", "").strip()):
+                        done_platforms.add("YOUPIC")
                     if "VK" in all_row_platforms and (ok_vk or fresh_row.get("url_vk", "").strip()):
                         done_platforms.add("VK")
                     if "X" in all_row_platforms and (ok_x or fresh_row.get("url_x", "").strip()):
@@ -6119,6 +6447,10 @@ def main():
                 if "35P" in platforms:
                     s = "done" if ok_35p or row.get("url_35p", "").strip() else "failed"
                     summary_detail.append(f"35photo:{s}")
+                if "YOUPIC" in platforms:
+                    s = ("done" if ok_youpic or row.get("url_youpic", "").strip()
+                         else "deferred" if youpic_deferred else "failed")
+                    summary_detail.append(f"YouPic:{s}")
                 if "VK" in platforms:
                     s = "done" if ok_vk or row.get("url_vk", "").strip() else "failed"
                     summary_detail.append(f"VK:{s}")
@@ -6141,6 +6473,7 @@ def main():
                 _ok_map = {
                     "500PX": True if ok_500px else ("skip" if row.get("url_500px","").strip() else False),
                     "35P":   True if ok_35p  else ("skip" if row.get("url_35p","").strip()   else False),
+                    "YOUPIC": True if ok_youpic else ("skip" if row.get("url_youpic","").strip() else ("deferred" if youpic_deferred else False)),
                     "VK":    True if ok_vk   else ("skip" if row.get("url_vk","").strip()    else False),
                     "X":     True if ok_x    else ("skip" if row.get("url_x","").strip()     else False),
                     "BSKY":  True if ok_bsky else ("skip" if row.get("url_bsky","").strip()  else False),
@@ -6148,6 +6481,8 @@ def main():
                     "FB":    True if ok_fb   else ("skip" if row.get("url_fb","").strip()    else False),
                     "DA":    True if ok_da   else ("skip" if row.get("da_deviation_url","").strip() else False),
                 }
+                if "YOUPIC" not in platforms:
+                    _ok_map.pop("YOUPIC", None)
                 _vk_gr = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
                 print("  [DEBUG] Sending Telegram summary...")
                 try:
@@ -6169,6 +6504,7 @@ def main():
                 _ok_map_c = {
                     "500PX": True if ok_500px else ("skip" if row.get("url_500px","").strip() else False),
                     "35P":   True if ok_35p  else ("skip" if row.get("url_35p","").strip()   else False),
+                    "YOUPIC": True if ok_youpic else ("skip" if row.get("url_youpic","").strip() else ("deferred" if youpic_deferred else False)),
                     "VK":    True if ok_vk   else ("skip" if row.get("url_vk","").strip()    else False),
                     "X":     True if ok_x    else ("skip" if row.get("url_x","").strip()     else False),
                     "BSKY":  True if ok_bsky else ("skip" if row.get("url_bsky","").strip()  else False),
@@ -6176,12 +6512,14 @@ def main():
                     "FB":    True if ok_fb   else ("skip" if row.get("url_fb","").strip()    else False),
                     "DA":    True if ok_da   else ("skip" if row.get("da_deviation_url","").strip() else False),
                 }
+                if "YOUPIC" not in platforms:
+                    _ok_map_c.pop("YOUPIC", None)
                 _vk_gr_c = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
                 send_run_summary(row, platforms, _ok_map_c, _vk_gr_c, _run_log_path, _row_start)
             except Exception:
                 pass
             try:
-                _any_ok = any([ok_500px, ok_35p, ok_vk, ok_x, ok_bsky, ok_ig, ok_fb, ok_da])
+                _any_ok = any([ok_500px, ok_35p, ok_youpic, ok_vk, ok_x, ok_bsky, ok_ig, ok_fb, ok_da])
                 save_row_update(args.csv, row["upload_id"], {
                     "status": "Partial" if _any_ok else "Failed",
                     "error_log": f"CRASH: {str(_loop_exc)[:150]}",

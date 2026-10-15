@@ -2,7 +2,7 @@
 """
 Post-upload verification — READ-ONLY.
 
-upload.py reports SUCCESS for 35photo, X, 500px, the VK wall and Facebook
+upload.py reports SUCCESS for 35photo, YouPic, X, 500px, the VK wall and Facebook
 after clicking the publish button and waiting a few seconds; nothing confirms
 the post actually exists. This script runs separately, a couple of minutes
 after an upload, opens the logged-in profile pages and looks for the post.
@@ -37,9 +37,10 @@ LOCK_FILE = SCRIPT_DIR / ".upload.lock"   # shared with run_upload.sh
 LOG_FILE = SCRIPT_DIR / "logs" / "verify.log"
 
 # Platform -> queue column upload.py fills in when it reports success.
-URL_FIELD = {"35P": "url_35p", "X": "url_x", "500PX": "url_500px", "VK": "url_vk", "FB": "url_fb"}
-ORDER = ["500PX", "35P", "VK", "X", "FB"]
-LABEL = {"35P": "35photo", "X": "X", "500PX": "500px", "VK": "VK", "FB": "Facebook"}
+URL_FIELD = {"35P": "url_35p", "X": "url_x", "500PX": "url_500px", "VK": "url_vk", "FB": "url_fb",
+             "YOUPIC": "url_youpic"}
+ORDER = ["500PX", "35P", "YOUPIC", "VK", "X", "FB"]
+LABEL = {"35P": "35photo", "X": "X", "500PX": "500px", "VK": "VK", "FB": "Facebook", "YOUPIC": "YouPic"}
 
 OK, MISSING, UNKNOWN = "found", "NOT FOUND", "could not check"
 
@@ -216,7 +217,28 @@ def check_fb(page, row, accounts):
     return MISSING, "caption not on the 3 newest photos"
 
 
-CHECKS = {"35P": check_35p, "X": check_x, "500PX": check_500px, "VK": check_vk, "FB": check_fb}
+def check_youpic(page, row, accounts):
+    """upload.py records the real post URL, so open it and look for the
+    title; a deleted/missing post lands on YouPic's 404 page. Falls back to
+    the profile when only the "UPLOADED" sentinel was recorded."""
+    handle = accounts.get("youpic") or "erozman"
+    needle = norm(row.get("title"))
+    if not needle:
+        return UNKNOWN, "row has no title"
+    url = row.get("url_youpic", "").strip()
+    if not url.startswith("http"):
+        return _check_title_on_profile(page, f"https://youpic.com/{handle}", needle, rf"/{handle}/\d+/\d+")
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(6000)
+    if logged_out(page):
+        return UNKNOWN, f"redirected to login ({page.url[:60]})"
+    if page_has(page, needle):
+        return OK, url
+    return MISSING, f"post page {url} does not show the title"
+
+
+CHECKS = {"35P": check_35p, "X": check_x, "500PX": check_500px, "VK": check_vk, "FB": check_fb,
+          "YOUPIC": check_youpic}
 
 
 # ── Row selection ─────────────────────────────────────────────
