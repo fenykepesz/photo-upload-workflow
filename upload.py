@@ -1163,6 +1163,23 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     except Exception:
         pass
 
+    # Dismiss the "Your photo made the leaderboard!" achievement modal if
+    # 500px shows it. Same class of problem as the GDPR banner above --
+    # its backdrop covers the whole page and blocks the Upload button
+    # entirely. Confirmed via error screenshot 2026-10-10 (PH-2026-214):
+    # "No file input: ... waiting for locator(\"button:has-text('Add photos')\")"
+    # was really this modal sitting on top, unrelated to any site
+    # redesign. "Maybe Later" dismisses without navigating away from the
+    # page we need to stay on.
+    try:
+        maybe_later_btn = page.locator('button:has-text("Maybe Later")')
+        if maybe_later_btn.count() > 0 and maybe_later_btn.first.is_visible():
+            maybe_later_btn.first.click(timeout=3000)
+            print("    Dismissed leaderboard achievement popup")
+            page.wait_for_timeout(1000)
+    except Exception:
+        pass
+
     # Click Upload icon button → click "Upload Photo" menu item → modal opens.
     # 500px rebuilt its header in Material-UI (confirmed live 2026-09-10,
     # PH-2026-189): the old text-labeled "Upload" button/Ant-Design dropdown
@@ -1293,21 +1310,40 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
                 page.keyboard.type(location, delay=50)
                 page.wait_for_timeout(2000)  # wait for autocomplete suggestions
 
-                # Click the first real suggestion by ARIA role, not screen
-                # position. The old position-based matcher only accepted
-                # elements below the input's bounding box -- confirmed live
-                # 2026-09-10 that 500px's MUI Autocomplete now flips the
-                # popper to open UPWARD when there isn't room below, so
-                # every real suggestion failed that check and the code fell
-                # through to a wrong/last-resort pick (selected "Santa
-                # Clara, Durango, MEX" instead of California). 500px's own
-                # geocoder already ranks results by relevance -- for a
-                # plain city query the first `role="option"` IS the
-                # intended match (confirmed live: 9 "Santa Clara" results
-                # worldwide, "Santa Clara, CA, USA" genuinely first) --
-                # so just take it directly, no text/position heuristics.
+                # Click by ARIA role, not screen position -- the old
+                # position-based matcher only accepted elements below the
+                # input's bounding box, which broke when 500px's MUI
+                # Autocomplete flips the popper upward (confirmed live
+                # 2026-09-10).
+                #
+                # Blindly taking `.first` (the fix that replaced that) is
+                # ALSO wrong in general: confirmed live 2026-10-11
+                # (PH-2026-214) that for "San Francisco" the real "San
+                # Francisco, CA, USA" is 5th, behind four Mexican compound
+                # names ("San Francisco Coacalco", "San Francisco De
+                # Campeche", etc.) that happen to rank higher. It only
+                # looked right for "Santa Clara" by coincidence (California
+                # happened to be first there too). Real fix: prefer the
+                # first option whose primary line is an EXACT match to the
+                # typed query (not a longer compound name with extra words
+                # glued onto it) -- "San Francisco, CA, USA" qualifies,
+                # "San Francisco Coacalco, ..." doesn't. Verified against
+                # both the Santa Clara and San Francisco candidate lists
+                # before deploying. Falls back to `.first` if nothing
+                # matches exactly, rather than failing outright.
                 try:
-                    page.get_by_role("option").first.click(timeout=5000)
+                    query_lower = location.strip().lower()
+                    opts = page.get_by_role("option")
+                    opt_count = opts.count()
+                    chosen = opts.first
+                    for i in range(opt_count):
+                        candidate = opts.nth(i)
+                        primary_line = candidate.inner_text().split("\n")[0]
+                        name_part = primary_line.split(",")[0].strip().lower()
+                        if name_part == query_lower:
+                            chosen = candidate
+                            break
+                    chosen.click(timeout=5000)
                     selected_text = page.evaluate("""() => {
                         const el = document.querySelector('input[placeholder*="Location"]');
                         return el ? el.value.trim() : '';
