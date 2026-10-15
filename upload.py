@@ -1661,6 +1661,43 @@ def youpic_photo_ids(page, handle):
     return found
 
 
+YOUPIC_LOG = SCRIPT_DIR / "logs" / "youpic.log"
+
+
+def youpic_history(row_id, result, detail="", source=None):
+    """Append one line to logs/youpic.log — the single YouPic history shared
+    by upload.py and youpic_catchup.py. Never raises."""
+    try:
+        if source is None:
+            source = "catch-up" if os.environ.get("YOUPIC_CATCHUP") else "upload"
+        YOUPIC_LOG.parent.mkdir(exist_ok=True)
+        with open(YOUPIC_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {source:<8}  {row_id:<12}  {result:<16}  {detail}\n")
+    except Exception:
+        pass
+
+
+def youpic_countdown_secs(body):
+    """Seconds left on the organizer's "Next Upload HH:MM" countdown (3600 if unreadable)."""
+    m = re.search(r"Next Upload\s*(\d{1,2})\s*:\s*(\d{2})", body or "")
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 if m else 3600
+
+
+def youpic_schedule_catchup(wait_secs):
+    """Ask youpic_catchup.py for one one-off Hermes run when the slot frees.
+    Skipped when this process IS a catch-up run (it schedules its own
+    follow-up). Never raises — the daily safety-net run covers a miss."""
+    if os.environ.get("YOUPIC_CATCHUP"):
+        return
+    try:
+        subprocess.run([sys.executable, str(SCRIPT_DIR / "youpic_catchup.py"),
+                        "--schedule-in", str(int(wait_secs) + 120)],
+                       cwd=SCRIPT_DIR, timeout=90, capture_output=True)
+        print("  YouPic catch-up scheduled for when the 24h slot frees up")
+    except Exception as e:
+        print(f"  WARNING: could not schedule YouPic catch-up: {e}")
+
+
 def _youpic_norm(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
@@ -1704,10 +1741,9 @@ def upload_to_youpic(page, row, desc_full, tags, image_path, no_submit=False, ha
     except Exception:
         body = ""
     if "Next Upload" in body:
-        m = re.search(r"Next Upload\s*([\d:]+)", body)
-        wait = f" (next slot in {m.group(1)})" if m else ""
-        return {"success": False, "url_youpic": "", "deferred": True,
-                "error": f"Free-tier 24h upload cap active{wait}"}
+        secs = youpic_countdown_secs(body)
+        return {"success": False, "url_youpic": "", "deferred": True, "wait_secs": secs,
+                "error": f"Free-tier 24h upload cap active (next slot in {secs // 3600}h{secs % 3600 // 60:02d})"}
 
     # ── Choose file ──────────────────────────────────────────
     print("  Uploading file...")
@@ -5638,6 +5674,9 @@ def main():
                         print("\n  YouPic: deferred — already used this run's upload slot")
                         write_run_log("YOUPIC", "deferred (24h cap)", pid=get_chromium_pid())
                         errors.append("YouPic: deferred — free-tier 24h cap (one upload per run)")
+                        youpic_history(row["upload_id"], "deferred", "one YouPic upload per run — slot already used this run")
+                        if not args.no_submit:
+                            youpic_schedule_catchup(24 * 3600)
                     else:
                         print(f"\n  ── YouPic Upload ──")
                         t0_youpic = time.time()
@@ -5663,17 +5702,23 @@ def main():
                             ok_youpic = True
                             print(f"  YouPic: SUCCESS ({time.time()-t0_youpic:.0f}s) — {result_youpic.get('url_youpic', '')}")
                             write_run_log("YOUPIC", "SUCCESS", pid=get_chromium_pid())
+                            youpic_history(row["upload_id"], "no-submit test" if args.no_submit else "SUCCESS",
+                                           f"{result_youpic.get('url_youpic', '')} ({time.time()-t0_youpic:.0f}s)")
                         elif result_youpic.get("deferred"):
                             youpic_deferred = True
                             err = result_youpic.get("error", "")
                             print(f"  YouPic: DEFERRED — {err}")
                             write_run_log("YOUPIC", "deferred (24h cap)", pid=get_chromium_pid())
                             errors.append(f"YouPic: deferred — {err}")
+                            youpic_history(row["upload_id"], "deferred", err)
+                            if not args.no_submit:
+                                youpic_schedule_catchup(result_youpic.get("wait_secs", 3600))
                         else:
                             err = result_youpic.get("error", "unknown")
                             print(f"  YouPic: FAILED ({time.time()-t0_youpic:.0f}s) — {err}")
                             write_run_log("YOUPIC", "FAILED", pid=get_chromium_pid())
                             errors.append(f"YouPic: {err}")
+                            youpic_history(row["upload_id"], "FAILED", f"{err[:300]} ({time.time()-t0_youpic:.0f}s)")
                             shot_path = error_shot_path(row['upload_id'], "youpic")
                             try:
                                 page.screenshot(path=str(shot_path))
