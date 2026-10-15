@@ -1813,24 +1813,66 @@ def upload_to_youpic(page, row, desc_full, tags, image_path, no_submit=False, ha
         return {"success": True, "url_youpic": "NO_SUBMIT", "error": "", "deferred": False}
 
     # ── Publish ──────────────────────────────────────────────
+    # Clicking publish returns to /organizer/ immediately and uploads the
+    # photo in the background as POST /api/media ("Uploading 1 remaining").
+    # Success = that request answers 2xx. Navigating away before then aborts
+    # it (confirmed 2026-10-15: the post silently never appeared), and a
+    # refused connection (YouPic's IPv6 endpoint was flaky that day) leaves
+    # the spinner going forever — both must be FAILED, not SUCCESS.
     print("  Publishing...")
-    published = False
-    for _ in range(3):
-        youpic_dismiss_popups(page)
-        try:
-            page.locator("a.send-button").first.click(timeout=8000)
-        except Exception:
-            continue
-        try:
-            page.wait_for_url(lambda u: "/organizer/draft" not in u, timeout=120000)
-            published = True
-            break
-        except PlaywrightTimeout:
-            continue
-    if not published:
+    media = {}
+
+    def _yp_req(r):
+        if "/api/media" in r.url and r.method == "POST":
+            media["started"] = True
+
+    def _yp_resp(r):
+        if "/api/media" in r.url and r.request.method == "POST":
+            media["status"] = r.status
+
+    def _yp_fail(r):
+        if "/api/media" in r.url and r.method == "POST":
+            media["fail"] = r.failure or "request failed"
+
+    page.on("request", _yp_req)
+    page.on("response", _yp_resp)
+    page.on("requestfailed", _yp_fail)
+    try:
+        for _ in range(3):
+            youpic_dismiss_popups(page)
+            try:
+                page.locator("a.send-button").first.click(timeout=8000)
+            except Exception:
+                continue
+            for _ in range(20):  # up to ~10s for the upload request to start
+                if media:
+                    break
+                page.wait_for_timeout(500)
+            if media:
+                break
+        if not media:
+            return {"success": False, "url_youpic": "", "deferred": False,
+                    "error": "Clicked publish but YouPic never started the upload — not published"}
+        deadline = time.time() + WAIT_TIMES.get("youpic_publish", 300000) / 1000
+        while "status" not in media and "fail" not in media and time.time() < deadline:
+            page.wait_for_timeout(1000)
+    finally:
+        for ev, fn in (("request", _yp_req), ("response", _yp_resp), ("requestfailed", _yp_fail)):
+            try:
+                page.remove_listener(ev, fn)
+            except Exception:
+                pass
+    if "fail" in media:
         return {"success": False, "url_youpic": "", "deferred": False,
-                "error": "Still on the draft form after clicking publish — not published"}
-    page.wait_for_timeout(3000)
+                "error": f"YouPic upload request failed ({media['fail']}) — not published"}
+    if "status" not in media:
+        return {"success": False, "url_youpic": "", "deferred": False,
+                "error": "YouPic upload did not finish within 5 min — not published"}
+    if not 200 <= media["status"] < 300:
+        return {"success": False, "url_youpic": "", "deferred": False,
+                "error": f"YouPic rejected the upload (HTTP {media['status']}) — not published"}
+    print(f"    Upload accepted (HTTP {media['status']})")
+    page.wait_for_timeout(5000)
 
     after = youpic_photo_ids(page, handle)
     new = sorted(after - before, key=lambda x: int(x[1]), reverse=True)
