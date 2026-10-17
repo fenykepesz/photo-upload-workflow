@@ -336,10 +336,18 @@ def run_pass(page, todo, accounts, results, pass_no):
     """todo: list of (row, platform). Updates results[(upload_id, platform)]."""
     for row, p in todo:
         t0 = time.time()
-        try:
-            status, detail = CHECKS[p](page, row, accounts)
-        except Exception as e:
-            status, detail = UNKNOWN, f"{type(e).__name__}: {str(e)[:120]}"
+        # Checks only read pages, so a page that failed to load (timeout or a
+        # dropped connection — ~1 in 2 new connections to 35photo from the VPS,
+        # 2026-10-17) is simply tried again.
+        for attempt in range(3):
+            try:
+                status, detail = CHECKS[p](page, row, accounts)
+                break
+            except Exception as e:
+                status, detail = UNKNOWN, f"{type(e).__name__}: {str(e)[:120]}"
+                if attempt < 2:
+                    print(f"  {row['upload_id']} {LABEL[p]:9} load failed, retrying ({attempt + 1}/2)")
+                    time.sleep(5)
         results[(row["upload_id"], p)] = (status, detail, pass_no)
         print(f"  {row['upload_id']} {LABEL[p]:9} {status} ({time.time()-t0:.0f}s) — {detail}")
 
