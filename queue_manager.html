@@ -1697,11 +1697,12 @@
         <input type="password" id="ai-key-input" placeholder="sk-ant-api03-...">
         <label for="ai-model-select">Model</label>
         <select id="ai-model-select">
-          <option value="claude-opus-4-7">Opus 4.7 — Most capable, complex reasoning</option>
-          <option value="claude-opus-4-6">Opus 4.6 — Best quality, slower</option>
-          <option value="claude-sonnet-4-5-20250929" selected>Sonnet 4.5 — Balanced</option>
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — Fastest, cheapest</option>
+          <option value="claude-opus-5-5">Opus 5.5 — Most capable</option>
+          <option value="claude-sonnet-5-5" selected>Sonnet 5.5 — Balanced (default)</option>
+          <option value="claude-haiku-5-5">Haiku 5.5 — Fastest, cheapest</option>
+          <option value="claude-fable-5-1">Fable 5.1 — Top tier, most expensive</option>
         </select>
+        <div id="ai-model-note" style="font-size:11px;opacity:.6;margin-top:4px"></div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
           <label for="ai-prompt-input" style="margin-bottom:0">Prompt</label>
           <button class="btn-link" onclick="resetAiPrompt()">Reset to Default</button>
@@ -3153,9 +3154,44 @@
     updateThemeIcon();
 
     // ── AI METADATA GENERATION ────────────────────────────────────────────────────
-    const AI_MODELS = { 'claude-opus-4-7': 1, 'claude-opus-4-6': 1, 'claude-sonnet-4-5-20250929': 1, 'claude-haiku-4-5-20251001': 1 };
-    const AI_MODEL_DEFAULT = 'claude-sonnet-4-5-20250929';
-    function getAiModel() { const m = localStorage.getItem('ai_model'); return (m && AI_MODELS[m]) ? m : AI_MODEL_DEFAULT; }
+    // Model list: fetched live from Anthropic (GET /v1/models) with the user's
+    // key when Settings opens, so it never goes stale again. The built-in
+    // options in the <select> are only the fallback (current as of 2026-10-17).
+    const AI_MODEL_DEFAULT = 'claude-sonnet-5-5';
+    const AI_MODEL_OLD_DEFAULT = 'claude-sonnet-4-5-20250929';  // pre-2026-10-17 default
+    function getAiModel() {
+      const m = localStorage.getItem('ai_model');
+      return (!m || m === AI_MODEL_OLD_DEFAULT) ? AI_MODEL_DEFAULT : m;
+    }
+    async function loadAiModels() {
+      const sel = document.getElementById('ai-model-select');
+      const note = document.getElementById('ai-model-note');
+      const want = getAiModel();
+      const key = getAiKey();
+      const ensure = () => {
+        if (![...sel.options].some(o => o.value === want)) sel.add(new Option(want + ' (saved choice)', want));
+        sel.value = want;
+      };
+      ensure();
+      if (!key) { if (note) note.textContent = 'Built-in list — add your API key to load the current model list.'; return; }
+      try {
+        const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+          headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01',
+                     'anthropic-dangerous-direct-browser-access': 'true' } });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const models = ((await res.json()).data || []).filter(m => /^claude-/.test(m.id));
+        if (!models.length) throw new Error('empty list');
+        sel.innerHTML = '';
+        for (const m of models) {   // newest first, as returned by the API
+          const label = (m.display_name || m.id) + (m.id === AI_MODEL_DEFAULT ? ' (default)' : '');
+          sel.add(new Option(label, m.id));
+        }
+        ensure();
+        if (note) note.textContent = `Live list from Anthropic — ${models.length} models.`;
+      } catch (e) {
+        if (note) note.textContent = 'Could not load the live model list (' + e.message + ') — showing the built-in list.';
+      }
+    }
     const AI_PROMPT_DEFAULT = `You are a metadata generator for fine art photography. Analyze this photo and generate:
 
 1. THREE title options (3-8 words each), one in each style. IMPORTANT: DeviantArt has a hard 50-character limit on "Title (Serial)" combined, and the serial suffix (e.g. " (Sienna 65)") typically takes up 10-18 characters -- keep each title to 32 characters or fewer so there's room for it. Titles over this will get rejected downstream.
@@ -3189,6 +3225,7 @@ Return ONLY valid JSON, no markdown fences:
     function openSettings(tab) {
       document.getElementById('ai-key-input').value = getAiKey();
       document.getElementById('ai-model-select').value = getAiModel();
+      loadAiModels();
       document.getElementById('ai-prompt-input').value = getAiPrompt();
       document.getElementById('ai-key-overlay').classList.add('open');
       showSettingsTab(tab || localStorage.getItem('settings_tab') || 'ai');
@@ -4594,10 +4631,11 @@ Return ONLY valid JSON, no markdown fences:
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         if (res.status === 401) throw new Error('Invalid API key — check Settings');
+        if (res.status === 404 && /model/i.test(body)) throw new Error(`Model ${getAiModel()} isn't available — choose another in Settings → AI`);
         throw new Error(`API error ${res.status}: ${body.slice(0, 200)}`);
       }
       const json = await res.json();
-      const text = json.content?.[0]?.text || '';
+      const text = (json.content || []).find(b => b.type === 'text')?.text || '';
       return parseAiResponse(text);
     }
 
