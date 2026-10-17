@@ -1431,180 +1431,230 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
 
 
 # ── 35photo Upload ────────────────────────────────────────────
-def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False):
-    """
-    Automate 35photo.pro photo upload.
-    Returns {"success": bool, "url_35p": str, "error": str}
-    """
-    if not image_path or not Path(image_path).exists():
-        return {"success": False, "url_35p": "", "error": "No image file available"}
+# "Upload photo (now)" — publishes immediately. The header "Upload" button
+# leads to the delayed-publication page (beta), which QUEUES a photo for 24h
+# whenever the previous one was published <24h ago ("publish photos every
+# day"); PH-2026-218..220 were queued there and never appeared (2026-10-15..17).
+P35_UPLOAD_NOW_URL = "https://35photo.pro/profile/photo/add_photo/?new=true"
+P35_MAX_ATTEMPTS = 3
 
+
+def _35p_goto(page, url, tries=6):
+    """page.goto with retries. From the VPS roughly every second NEW connection
+    to 35photo (Moscow) is silently dropped (confirmed 2026-10-17); a retry
+    usually gets through. Returns True once the page loaded."""
+    for i in range(tries):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            return True
+        except Exception as e:
+            print(f"    (35photo load attempt {i + 1}/{tries} failed: {str(e).splitlines()[0][:80]})")
+            page.wait_for_timeout(2000)
+    return False
+
+
+def _35p_profile_ids(page, handle):
+    """Photo ids listed on the profile, or None if it couldn't be loaded."""
+    if not _35p_goto(page, f"https://35photo.pro/{handle}/"):
+        return None
+    page.wait_for_timeout(3000)
+    try:
+        hrefs = page.evaluate("() => [...document.querySelectorAll('a[href]')].map(a => a.href)")
+    except Exception:
+        return None
+    ids = set(re.findall(rf"/{re.escape(handle)}/photo_(\d+)", " ".join(hrefs)))
+    return ids or None   # no photo links at all = the page didn't render
+
+
+def _35p_find_new(page, handle, before, title):
+    """Look for a photo on the profile that wasn't there before the upload.
+    Returns (post_url or "", profile_loaded)."""
+    after = _35p_profile_ids(page, handle)
+    if after is None:
+        return "", False
+    new = sorted(after - before, key=int, reverse=True)
+    for pid in new:
+        url = f"https://35photo.pro/{handle}/photo_{pid}/"
+        if not _35p_goto(page, url, tries=3):
+            return url, True        # a new photo exists — never re-upload over it
+        page.wait_for_timeout(2000)
+        try:
+            text = (page.title() + " " + page.inner_text("body")[:4000]).lower()
+        except Exception:
+            text = ""
+        if title.lower() in text:
+            return url, True
+        print(f"    WARNING: new photo {pid} doesn't show the title '{title}'")
+    if new:
+        return f"https://35photo.pro/{handle}/photo_{new[0]}/", True
+    return "", True
+
+
+def _35p_attempt(page, row, desc_full, tags, image_path, no_submit):
+    """One pass through the "Upload photo (now)" form. Returns "published"
+    (the form POST came back OK), "no_submit", "limit", or an error message.
+
+    This form has no "Adult content 18+" checkbox (nor does the photo's edit
+    page); Erik's call 2026-10-17: rely on the "Fine Nudes" style, which all
+    NSFW rows use, instead of the delayed page's checkbox."""
     category = row.get("category_35p", "").strip()
     title = get_effective_title(row)
-    nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
 
-    # ── Navigate to 35photo upload page ──────────────────────
-    print("  Opening 35photo upload page...")
-    try:
-        page.goto("https://35photo.pro", wait_until="networkidle", timeout=30000)
-    except PlaywrightTimeout:
-        page.goto("https://35photo.pro", wait_until="domcontentloaded", timeout=15000)
-
+    print("  Opening 35photo upload page (publish now)...")
+    if not _35p_goto(page, P35_UPLOAD_NOW_URL):
+        return "35photo upload page did not load (connection dropped)"
     page.wait_for_timeout(2000)
-
     if "login" in page.url.lower():
-        return {"success": False, "url_35p": "",
-                "error": "Not logged into 35photo — run: python upload.py --login"}
-
-    # Click the "Upload" button in top nav
+        return "Not logged into 35photo — run: python upload.py --login"
     try:
-        upload_link = page.locator('a:has-text("Upload")').first
-        upload_link.click(timeout=5000)
+        body = page.inner_text("body", timeout=10000)
     except Exception:
-        # Fallback: navigate directly
-        page.goto("https://35photo.pro/upload/", wait_until="networkidle", timeout=30000)
+        body = ""
+    m = re.search(r"You can upload\s+(\d+)\s+Photo", body, re.I)
+    if m and int(m.group(1)) == 0:
+        return "limit"
 
-    page.wait_for_timeout(3000)
+    file_input = page.locator('input[type="file"][name="userfile"], input[type="file"]').first
+    try:
+        file_input.wait_for(state="attached", timeout=20000)
+    except Exception:
+        return "No file input found on 35photo upload page"
+    print("  Choosing file...")
+    file_input.set_input_files(str(image_path))
+    page.wait_for_timeout(1000)
 
-    # ── Upload file ──────────────────────────────────────────
-    print(f"  Uploading file...")
-    file_input = page.locator('input[type="file"]')
-    if file_input.count() > 0:
-        file_input.first.set_input_files(str(image_path))
-    else:
-        return {"success": False, "url_35p": "", "error": "No file input found on 35photo upload page"}
+    print("  Setting metadata: title, style, tags, description...")
+    try:
+        page.locator("#photo_name, input[name='photo_name']").first.fill(title, timeout=8000)
+    except Exception as e:
+        return f"Could not fill title: {e}"
 
-    # Wait for upload to process and form to appear
-    print("  Waiting for upload to complete...")
-    page.wait_for_timeout(WAIT_TIMES["35photo"])
-
-    # Scroll down to make the metadata form visible
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    page.wait_for_timeout(2000)
-
-    # ── Fill metadata fields ────────────────────────────────
-    print(f"  Setting metadata: style, title, description, tags...")
-
-    # Style (category) — standard HTML <select>, skip the time interval select
     if category:
-        try:
-            style_select = page.locator('select.photoData, select:not(#allowTimeInteval)').first
-            style_select.scroll_into_view_if_needed()
-            style_select.select_option(label=category, timeout=5000)
-        except Exception as e:
-            print(f"    WARNING: Could not select style '{category}': {e}")
-
-    page.wait_for_timeout(300)
-
-    # Title — standard HTML input with class photoData
-    try:
-        title_input = page.locator('input.photoData[placeholder="Title"], input[placeholder="Title"]').first
-        title_input.scroll_into_view_if_needed()
-        title_input.fill(title, timeout=5000)
-    except Exception as e:
-        print(f"    WARNING: Could not fill title: {e}")
-
-    page.wait_for_timeout(300)
-
-    # Description — standard HTML textarea
-    try:
-        desc_input = page.locator('textarea.photoData[placeholder="Description"], textarea[placeholder="Description"]').first
-        desc_input.scroll_into_view_if_needed()
-        desc_input.fill(desc_full, timeout=5000)
-    except Exception as e:
-        print(f"    WARNING: Could not fill description: {e}")
-
-    page.wait_for_timeout(300)
-
-    # Tags — the real <input var-input="photo_keywords"> has display:none.
-    # 35photo wraps it with a custom chip UI: div.upload-tags-editor > input.upload-tags-input.
-    # Click the visible input directly, or fall back to clicking the editor container.
-    try:
-        tag_input = page.locator('input.upload-tags-input')
-        if tag_input.count() > 0:
-            tag_input.first.scroll_into_view_if_needed()
-            tag_input.first.click(timeout=5000)
+        picked = page.evaluate("""(cat) => {
+            for (const r of document.querySelectorAll('input[type=radio][name=genre_id]')) {
+                const lab = ((r.closest('label') || r.parentElement || {}).innerText || '').trim();
+                if (lab.toLowerCase() === cat.toLowerCase()) { r.click(); return r.checked ? lab : ''; }
+            }
+            return '';
+        }""", category)
+        if picked:
+            print(f"    Style: {picked}")
         else:
-            # Fallback: click the editor container to activate the input
-            editor = page.locator('.upload-tags-editor')
-            if editor.count() > 0:
-                editor.first.scroll_into_view_if_needed()
-                editor.first.click(timeout=5000)
-            else:
-                # Last resort: click parent of the hidden input
-                parent_loc = page.locator('input[var-input="photo_keywords"]').locator('..')
-                parent_loc.scroll_into_view_if_needed()
-                parent_loc.click(timeout=5000)
-        page.wait_for_timeout(500)
-        for tag in tags:
-            page.keyboard.type(tag, delay=50)
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(300)
-    except Exception as e:
-        print(f"    WARNING: Could not fill tags: {e}")
+            print(f"    WARNING: style '{category}' not found on the form")
 
-    # Background — try to select black (last swatch)
+    # Tags: chip input ("Add a tag...") feeding the hidden photo_keywords field
     try:
-        bg_swatches = page.locator('[class*="background"] span, [class*="bg"] span, .color-swatch')
-        if bg_swatches.count() > 0:
-            bg_swatches.last.click(timeout=2000)
-    except Exception:
-        pass  # Not critical
+        tag_input = page.locator('input[placeholder="Add a tag..."]').first
+        tag_input.click(timeout=5000)
+        for tag in tags:
+            page.keyboard.type(tag, delay=30)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(200)
+    except Exception as e:
+        print(f"    WARNING: could not type tags: {e}")
+    kw = page.evaluate("() => (document.querySelector('#photo_keywords') || {}).value || ''")
+    if tags and not kw.strip():
+        page.evaluate("(v) => { const e = document.querySelector('#photo_keywords'); if (e) e.value = v; }", ", ".join(tags))
+        print("    Tags set directly on the keywords field")
 
-    # Adult content checkbox — use JS to find and check it directly
-    if nsfw:
-        print("  Setting adult content flag...")
-        checked = page.evaluate("""
-            (() => {
-                // Find all checkboxes on the page
-                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-                for (const cb of checkboxes) {
-                    // Check if this checkbox or its parent/label contains "Adult content" text
-                    const parent = cb.closest('label, div, span, td') || cb.parentElement;
-                    const nearby = parent ? parent.textContent : '';
-                    if (nearby.includes('Adult content') || nearby.includes('adult content')) {
-                        if (!cb.checked) {
-                            cb.click();
-                            return 'checked';
-                        }
-                        return 'already_checked';
-                    }
-                }
-                // Fallback: look for any element with "Adult content 18" text and click it
-                const els = document.querySelectorAll('*');
-                for (const el of els) {
-                    if (el.children.length === 0 && el.textContent.includes('Adult content 18')) {
-                        el.click();
-                        return 'clicked_text';
-                    }
-                }
-                return 'not_found';
-            })()
-        """)
-        print(f"    Adult content: {checked}")
+    try:
+        page.locator("#photo_comm, textarea[name='photo_comm']").first.fill(desc_full, timeout=8000)
+    except Exception as e:
+        print(f"    WARNING: could not fill description: {e}")
 
+    if row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE":
+        print(f"    NSFW row — no 18+ checkbox on this form; style '{category}' marks it")
     page.wait_for_timeout(1000)
 
     if no_submit:
         print("  --no-submit: skipping publish")
-        return {"success": True, "url_35p": "NO_SUBMIT", "error": ""}
+        return "no_submit"
 
-    # ── Publish ──────────────────────────────────────────────
-    print("  Publishing...")
-    publish_clicked = False
-    for label in ("Publish", "Submit", "Save", "Upload photo", "Upload"):
-        btn = page.locator(f'button:has-text("{label}"), input[type="submit"][value="{label}"], a:has-text("{label}")')
-        if btn.count() > 0:
-            btn.first.click()
-            publish_clicked = True
-            break
+    # ── Publish: plain multipart form POST (the file goes up with it) ──
+    print("  Publishing (Add)...")
+    btn = page.locator('form[enctype="multipart/form-data"] button[type="submit"], '
+                       'form[enctype="multipart/form-data"] input[type="submit"]').first
+    if btn.count() == 0:
+        return "No Add button found"
+    try:
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=180000) as nav:
+            btn.click(timeout=8000)
+        resp = nav.value
+        status = resp.status if resp else 0
+    except Exception as e:
+        return f"publish request failed ({str(e).splitlines()[0][:100]})"
+    if status and status >= 400:
+        return f"35photo rejected the upload (HTTP {status})"
+    page.wait_for_timeout(3000)
+    return "published"
 
-    if not publish_clicked:
-        return {"success": False, "url_35p": "", "error": "No Publish button found"}
 
-    page.wait_for_timeout(5000)
-    print("  Upload complete")
-    return {"success": True, "url_35p": "UPLOADED", "error": ""}
+def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False, handle="rozmanerik"):
+    """
+    Automate 35photo.pro photo upload via "Upload photo (now)".
+    Returns {"success": bool, "url_35p": str, "error": str, "attempt": int}
+
+    Rebuilt 2026-10-17: the old flow went through the delayed-publication
+    page, which silently queued PH-2026-218..220 (they never appeared) while
+    this function reported SUCCESS. Now: snapshot the profile, publish via the
+    immediate form, then confirm the new photo on the profile (real URL, not
+    "UPLOADED"). Not confirmed → fresh attempt, up to P35_MAX_ATTEMPTS; the
+    profile is checked before every retry so a photo that did land is never
+    uploaded twice (from the VPS ~1 in 2 new connections to 35photo are
+    silently dropped). If the profile itself can't be loaded, a single attempt
+    is made and reported unconfirmed (verify_upload.py settles it later).
+    """
+    if not image_path or not Path(image_path).exists():
+        return {"success": False, "url_35p": "", "error": "No image file available"}
+
+    check_title = row.get("title", "").strip() or get_effective_title(row)
+    before = None
+    if not no_submit:
+        print("  Checking 35photo profile (pre-upload snapshot)...")
+        before = _35p_profile_ids(page, handle)
+        if before is None:
+            print("    WARNING: 35photo profile didn't load — the publish can't be confirmed, single attempt only")
+
+    last_err = ""
+    for attempt in range(1, P35_MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            print(f"  ── 35photo attempt {attempt}/{P35_MAX_ATTEMPTS} ──")
+        outcome = _35p_attempt(page, row, desc_full, tags, image_path, no_submit)
+        if outcome == "no_submit":
+            return {"success": True, "url_35p": "NO_SUBMIT", "error": ""}
+        if outcome == "limit":
+            return {"success": False, "url_35p": "", "error": "35photo daily upload limit reached (\"You can upload 0 Photo\")"}
+        if outcome.startswith("Not logged"):
+            return {"success": False, "url_35p": "", "error": outcome}
+
+        if before is None:
+            if outcome == "published":
+                print("  Upload complete (not confirmed on the profile)")
+                return {"success": True, "url_35p": "UPLOADED", "error": "", "attempt": attempt}
+            return {"success": False, "url_35p": "", "error": f"{outcome}; profile unreachable, not retrying"}
+
+        # Confirm on the profile — even when the POST failed, it may still have
+        # landed, and then retrying would create a duplicate.
+        print("  Confirming on the 35photo profile...")
+        url, loaded = _35p_find_new(page, handle, before, check_title)
+        if not url and loaded:
+            page.wait_for_timeout(30000)
+            url, loaded = _35p_find_new(page, handle, before, check_title)
+        if url:
+            note = f" (attempt {attempt}/{P35_MAX_ATTEMPTS})" if attempt > 1 else ""
+            print(f"  35photo post confirmed{note}: {url}")
+            return {"success": True, "url_35p": url, "error": "", "attempt": attempt}
+        if not loaded:
+            if outcome == "published":
+                print("  Upload complete (profile unreachable — not confirmed)")
+                return {"success": True, "url_35p": "UPLOADED", "error": "", "attempt": attempt}
+            return {"success": False, "url_35p": "",
+                    "error": f"{outcome}; profile unreachable, not retrying (could duplicate)"}
+        last_err = outcome if outcome != "published" else "35photo accepted the upload, but the photo never appeared on the profile"
+        print(f"    35photo attempt {attempt} not published: {last_err}")
+
+    return {"success": False, "url_35p": "",
+            "error": f"publish not confirmed after {P35_MAX_ATTEMPTS} attempts — last: {last_err}"}
 
 
 # ── YouPic Upload ─────────────────────────────────────────────
@@ -5632,7 +5682,8 @@ def main():
                         tags_35p = tags[:TAG_LIMIT_500PX]
                         try:
                             result_35p = upload_to_35photo(
-                                page, row, desc_full, tags_35p, image_path, args.no_submit
+                                page, row, desc_full, tags_35p, image_path, args.no_submit,
+                                handle=config.get("accounts", {}).get("35photo", "") or "rozmanerik"
                             )
                         except PlaywrightTimeout as e:
                             result_35p = {"success": False, "url_35p": "", "error": f"Timeout: {e}"}
@@ -5642,7 +5693,9 @@ def main():
                         if result_35p["success"]:
                             ok_35p = True
                             print(f"  35photo: SUCCESS ({time.time()-t0_35p:.0f}s) — {result_35p.get('url_35p', '')}")
-                            write_run_log("35PHOTO", "SUCCESS", pid=get_chromium_pid())
+                            _a35 = result_35p.get("attempt", 1)
+                            write_run_log("35PHOTO", "SUCCESS" if _a35 == 1 else f"SUCCESS (attempt {_a35}/{P35_MAX_ATTEMPTS})",
+                                          pid=get_chromium_pid())
                         else:
                             err = result_35p.get("error", "unknown")
                             print(f"  35photo: FAILED ({time.time()-t0_35p:.0f}s) — {err}")
@@ -6198,7 +6251,8 @@ def main():
                         t0_35p = time.time()
                         tags_35p = tags[:TAG_LIMIT_500PX]
                         try:
-                            result_35p = upload_to_35photo(page, row, desc_full, tags_35p, image_path, args.no_submit)
+                            result_35p = upload_to_35photo(page, row, desc_full, tags_35p, image_path, args.no_submit,
+                                                           handle=config.get("accounts", {}).get("35photo", "") or "rozmanerik")
                         except PlaywrightTimeout as e:
                             result_35p = {"success": False, "url_35p": "", "error": f"Timeout: {e}"}
                         except Exception as e:
