@@ -1971,6 +1971,24 @@ def upload_to_youpic(page, row, desc_full, tags, image_path, no_submit=False, ha
 
 
 # ── VK Upload (Playwright) ────────────────────────────────────
+def goto_with_retries(page, url, tries=4, timeout=45000, pause_ms=5000):
+    """page.goto that survives both a slow page (PlaywrightTimeout) and a
+    network-level failure (playwright Error such as net::ERR_TIMED_OUT, which
+    is NOT a PlaywrightTimeout). Confirmed 2026-10-18: VK's feed failed with
+    net::ERR_TIMED_OUT twice in one run (main + retry pass) and the old
+    timeout-only reload never fired. Returns True once loaded."""
+    for i in range(tries):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            return True
+        except Exception as e:
+            first = str(e).splitlines()[0][:90] if str(e) else type(e).__name__
+            print(f"    (load attempt {i + 1}/{tries} for {url} failed: {first})")
+            if i < tries - 1:
+                page.wait_for_timeout(pause_ms)
+    return False
+
+
 def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", photographer="", model_name="", mua_name="", studio_name="", no_submit=False):
     """
     Post a photo to the VK wall via browser automation, then suggest to VK groups.
@@ -1982,19 +2000,10 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
 
     # Navigate to VK feed
     print("  Opening VK feed...")
-    try:
-        page.goto("https://vk.com/feed", wait_until="domcontentloaded", timeout=45000)
-    except PlaywrightTimeout:
-        # The VK retry pass runs in the same browser session as the failed
-        # first attempt (no restart between retries -- that only happens
-        # once, pre-VK), so a slow/contended session can blow past even a
-        # generous goto timeout. Observed live 2026-09-17 (PH-2026-195,
-        # retry pass): reload once before giving up entirely.
-        print("    Feed load timed out — reloading once...")
-        try:
-            page.goto("https://vk.com/feed", wait_until="domcontentloaded", timeout=45000)
-        except PlaywrightTimeout:
-            return {"success": False, "url_vk": "", "error": "Timeout loading VK feed"}
+    # Slow/contended sessions (observed 2026-09-17, PH-2026-195) and dropped
+    # connections on the route to VK (2026-10-18, net::ERR_TIMED_OUT) — retry.
+    if not goto_with_retries(page, "https://vk.com/feed", tries=4, timeout=45000):
+        return {"success": False, "url_vk": "", "error": "Could not load VK feed after 4 attempts (timeout / connection dropped)"}
     page.wait_for_timeout(3000)
 
     # Check if logged in (VK redirects to login page if not)
@@ -2393,10 +2402,8 @@ def suggest_post_to_vk_group(page, group_slug, caption, image_path, vk_tag_peopl
     """
     group_url = f"https://vk.com/{group_slug}"
     print(f"    Opening group: {group_url}")
-    try:
-        page.goto(group_url, wait_until="domcontentloaded", timeout=30000)
-    except PlaywrightTimeout:
-        return {"success": False, "error": f"Timeout loading {group_url}"}
+    if not goto_with_retries(page, group_url, tries=3, timeout=30000):
+        return {"success": False, "error": f"Could not load {group_url} after 3 attempts (timeout / connection dropped)"}
     page.wait_for_timeout(3000)
 
     # Dismiss "Leave without saving?" dialog if VK shows it after navigating away
