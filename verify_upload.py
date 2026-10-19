@@ -159,10 +159,40 @@ def check_500px(page, row, accounts):
         page, f"https://500px.com/p/{accounts['500px']}", norm(row.get("title")), r"/photo/")
 
 
+VK_PHOTO_JS = "() => [...document.querySelectorAll('img')].filter(i => i.getBoundingClientRect().width > 250).length"
+
+
+def _vk_post_matches(page, needle, model):
+    """On a VK post page: does THIS post look like ours? The whole page text
+    also contains other posts (2026-10-19: PH-2026-222's caption showed up on
+    213's post page), so additionally require the model name in the post's
+    own title, which VK builds from the start of the post text."""
+    if not page_has(page, needle):
+        return False
+    if model and norm(model) not in norm(page.title()):
+        return False
+    return True
+
+
 def check_vk(page, row, accounts):
     needle = caption_needle(row)
     if not needle:
         return UNKNOWN, "row has no caption to match on"
+    model = row.get("model_name", "").strip()
+
+    # upload.py now records the confirmed post URL — check exactly that post
+    known = row.get("url_vk", "").strip()
+    if re.search(r"/wall-?\d+_\d+", known):
+        page.goto(known, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(5000)
+        if logged_out(page):
+            return UNKNOWN, f"redirected to login ({page.url[:60]})"
+        if not page_has(page, needle):
+            return MISSING, f"post {known} does not show this photo's caption"
+        if not page.evaluate(VK_PHOTO_JS):
+            return MISSING, f"post {known} has the caption but no photo"
+        return OK, known
+
     page.goto(f"https://vk.com/{accounts['vk']}", wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(5000)
     if logged_out(page):
@@ -180,11 +210,9 @@ def check_vk(page, row, accounts):
     ids = sorted({int(re.search(r"_(\d+)$", h).group(1)) for h in links}, reverse=True)
     for pid in ids[:3]:
         page.goto(f"https://vk.com/wall{owner}_{pid}", wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(4000)
-        if page_has(page, needle):
-            imgs = page.evaluate(
-                "() => Array.from(document.querySelectorAll('img')).filter(i => i.naturalWidth > 300).length")
-            if not imgs:
+        page.wait_for_timeout(5000)
+        if _vk_post_matches(page, needle, model):
+            if not page.evaluate(VK_PHOTO_JS):
                 return MISSING, f"post {page.url} has the caption but no photo"
             return OK, page.url
     return MISSING, f"caption not in the 3 newest wall posts (newest: {ids[0]})"

@@ -1152,6 +1152,37 @@ def print_dry_run(rows, config):
 
 
 # ── 500px Upload ──────────────────────────────────────────────
+# 500px category picker (two levels: main → sub, then "Done"), mapped from
+# category_35p — mapped live 2026-10-19 when 500px brought categories back.
+P500_CATEGORY_MAP = {
+    "female portrait":   ("People", "Professional Portraits"),
+    "portrait":          ("People", "Professional Portraits"),
+    "fine nudes":        ("People", "Nude"),
+    "city/architecture": ("City", "Architecture"),
+}
+P500_DESC_LIMIT = 500
+
+
+def fit_500px_description(desc_full, limit=P500_DESC_LIMIT):
+    """500px's description box takes at most 500 characters (2026-10-19).
+    Drop the trailing social-links block first; if still too long, cut the
+    text at the last sentence/word boundary before the limit."""
+    if len(desc_full) <= limit:
+        return desc_full
+    text = desc_full.split("\n\n---\n")[0].rstrip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1]
+    for sep in (". ", "\n", " "):
+        i = cut.rfind(sep)
+        if i > limit * 0.6:
+            if sep == ". ":
+                return cut[:i + 1].rstrip()          # clean sentence end
+            cut = cut[:i]
+            break
+    return cut.rstrip() + "…"
+
+
 def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     """
     Automate 500px photo upload.
@@ -1286,11 +1317,43 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     # works as a literal value — confirmed via a real live publish
     # (PH test "Noemi", 2026-09-10): no AI text was generated, the typed
     # description went through verbatim.
+    #
+    # 2026-10-19: 500px changed the description placeholder again ("Enter
+    # keywords such as shooting location, time and story, and AI will expand
+    # your photo description.") and capped it at 500 chars, which broke the
+    # placeholder lookup (30s timeout, PH-2026-222). Locate it structurally
+    # instead: the upload dialog's only <textarea>.
     print("  Setting metadata: title, description...")
     page.get_by_placeholder("Untitled").fill(title)
     page.wait_for_timeout(300)
-    page.get_by_placeholder("Enter a prompt to generate a description with AI.").fill(desc_full)
+    desc_500 = fit_500px_description(desc_full)
+    if len(desc_500) < len(desc_full):
+        print(f"    Description shortened for 500px: {len(desc_full)} → {len(desc_500)} chars")
+    page.locator('[role="dialog"] textarea').first.fill(desc_500, timeout=15000)
     page.wait_for_timeout(300)
+
+    # Category is back (2026-10-19): two-level picker opened from the
+    # "Category" combobox — click main, then sub, then "Done". Mapped from
+    # category_35p. Best effort: a failure here never blocks the upload.
+    cat_pair = P500_CATEGORY_MAP.get(row.get("category_35p", "").strip().lower())
+    if cat_pair:
+        try:
+            page.get_by_role("combobox", name="Category").click(timeout=5000)
+            page.wait_for_timeout(1000)
+            page.get_by_text(cat_pair[0], exact=True).first.click(timeout=5000)
+            page.wait_for_timeout(600)
+            page.get_by_text(cat_pair[1], exact=True).first.click(timeout=5000)
+            page.wait_for_timeout(400)
+            page.get_by_role("button", name="Done", exact=True).click(timeout=5000)
+            page.wait_for_timeout(600)
+            shown = page.get_by_role("combobox", name="Category").input_value()
+            print(f"    Category: {cat_pair[0]} › {cat_pair[1]} (field shows: {shown!r})")
+        except Exception as e:
+            print(f"    WARNING: could not set 500px category {cat_pair}: {str(e).splitlines()[0][:100]}")
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
 
     # Category and Keywords/Tags no longer exist anywhere in the upload
     # flow -- confirmed via a full-page DOM text search (2026-09-10) and
@@ -1317,6 +1380,33 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     # "Restrict" does.
     # if nsfw:
     #     ... (removed 2026-09-10, see above)
+
+    # Keywords are back too (2026-10-19), on their own "Keywords" tab:
+    # textbox "Keywords" (max 50 chars each) + Enter adds a chip. Then
+    # return to the Information tab for location. Best effort.
+    if tags:
+        try:
+            page.get_by_role("tab", name="Keywords").click(timeout=5000)
+            page.wait_for_timeout(800)
+            kw_box = page.get_by_role("textbox", name="Keywords")
+            added = 0
+            for t in tags:
+                t = t.strip()[:50]
+                if not t:
+                    continue
+                kw_box.fill(t)
+                kw_box.press("Enter")
+                page.wait_for_timeout(250)
+                added += 1
+            print(f"    Keywords: {added} added")
+            page.get_by_role("tab", name="Information").click(timeout=5000)
+            page.wait_for_timeout(800)
+        except Exception as e:
+            print(f"    WARNING: could not add 500px keywords: {str(e).splitlines()[0][:100]}")
+            try:
+                page.get_by_role("tab", name="Information").click(timeout=3000)
+            except Exception:
+                pass
 
     # Location — skip if EXIF already populated or no location in CSV
     location = row.get("location_500px", "").strip()
@@ -1989,6 +2079,36 @@ def goto_with_retries(page, url, tries=4, timeout=45000, pause_ms=5000):
     return False
 
 
+def vk_wall_post_ids(page, handle):
+    """(owner_id, {post ids}) listed on the VK profile wall, or (None, None)
+    if it couldn't be loaded."""
+    h = (handle or "").strip().lstrip("@")
+    if not h or not goto_with_retries(page, f"https://vk.com/{h}", tries=3, timeout=40000):
+        return None, None
+    page.wait_for_timeout(4000)
+    try:
+        hrefs = page.evaluate("() => [...document.querySelectorAll('a[href]')].map(a => a.href)")
+    except Exception:
+        return None, None
+    found = [m for m in (re.search(r"/wall(\d+)_(\d+)", x) for x in hrefs) if m]
+    if not found:
+        return None, None
+    owner = found[0].group(1)
+    return owner, {int(m.group(2)) for m in found if m.group(1) == owner}
+
+
+def vk_post_has_photo(page, url):
+    """True if the post page shows a photo-sized image (False on a missing post)."""
+    if not goto_with_retries(page, url, tries=3, timeout=40000):
+        return None
+    page.wait_for_timeout(4000)
+    try:
+        return page.evaluate(
+            "() => [...document.querySelectorAll('img')].filter(i => i.getBoundingClientRect().width > 250).length") > 0
+    except Exception:
+        return None
+
+
 def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk_group_caption="", film_info="", photographer="", model_name="", mua_name="", studio_name="", no_submit=False):
     """
     Post a photo to the VK wall via browser automation, then suggest to VK groups.
@@ -1997,6 +2117,16 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
     """
     if not image_path or not Path(image_path).exists():
         return {"success": False, "url_vk": "", "error": "No image file available"}
+
+    # Snapshot the wall first so the publish can be confirmed afterwards —
+    # 2026-10-19 (PH-2026-222) the Publish click silently didn't take and the
+    # old code still reported "Wall post created".
+    wall_before = None
+    if not no_submit and photographer:
+        print("  Checking VK wall (pre-post snapshot)...")
+        _owner, wall_before = vk_wall_post_ids(page, photographer)
+        if wall_before is None:
+            print("    WARNING: VK wall didn't load — the post can't be confirmed")
 
     # Navigate to VK feed
     print("  Opening VK feed...")
@@ -2332,12 +2462,36 @@ def upload_to_vk(page, desc_full, image_path, vk_tag_people="", vk_groups="", vk
         except Exception:
             return {"success": False, "url_vk": "", "error": "Could not find Publish button"}
         page.wait_for_timeout(5000)
-        print("  Wall post created")
-        # Harvest the real wall-post URL from own profile. Safe to navigate
-        # away here — the group-suggestion loop below does its own goto per group.
-        wall_url = capture_post_url(page, "VK", handle=photographer) or "UPLOADED"
-        if wall_url != "UPLOADED":
-            print(f"  Post URL: {wall_url}")
+        # Confirm on the wall: a post id that wasn't there before, with a
+        # photo. Safe to navigate away here — the group-suggestion loop below
+        # does its own goto per group.
+        wall_url = ""
+        if wall_before is not None:
+            after = None
+            for extra_wait in (0, 15000):          # VK can take a moment to list it
+                page.wait_for_timeout(extra_wait)
+                owner, after = vk_wall_post_ids(page, photographer)
+                if after is None:
+                    break
+                new_ids = sorted(after - wall_before, reverse=True)
+                if new_ids:
+                    wall_url = f"https://vk.com/wall{owner}_{new_ids[0]}"
+                    break
+            if wall_url:
+                if vk_post_has_photo(page, wall_url) is False:
+                    # url_vk stays empty: the caller saves any url_vk it gets, which
+                    # would mark this broken post as done and skip the retry.
+                    return {"success": False, "url_vk": "", "vk_groups_result": "",
+                            "error": f"VK wall post {wall_url} was published WITHOUT the photo — delete it before re-uploading"}
+                print(f"  Wall post confirmed: {wall_url}")
+            elif after is not None:
+                return {"success": False, "url_vk": "", "vk_groups_result": "",
+                        "error": "Clicked Publish but no new post appeared on the VK wall — not published"}
+        if not wall_url:
+            print("  Wall post created (not confirmed — VK wall unreachable)")
+            wall_url = capture_post_url(page, "VK", handle=photographer) or "UPLOADED"
+            if wall_url != "UPLOADED":
+                print(f"  Post URL: {wall_url}")
 
     wall_result = {"success": True, "url_vk": wall_url, "error": "", "vk_groups_result": ""}
 
