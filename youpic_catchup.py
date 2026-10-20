@@ -39,8 +39,9 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -57,6 +58,26 @@ MAX_ATTEMPTS = 3
 
 def log(row_id, result, detail=""):
     u.youpic_history(row_id, result, detail, source="catch-up")
+
+
+def notify(msg):
+    """Telegram (same Photo Uploads channel as the upload summaries). Never raises."""
+    try:
+        u._send_telegram_message(msg, parse_mode=None)
+    except Exception:
+        pass
+
+
+def local(dt):
+    """Server time is UTC; show Erik's local (Israel) time."""
+    return dt.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%H:%M (%a %d %b)")
+
+
+def row_label(uid, rows=None):
+    rows = rows if rows is not None else u.load_queue(u.DEFAULT_CSV)
+    r = next((x for x in rows if x["upload_id"] == uid), {})
+    title = (r.get("title") or "").strip()
+    return f'{uid} "{title}"' if title else uid
 
 
 def load_state():
@@ -113,14 +134,15 @@ def _job_pending(job_id):
 
 
 def ensure_scheduled(st, when):
-    """Make sure exactly one pending one-off run exists at ~`when`. Never raises."""
+    """Make sure exactly one pending one-off run exists at ~`when`. Never raises.
+    Returns the scheduled run time, or None if scheduling failed."""
     when = max(when, datetime.now() + timedelta(minutes=2))
     cur = st.get("scheduled") or {}
     if cur.get("job_id"):
         cur_at = datetime.fromisoformat(cur["run_at"])
         if cur_at > datetime.now() and _job_pending(cur["job_id"]):
             if abs((cur_at - when).total_seconds()) < 600:
-                return                              # already scheduled for about then
+                return cur_at                       # already scheduled for about then
             try:
                 _hermes("remove", cur["job_id"])
             except Exception:
@@ -135,9 +157,11 @@ def ensure_scheduled(st, when):
         run_at = datetime.now() + timedelta(minutes=minutes)
         st["scheduled"] = {"job_id": m.group(1), "run_at": run_at.isoformat(timespec="seconds")}
         log("-", "scheduled", f"next catch-up run at {run_at:%Y-%m-%d %H:%M} UTC (job {m.group(1)})")
+        return run_at
     except Exception as e:
         st["scheduled"] = None
         log("-", "schedule FAILED", f"{e} — daily safety-net run will pick it up")
+        return None
 
 
 # ── Work ───────────────────────────────────────────────────────
@@ -217,7 +241,9 @@ def run(st):
         if not free:
             st["next_slot"] = (datetime.now() + timedelta(seconds=secs + 120)).isoformat(timespec="seconds")
             log(uid, "waiting", f"24h cap active, slot frees ~{st['next_slot']}")
-            ensure_scheduled(st, datetime.fromisoformat(st["next_slot"]))
+            at = ensure_scheduled(st, datetime.fromisoformat(st["next_slot"]))
+            notify(f"⏳ YouPic catch-up: {row_label(uid, rows)} — the 24h limit is still active. "
+                   + (f"Next try at {local(at)}." if at else "The daily safety-net run will try again."))
             return
 
         log(uid, "starting", f"slot free — uploading ({len(todo)} row(s) waiting)")
@@ -247,15 +273,24 @@ def run(st):
                           "--delay", "60", "--recheck", "180"], cwd=SCRIPT_DIR, env=env,
                          stdout=open(SCRIPT_DIR / "logs" / "verify_run.log", "a"), stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True)
+        at = ensure_scheduled(st, datetime.fromisoformat(st["next_slot"])) if remaining else None
+        lines = [f"✅ YouPic catch-up done: {row_label(uid, rows)} is on YouPic.", url,
+                 f"Row status: {fresh.get('status', '?')}."]
         if remaining:
-            ensure_scheduled(st, datetime.fromisoformat(st["next_slot"]))
+            lines.append(f"{remaining} more photo(s) waiting for YouPic"
+                         + (f" — next upload at {local(at)}." if at else "."))
+        notify("\n".join(lines))
     elif "deferred" in out.lower():
         st["next_slot"] = (datetime.now() + timedelta(hours=1)).isoformat(timespec="seconds")
-        ensure_scheduled(st, datetime.fromisoformat(st["next_slot"]))
+        at = ensure_scheduled(st, datetime.fromisoformat(st["next_slot"]))
+        notify(f"⏳ YouPic catch-up: {row_label(uid, rows)} — YouPic still reported the 24h limit. "
+               + (f"Next try at {local(at)}." if at else "The daily safety-net run will try again."))
     else:
         n = st["attempts"].get(uid, 0) + 1
         st["attempts"][uid] = n
         log(uid, "attempt failed", f"{n}/{MAX_ATTEMPTS}, upload.py rc={rc}, see logs/{raw.name}")
+        m = re.search(r"YouPic: FAILED \([^)]*\) — (.+)", out)
+        reason = m.group(1).strip()[:200] if m else f"see logs/{raw.name}"
         if n >= MAX_ATTEMPTS:
             st["gave_up"].append(uid)
             st["attempts"].pop(uid, None)
@@ -267,7 +302,9 @@ def run(st):
             if remaining:
                 ensure_scheduled(st, datetime.now() + timedelta(hours=2))
         else:
-            ensure_scheduled(st, datetime.now() + timedelta(hours=2))
+            at = ensure_scheduled(st, datetime.now() + timedelta(hours=2))
+            notify(f"⚠️ YouPic catch-up: {row_label(uid, rows)} failed (attempt {n}/{MAX_ATTEMPTS}): {reason}. "
+                   + (f"Retrying at {local(at)}." if at else "The daily safety-net run will retry."))
     u.save_row_update(u.DEFAULT_CSV, uid, fix)
 
 
@@ -275,6 +312,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--schedule-in", type=int, metavar="SECONDS")
+    ap.add_argument("--row", default="", help="with --schedule-in: the row just deferred (for the Telegram notice)")
     args = ap.parse_args()
 
     st = load_state()
@@ -286,8 +324,12 @@ def main():
     if args.schedule_in is not None:
         when = datetime.now() + timedelta(seconds=args.schedule_in)
         st["next_slot"] = when.isoformat(timespec="seconds")
-        ensure_scheduled(st, when)
+        at = ensure_scheduled(st, when)
         save_state(st)
+        if args.row:
+            notify(f"⏳ YouPic deferred: {row_label(args.row)} — the free account allows one upload per 24h. "
+                   + (f"Catch-up scheduled for {local(at)}; you'll get a message when it's done."
+                      if at else "Couldn't schedule the catch-up — the daily safety-net run will pick it up."))
         return 0
     try:
         run(st)

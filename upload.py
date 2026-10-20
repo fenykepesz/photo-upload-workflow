@@ -1834,7 +1834,7 @@ def youpic_countdown_secs(body):
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 if m else 3600
 
 
-def youpic_schedule_catchup(wait_secs):
+def youpic_schedule_catchup(wait_secs, row_id=""):
     """Ask youpic_catchup.py for one one-off Hermes run when the slot frees.
     Skipped when this process IS a catch-up run (it schedules its own
     follow-up). Never raises — the daily safety-net run covers a miss."""
@@ -1842,7 +1842,7 @@ def youpic_schedule_catchup(wait_secs):
         return
     try:
         subprocess.run([sys.executable, str(SCRIPT_DIR / "youpic_catchup.py"),
-                        "--schedule-in", str(int(wait_secs) + 120)],
+                        "--schedule-in", str(int(wait_secs) + 120)] + (["--row", row_id] if row_id else []),
                        cwd=SCRIPT_DIR, timeout=90, capture_output=True)
         print("  YouPic catch-up scheduled for when the 24h slot frees up")
     except Exception as e:
@@ -5770,7 +5770,11 @@ def main():
                         continue
                     platforms = {requested}
                 print(f"  Platforms: {', '.join(sorted(platforms))}")
-                if not args.dry_run and not args.no_submit:
+                # YouPic catch-up runs report their outcome themselves (one
+                # clear message from youpic_catchup.py), so skip the generic
+                # live/final summary for them.
+                _quiet_summary = bool(os.environ.get("YOUPIC_CATCHUP"))
+                if not args.dry_run and not args.no_submit and not _quiet_summary:
                     start_live_summary(row, platforms)
 
                 desc_full = build_description(row, config)
@@ -5904,7 +5908,7 @@ def main():
                         errors.append("YouPic: deferred — free-tier 24h cap (one upload per run)")
                         youpic_history(row["upload_id"], "deferred", "one YouPic upload per run — slot already used this run")
                         if not args.no_submit:
-                            youpic_schedule_catchup(24 * 3600)
+                            youpic_schedule_catchup(24 * 3600, row["upload_id"])
                     else:
                         print(f"\n  ── YouPic Upload ──")
                         t0_youpic = time.time()
@@ -5940,7 +5944,7 @@ def main():
                             errors.append(f"YouPic: deferred — {err}")
                             youpic_history(row["upload_id"], "deferred", err)
                             if not args.no_submit:
-                                youpic_schedule_catchup(result_youpic.get("wait_secs", 3600))
+                                youpic_schedule_catchup(result_youpic.get("wait_secs", 3600), row["upload_id"])
                         else:
                             err = result_youpic.get("error", "unknown")
                             print(f"  YouPic: FAILED ({time.time()-t0_youpic:.0f}s) — {err}")
@@ -6802,7 +6806,8 @@ def main():
                 _vk_gr = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
                 print("  [DEBUG] Sending Telegram summary...")
                 try:
-                    send_run_summary(row, platforms, _ok_map, _vk_gr, _run_log_path, _row_start)
+                    if not _quiet_summary:
+                        send_run_summary(row, platforms, _ok_map, _vk_gr, _run_log_path, _row_start)
                 except Exception as _tg_err:
                     import traceback
                     print(f"  ERROR in send_run_summary: {_tg_err}")
