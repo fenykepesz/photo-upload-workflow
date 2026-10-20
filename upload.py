@@ -212,7 +212,7 @@ def _update_live_summary(event, detail):
     _edit_telegram_message(_live_message_id, msg)
 
 
-def send_preflight_notification(needed_platforms, failed_logins):
+def send_preflight_notification(needed_platforms, failed_logins, unreachable=()):
     """Always post the pre-flight login-check result, pass or fail.
 
     Previously a failed check just printed to the terminal and called
@@ -224,11 +224,16 @@ def send_preflight_notification(needed_platforms, failed_logins):
     ordered = [p for p in platform_order if p in needed_platforms]
     if not ordered:
         return
-    n_ok = len(ordered) - len(failed_logins)
-    header = (f"✅ Pre-flight OK — {n_ok}/{len(ordered)} platforms logged in"
-              if not failed_logins else
-              f"❌ Pre-flight FAILED — {n_ok}/{len(ordered)} platforms logged in")
-    lines = [f"{'❌' if p in failed_logins else '✅'} {p}" for p in ordered]
+    n_ok = len(ordered) - len(failed_logins) - len(unreachable)
+    if failed_logins:
+        header = f"❌ Pre-flight FAILED — {n_ok}/{len(ordered)} platforms logged in"
+    elif unreachable:
+        header = (f"✅ Pre-flight OK — {n_ok}/{len(ordered)} logged in, "
+                  f"{len(unreachable)} unreachable (continuing, will retry during upload)")
+    else:
+        header = f"✅ Pre-flight OK — {n_ok}/{len(ordered)} platforms logged in"
+    lines = [f"{'❌' if p in failed_logins else '⚠️' if p in unreachable else '✅'} {p}"
+             + (" — didn't load" if p in unreachable else "") for p in ordered]
     msg = header + "\n\n" + "\n".join(lines)
     if failed_logins:
         msg += "\n\nRun: python upload.py --login"
@@ -265,7 +270,7 @@ def _build_table_rows(log_path, n_ok):
             # rest is "<PLATFORM> checking" or "<PLATFORM> PASS/FAIL" —
             # only the result lines carry a status to aggregate.
             _parts = rest.split()
-            if len(_parts) == 2 and _parts[1] in ('PASS', 'FAIL'):
+            if len(_parts) == 2 and _parts[1] in ('PASS', 'FAIL', 'UNREACHABLE'):
                 if login_first_t is None:
                     login_first_t = t
                 login_last_t = t
@@ -737,7 +742,10 @@ def collect_required_platforms(rows):
 def verify_login(page, platform):
     """
     Navigate to platform home and check whether the user is logged in.
-    Returns True if logged in, False otherwise.
+    Returns True if logged in, False if logged out, None if the site could
+    not be loaded/checked at all (dropped connection, timeout) — a page that
+    doesn't load is NOT evidence of a logout (2026-10-20: 35P failed
+    pre-flight on a timeout and the whole run stopped).
     """
     checks = {
         "500PX": "https://500px.com/",
@@ -751,19 +759,11 @@ def verify_login(page, platform):
     }
     if platform not in checks:
         return True
+    # Slow sites (VK/DA, 2026-08-31) and dropped connections (35photo,
+    # 2026-10-17/20) — several load attempts before giving up.
+    if not goto_with_retries(page, checks[platform], tries=4, timeout=30000, pause_ms=3000):
+        return None
     try:
-        try:
-            page.goto(checks[platform], wait_until="domcontentloaded", timeout=20000)
-        except PlaywrightTimeout:
-            # VK and DA in particular can be slow to respond (same class of
-            # issue already confirmed and fixed in login_step() -- see
-            # 2026-08-31). Without this retry, a single slow load here gets
-            # silently treated as "not logged in" with no way to tell it
-            # apart from a genuinely expired session -- confirmed in
-            # production: 35P failed pre-flight once, then passed cleanly
-            # on the very next run with no re-login in between.
-            print(f"  ({platform} slow to load, retrying with a longer timeout...)")
-            page.goto(checks[platform], wait_until="domcontentloaded", timeout=40000)
         page.wait_for_timeout(2000)
         url = page.url.lower()
 
@@ -804,30 +804,41 @@ def verify_login(page, platform):
         elif platform == "DA":
             return "users/login" not in url
     except Exception:
-        return False
+        return None
     return True
 
 
 def run_login_checks(page, platforms):
     """
     Check login state for each required platform.
-    Prints a status table and returns list of failed platform names.
+    Prints a status table and returns (logged_out, unreachable) lists.
+    Unreachable platforms get one more check after a pause; if still
+    unreachable the run continues (each upload step retries on its own).
     """
     platform_order = ["500PX", "35P", "YOUPIC", "VK", "X", "BSKY", "FB", "DA"]
     ordered = [p for p in platform_order if p in platforms]
 
     print("\n── Pre-flight login check ──────────────────────────────")
-    failed = []
+    failed, unreachable = [], []
     for plat in ordered:
         write_run_log("LOGIN_CHECK", f"{plat} checking", pid=get_chromium_pid())
         ok = verify_login(page, plat)
-        status = "✓ PASS" if ok else "✗ FAIL"
-        print(f"  {plat:<8} {status}")
-        write_run_log("LOGIN_CHECK", f"{plat} {'PASS' if ok else 'FAIL'}", pid=get_chromium_pid())
-        if not ok:
+        if ok is None:
+            print(f"  {plat:<8} … didn't load — checking again in 20s")
+            page.wait_for_timeout(20000)
+            ok = verify_login(page, plat)
+        if ok is None:
+            status, word = "⚠ UNREACHABLE (continuing)", "UNREACHABLE"
+            unreachable.append(plat)
+        elif ok:
+            status, word = "✓ PASS", "PASS"
+        else:
+            status, word = "✗ FAIL", "FAIL"
             failed.append(plat)
+        print(f"  {plat:<8} {status}")
+        write_run_log("LOGIN_CHECK", f"{plat} {word}", pid=get_chromium_pid())
     print()
-    return failed
+    return failed, unreachable
 
 
 # ── Post-publish URL capture (best effort) ────────────────────
@@ -5723,14 +5734,17 @@ def main():
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
             needed_platforms = collect_required_platforms(target_rows)
-            failed_logins = run_login_checks(page, needed_platforms)
-            send_preflight_notification(needed_platforms, failed_logins)
+            failed_logins, unreachable_logins = run_login_checks(page, needed_platforms)
+            send_preflight_notification(needed_platforms, failed_logins, unreachable_logins)
+            if unreachable_logins:
+                print("WARNING: couldn't reach " + ", ".join(unreachable_logins)
+                      + " during pre-flight — continuing; their upload steps will retry")
             if failed_logins:
                 print("ERROR: Not logged in to: " + ", ".join(failed_logins))
                 print("Run:   python upload.py --login")
                 close_context_gracefully(context)
                 sys.exit(1)
-            print("All login checks passed. Starting uploads...")
+            print("Login checks done. Starting uploads...")
 
         results_summary = []
         _youpic_attempted = False
