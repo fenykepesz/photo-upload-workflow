@@ -1194,6 +1194,64 @@ def fit_500px_description(desc_full, limit=P500_DESC_LIMIT):
     return cut.rstrip() + "…"
 
 
+# 500px sometimes shows a full-screen advert (2026-11-04: "vivo X500 Pro Max",
+# round × top-right) on top of the upload dialog, covering "Submit N photo(s)"
+# so the click timed out (PH-2026-238). It's a separate overlay, not part of
+# the dialog, so: look at what is actually on top at the button's centre; if
+# that isn't the button, find that overlay's top-level node and click its
+# close control (aria-label close / small button or icon in its top-right
+# corner). If it has none, hide the overlay. Never touches the upload dialog.
+_P500_UNBLOCK_JS = r"""([x, y]) => {
+  const target = document.elementFromPoint(x, y);
+  if (!target) return {status: 'none'};
+  const dialog = [...document.querySelectorAll('[role=dialog]')].find(d => d.contains(target));
+  if (dialog) return {status: 'clear'};
+  let root = target;
+  while (root.parentElement && root.parentElement !== document.body) root = root.parentElement;
+  if ([...document.querySelectorAll('[role=dialog]')].some(d => root.contains(d)) && root.contains(target)) {
+    // dialog and overlay share a root; climb only to the child holding target but not the dialog
+    root = target;
+    while (root.parentElement && ![...document.querySelectorAll('[role=dialog]')].some(d => root.parentElement.contains(d))) root = root.parentElement;
+  }
+  const rb = root.getBoundingClientRect();
+  const cands = [...root.querySelectorAll('button,[role=button],[aria-label],svg,[class*=close i]')].filter(c => {
+    const b = c.getBoundingClientRect();
+    if (!b.width || b.width > 64 || b.height > 64) return false;
+    const label = ((c.getAttribute('aria-label') || '') + ' ' + String(c.className?.baseVal ?? c.className)).toLowerCase();
+    const corner = b.left > rb.left + rb.width * 0.6 && b.top < rb.top + rb.height * 0.4;
+    return label.includes('close') || corner;
+  });
+  const desc = (root.innerText || '').slice(0, 60).replace(/\s+/g, ' ') || root.className;
+  if (cands.length) {
+    const b = cands[0].getBoundingClientRect();
+    return {status: 'close', x: b.left + b.width / 2, y: b.top + b.height / 2, desc};
+  }
+  root.style.display = 'none';
+  return {status: 'hidden', desc};
+}"""
+
+
+def p500_unblock(page, locator):
+    """If something covers `locator` (e.g. a 500px advert), close it. Never raises."""
+    try:
+        for _ in range(3):
+            box = locator.bounding_box(timeout=3000)
+            if not box:
+                return
+            res = page.evaluate(_P500_UNBLOCK_JS, [box["x"] + box["width"] / 2, box["y"] + box["height"] / 2])
+            if res.get("status") == "close":
+                page.mouse.click(res["x"], res["y"])
+                print(f"    Closed 500px overlay covering the dialog ({str(res.get('desc'))[:50]!r})")
+                page.wait_for_timeout(1200)
+            elif res.get("status") == "hidden":
+                print(f"    Hid 500px overlay covering the dialog ({str(res.get('desc'))[:50]!r})")
+                page.wait_for_timeout(500)
+            else:
+                return
+    except Exception as e:
+        print(f"    (overlay check skipped: {str(e).splitlines()[0][:80]})")
+
+
 def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     """
     Automate 500px photo upload.
@@ -1314,7 +1372,13 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     # that click. The old flow went straight from file-select to inline
     # metadata fields in the same modal — this extra step didn't exist.
     print("  Confirming upload...")
-    page.locator('button').filter(has_text="photo(").first.click(timeout=10000)
+    submit_btn = page.locator('button').filter(has_text="photo(").first
+    p500_unblock(page, submit_btn)
+    try:
+        submit_btn.click(timeout=10000)
+    except PlaywrightTimeout:
+        p500_unblock(page, submit_btn)       # advert may have appeared mid-wait
+        submit_btn.click(timeout=10000)
     page.wait_for_timeout(1500)
 
     # ── Fill metadata fields ────────────────────────────────
@@ -1335,6 +1399,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     # placeholder lookup (30s timeout, PH-2026-222). Locate it structurally
     # instead: the upload dialog's only <textarea>.
     print("  Setting metadata: title, description...")
+    p500_unblock(page, page.get_by_placeholder("Untitled"))
     page.get_by_placeholder("Untitled").fill(title)
     page.wait_for_timeout(300)
     desc_500 = fit_500px_description(desc_full)
@@ -1502,6 +1567,7 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
     print("  Publishing...")
     publish_clicked = False
     try:
+        p500_unblock(page, page.locator('button').filter(has_text="photo(").first)
         page.locator('button').filter(has_text="photo(").first.click(timeout=5000)
         publish_clicked = True
     except Exception:

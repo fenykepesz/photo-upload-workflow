@@ -8,7 +8,9 @@ Until 2026-11 Erik started every upload by telling Hermes to run it. Now:
   it picks a random start time in WINDOW (Israel time) and creates ONE Hermes
   one-off job for it, then sends "📅 Today's upload: ..." to Telegram. With
   nothing due it sends "📭 No upload today" (Erik wants that message too).
-- The one-off runs `upload_planner.py --run`, which waits for the upload lock
+- The one-off job fires REMIND_MIN early: `upload_planner.py --run` sends
+  "🚀 Upload starts in 10 min" (so Erik can stay off the platforms while the
+  VPS posts), waits until the announced time, then waits for the upload lock
   if something else (e.g. YouPic catch-up) holds it, then runs
   run_upload.sh — the same real upload Hermes starts by hand, with the usual
   Telegram reports and verify_upload afterwards.
@@ -52,6 +54,7 @@ HERMES = "/usr/local/bin/hermes"
 JOB_SCRIPT = "scheduled_upload.sh"        # under ~/.hermes/scripts/
 ONEOFF_NAME = "Photo Upload (scheduled one-off)"
 LOCK_WAIT_MIN = 45                        # max wait for a busy lock before giving up
+REMIND_MIN = 10                           # "starting soon" heads-up this long before the run
 
 
 def log(msg):
@@ -129,8 +132,9 @@ def _job_pending(job_id):
 
 
 def create_oneoff(run_at):
-    """Create the one-off job for `run_at` (aware datetime). Returns job id."""
-    minutes = max(1, round((run_at - datetime.now(timezone.utc)).total_seconds() / 60))
+    """Create the one-off job REMIND_MIN before `run_at` (aware datetime). Returns job id."""
+    fire_at = run_at - timedelta(minutes=REMIND_MIN)
+    minutes = max(1, round((fire_at - datetime.now(timezone.utc)).total_seconds() / 60))
     res = _hermes("create", f"in {minutes}m", "--name", ONEOFF_NAME, "--script", JOB_SCRIPT,
                   "--no-agent", "--deliver", "local", "--failure-deliver", "telegram:718581332")
     m = re.search(r"\b([0-9a-f]{12})\b", res.stdout + res.stderr)
@@ -209,6 +213,17 @@ def lock_busy():
 
 
 def run():
+    st = load_state()
+    if st.get("date") == now_local().date().isoformat() and st.get("run_at") and not PAUSE_FILE.exists():
+        run_at = datetime.fromisoformat(st["run_at"])
+        wait = (run_at - datetime.now(timezone.utc)).total_seconds()
+        if wait > 30:
+            rows = due_rows()
+            if rows:
+                notify(f"🚀 Upload starts in {round(wait / 60)} min ({fmt_local(run_at)}): {describe(rows)}. "
+                       "Stay off the platforms until the summary arrives (~15 min).")
+                log(f"run: reminder sent, starting at {fmt_local(run_at)}")
+            time.sleep(wait)
     if PAUSE_FILE.exists():
         log("run: paused — skipped")
         notify("⏸ Scheduled upload skipped — uploads are paused.")
