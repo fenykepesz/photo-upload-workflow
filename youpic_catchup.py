@@ -10,6 +10,10 @@ the row ends Partial. This script uploads such rows to YouPic only, once the
 On demand, not polling:
 - When upload.py defers YouPic it calls `youpic_catchup.py --schedule-in N`,
   which creates ONE Hermes one-off job ("in Nm") for when the slot frees up.
+  Since 2026-11-04 normal runs never try YouPic at all: they hand it over
+  with `--handoff`, which schedules the catch-up after the main run is done
+  (HANDOFF_DELAY_MIN) or at the known next slot, whichever is later; the
+  catch-up then checks the slot itself as usual.
 - That run uploads the oldest waiting row and, if more rows are waiting,
   schedules the next one-off. Nothing waiting = nothing scheduled.
 - A daily Hermes job runs this same script as a safety net (e.g. a one-off
@@ -54,6 +58,7 @@ JOB_SCRIPT = "youpic_catchup.sh"          # under ~/.hermes/scripts/
 ONEOFF_NAME = "YouPic Catch-up (one-off)"
 MAX_AGE_DAYS = 14
 MAX_ATTEMPTS = 3
+HANDOFF_DELAY_MIN = 30      # a normal run takes ~15 min; start after it
 
 
 def log(row_id, result, detail=""):
@@ -313,6 +318,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--schedule-in", type=int, metavar="SECONDS")
     ap.add_argument("--row", default="", help="with --schedule-in: the row just deferred (for the Telegram notice)")
+    ap.add_argument("--handoff", action="store_true",
+                    help="with --schedule-in: a normal run handed YouPic over (not a 24h-cap deferral)")
     args = ap.parse_args()
 
     st = load_state()
@@ -320,6 +327,19 @@ def main():
         rows = u.load_queue(u.DEFAULT_CSV)
         print(json.dumps({k: st[k] for k in ("next_slot", "attempts", "gave_up", "scheduled")}, indent=1))
         print("candidates (oldest first):", [r["upload_id"] for r in candidates(rows, set(st["gave_up"]))] or "none")
+        return 0
+    if args.schedule_in is not None and args.handoff:
+        when = datetime.now() + timedelta(minutes=HANDOFF_DELAY_MIN)
+        if st["next_slot"] and datetime.fromisoformat(st["next_slot"]) > when:
+            when = datetime.fromisoformat(st["next_slot"])
+        if st.get("scheduled") and _job_pending(st["scheduled"]["job_id"]):
+            when = max(when, datetime.fromisoformat(st["scheduled"]["run_at"]))  # earlier row still queued
+        at = ensure_scheduled(st, when)
+        save_state(st)
+        if args.row:
+            notify(f"📤 YouPic for {row_label(args.row)} will be posted by the catch-up job "
+                   + (f"from about {local(at)} (YouPic allows one upload per 24h); you'll get a message when it's done."
+                      if at else "— couldn't schedule it now; the daily safety-net run will pick it up."))
         return 0
     if args.schedule_in is not None:
         when = datetime.now() + timedelta(seconds=args.schedule_in)

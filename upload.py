@@ -161,6 +161,15 @@ def _edit_telegram_message(message_id, text, parse_mode="HTML"):
 # just falls back to a single message at the end, same as before this
 # feature existed — never worse than the old behavior, just not live.
 _live_message_id = None
+
+# Display names for run messages / error_log entries.
+PLATFORM_NAMES = {"500PX": "500px", "35P": "35photo", "YOUPIC": "YouPic", "VK": "VK", "X": "X",
+                  "BSKY": "Bluesky", "FB": "Facebook", "IG": "Instagram", "DA": "DeviantArt"}
+
+# Platforms found logged out at pre-flight (after re-checks). An unattended
+# run skips them instead of stopping (2026-11-04, Erik); login_catchup.py
+# retries each skipped row+platform later.
+_logged_out = set()
 _live_row = None
 
 
@@ -212,7 +221,7 @@ def _update_live_summary(event, detail):
     _edit_telegram_message(_live_message_id, msg)
 
 
-def send_preflight_notification(needed_platforms, failed_logins, unreachable=()):
+def send_preflight_notification(needed_platforms, failed_logins, unreachable=(), skipping=False):
     """Always post the pre-flight login-check result, pass or fail.
 
     Previously a failed check just printed to the terminal and called
@@ -225,18 +234,24 @@ def send_preflight_notification(needed_platforms, failed_logins, unreachable=())
     if not ordered:
         return
     n_ok = len(ordered) - len(failed_logins) - len(unreachable)
-    if failed_logins:
+    if failed_logins and skipping:
+        header = (f"🔑 Pre-flight: {n_ok}/{len(ordered)} logged in — "
+                  f"{', '.join(PLATFORM_NAMES.get(p, p) for p in failed_logins)} logged out. "
+                  f"Uploading the rest; the logged-out site will be retried by the login catch-up.")
+    elif failed_logins:
         header = f"❌ Pre-flight FAILED — {n_ok}/{len(ordered)} platforms logged in"
     elif unreachable:
         header = (f"✅ Pre-flight OK — {n_ok}/{len(ordered)} logged in, "
                   f"{len(unreachable)} unreachable (continuing, will retry during upload)")
     else:
         header = f"✅ Pre-flight OK — {n_ok}/{len(ordered)} platforms logged in"
-    lines = [f"{'❌' if p in failed_logins else '⚠️' if p in unreachable else '✅'} {p}"
-             + (" — didn't load" if p in unreachable else "") for p in ordered]
+    lines = [f"{('🔑' if skipping else '❌') if p in failed_logins else '⚠️' if p in unreachable else '✅'} {p}"
+             + (" — didn't load" if p in unreachable else " — logged out, skipped" if p in failed_logins and skipping
+                else "") for p in ordered]
     msg = header + "\n\n" + "\n".join(lines)
     if failed_logins:
-        msg += "\n\nRun: python upload.py --login"
+        msg += ("\n\nLog in (VNC: http://hermes:6080/vnc.html, run_login.sh) — the catch-up retries every 3h for 24h."
+                if skipping else "\n\nRun: python upload.py --login")
     _send_telegram_message(msg, parse_mode=None)
 
 
@@ -342,8 +357,10 @@ def send_run_summary(row, platforms, ok_map, vk_groups_result, log_path, run_sta
 
     # ── Compose message ───────────────────────────────────────────────────────
     if not any_failed and deferred:
-        header = (f"✅ Done. {n_ok}/{n_total} platforms in {duration} — "
-                  f"{', '.join(deferred)} deferred (free-tier 24h cap).")
+        why = {"YOUPIC": "catch-up, 24h limit"}
+        header = (f"✅ Done. {n_ok}/{n_total} platforms in {duration} — deferred: "
+                  + ", ".join(f"{PLATFORM_NAMES.get(k, k)} ({'logged out' if k in _logged_out else why.get(k, 'later')})"
+                              for k in deferred) + ".")
     elif not any_failed:
         header = f"✅ Complete success. All {n_total} platforms done in {duration}."
     elif n_ok:
@@ -806,6 +823,20 @@ def verify_login(page, platform):
     except Exception:
         return None
     return True
+
+
+def recheck_logged_out(page, failed, tries=2, wait_ms=120000):
+    """Re-check platforms that looked logged out — a slow or half-loaded page
+    can look logged out. Returns those still logged out after `tries` more
+    checks `wait_ms` apart."""
+    still = list(failed)
+    for n in range(tries):
+        if not still:
+            break
+        print(f"  Re-checking {', '.join(still)} in {wait_ms // 1000}s ({n + 1}/{tries})...")
+        page.wait_for_timeout(wait_ms)
+        still = [p for p in still if verify_login(page, p) is not True]
+    return still
 
 
 def run_login_checks(page, platforms):
@@ -1900,7 +1931,7 @@ def youpic_countdown_secs(body):
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 if m else 3600
 
 
-def youpic_schedule_catchup(wait_secs, row_id=""):
+def youpic_schedule_catchup(wait_secs, row_id="", handoff=False):
     """Ask youpic_catchup.py for one one-off Hermes run when the slot frees.
     Skipped when this process IS a catch-up run (it schedules its own
     follow-up). Never raises — the daily safety-net run covers a miss."""
@@ -1908,11 +1939,23 @@ def youpic_schedule_catchup(wait_secs, row_id=""):
         return
     try:
         subprocess.run([sys.executable, str(SCRIPT_DIR / "youpic_catchup.py"),
-                        "--schedule-in", str(int(wait_secs) + 120)] + (["--row", row_id] if row_id else []),
+                        "--schedule-in", str(int(wait_secs) + 120)] + (["--row", row_id] if row_id else [])
+                       + (["--handoff"] if handoff else []),
                        cwd=SCRIPT_DIR, timeout=90, capture_output=True)
         print("  YouPic catch-up scheduled for when the 24h slot frees up")
     except Exception as e:
         print(f"  WARNING: could not schedule YouPic catch-up: {e}")
+
+
+def login_catchup_add(row_id, platform):
+    """Hand a row+platform skipped for a logout to login_catchup.py, which
+    retries it every few hours. Never raises."""
+    try:
+        subprocess.run([sys.executable, str(SCRIPT_DIR / "login_catchup.py"), "--add", row_id, platform],
+                       cwd=SCRIPT_DIR, timeout=90, capture_output=True)
+        print(f"  {PLATFORM_NAMES.get(platform, platform)}: handed to the login catch-up")
+    except Exception as e:
+        print(f"  WARNING: could not schedule login catch-up for {platform}: {e}")
 
 
 def _youpic_norm(s):
@@ -5800,8 +5843,22 @@ def main():
         # ── Pre-flight login verification ─────────────────────
         if not args.skip_login_check:
             needed_platforms = collect_required_platforms(target_rows)
+            if args.platform:
+                needed_platforms &= {args.platform.strip().upper()}
             failed_logins, unreachable_logins = run_login_checks(page, needed_platforms)
-            send_preflight_notification(needed_platforms, failed_logins, unreachable_logins)
+            # A run aimed at one platform (manual, or a catch-up) still stops
+            # on a logout; a normal run re-checks, then skips the platform.
+            skipping = bool(failed_logins) and not args.platform
+            if skipping:
+                failed_logins = recheck_logged_out(page, failed_logins)
+                skipping = bool(failed_logins)
+            if not os.environ.get("LOGIN_CATCHUP"):   # the catch-up reports its own outcome
+                send_preflight_notification(needed_platforms, failed_logins, unreachable_logins, skipping=skipping)
+            if skipping:
+                _logged_out.update(failed_logins)
+                print("WARNING: logged out of " + ", ".join(failed_logins)
+                      + " — skipping them this run; login_catchup.py will retry")
+                failed_logins = []
             if unreachable_logins:
                 print("WARNING: couldn't reach " + ", ".join(unreachable_logins)
                       + " during pre-flight — continuing; their upload steps will retry")
@@ -5839,7 +5896,7 @@ def main():
                 # YouPic catch-up runs report their outcome themselves (one
                 # clear message from youpic_catchup.py), so skip the generic
                 # live/final summary for them.
-                _quiet_summary = bool(os.environ.get("YOUPIC_CATCHUP"))
+                _quiet_summary = bool(os.environ.get("YOUPIC_CATCHUP") or os.environ.get("LOGIN_CATCHUP"))
                 if not args.dry_run and not args.no_submit and not _quiet_summary:
                     start_live_summary(row, platforms)
 
@@ -5857,6 +5914,17 @@ def main():
                 ok_ig = False
                 ok_fb = False
                 ok_da = False
+
+                # Logged out at pre-flight: skip here, retry via login_catchup.py
+                platforms_skipped = platforms & _logged_out
+                platforms = platforms - platforms_skipped
+                for _p in sorted(platforms_skipped):
+                    _name = PLATFORM_NAMES.get(_p, _p)
+                    print(f"\n  {_name}: skipped — logged out")
+                    write_run_log(_p, "deferred (logged out)", pid=get_chromium_pid())
+                    errors.append(f"{_name}: deferred — logged out")
+                    if not args.no_submit:
+                        login_catchup_add(row["upload_id"], _p)
 
                 # ── 500PX (must run before DA) ────────────────────
                 if "500PX" in platforms:
@@ -5965,6 +6033,17 @@ def main():
                     if already:
                         print(f"\n  YouPic: already uploaded ({already}) — skipping")
                         write_run_log("YOUPIC", "skipped", pid=get_chromium_pid())
+                    elif not (os.environ.get("YOUPIC_CATCHUP") or args.platform or args.no_submit):
+                        # Normal runs never upload YouPic themselves (2026-11-04,
+                        # Erik): the free account allows one upload per 24h and
+                        # the start time is random, so youpic_catchup.py posts it
+                        # when the slot is free.
+                        youpic_deferred = True
+                        print("\n  YouPic: handed to the catch-up job (one upload per 24h)")
+                        write_run_log("YOUPIC", "deferred (catch-up)", pid=get_chromium_pid())
+                        errors.append("YouPic: deferred — posted by the catch-up job")
+                        youpic_history(row["upload_id"], "handed to catch-up", "normal run — catch-up posts YouPic")
+                        youpic_schedule_catchup(0, row["upload_id"], handoff=True)
                     elif _youpic_attempted:
                         # Free account: one upload per 24h — later rows in
                         # the same run would only hit the cap.
@@ -6855,6 +6934,7 @@ def main():
                 if "DA" in platforms:
                     s = "done" if ok_da or row.get("da_deviation_url", "").strip() else "failed"
                     summary_detail.append(f"DA:{s}")
+                summary_detail += [f"{PLATFORM_NAMES.get(_p, _p)}:deferred (logged out)" for _p in sorted(platforms_skipped)]
                 results_summary.append((row["upload_id"], ", ".join(summary_detail)))
                 _ok_map = {
                     "500PX": True if ok_500px else ("skip" if row.get("url_500px","").strip() else False),
@@ -6869,6 +6949,8 @@ def main():
                 }
                 if "YOUPIC" not in platforms:
                     _ok_map.pop("YOUPIC", None)
+                for _p in platforms_skipped:
+                    _ok_map[_p] = "deferred"
                 _vk_gr = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
                 print("  [DEBUG] Sending Telegram summary...")
                 try:
@@ -6901,6 +6983,8 @@ def main():
                 }
                 if "YOUPIC" not in platforms:
                     _ok_map_c.pop("YOUPIC", None)
+                for _p in locals().get("platforms_skipped", ()):
+                    _ok_map_c[_p] = "deferred"
                 _vk_gr_c = result_vk.get("vk_groups_result","") if "result_vk" in locals() and result_vk else ""
                 send_run_summary(row, platforms, _ok_map_c, _vk_gr_c, _run_log_path, _row_start)
             except Exception:
