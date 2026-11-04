@@ -79,3 +79,6 @@ logs/
 # Old manual backup files, predates the ~/.hermes-manual-backups/ convention
 upload.py.main-backup
 upload.py.pre-reliability-merge-*
+
+# Pause flag for scheduled uploads (upload_planner.py --pause/--resume)
+.uploads_paused
