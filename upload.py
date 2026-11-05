@@ -106,17 +106,18 @@ def _telegram_creds():
     return token, chat_id
 
 
-def _send_telegram_message(text, parse_mode="HTML"):
+def _send_telegram_message(text, parse_mode="HTML", chat_id=None):
     """Send a new message. Returns its message_id (for later editing), or
-    None if sending failed or credentials aren't configured."""
+    None if sending failed or credentials aren't configured. `chat_id`
+    overrides the default uploads channel."""
     import json as _json
     import urllib.parse as _uparse
     import urllib.request as _ureq
 
-    token, chat_id = _telegram_creds()
+    token, default_chat = _telegram_creds()
     if not token:
         return None
-    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
+    payload = {"chat_id": chat_id or default_chat, "text": text, "disable_web_page_preview": "true"}
     if parse_mode:
         payload["parse_mode"] = parse_mode
     try:

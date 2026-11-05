@@ -64,12 +64,30 @@ def log(msg):
     print(msg)
 
 
+def _dm_chat():
+    """Erik's direct chat with the Hermes bot (TELEGRAM_HOME_CHANNEL)."""
+    try:
+        for line in Path("/root/.hermes/.env").read_text().splitlines():
+            if line.startswith("TELEGRAM_HOME_CHANNEL="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
+
 def notify(msg):
-    """Telegram (Photo Uploads channel, like the upload summaries). Never raises."""
+    """Telegram: Photo Uploads channel (like the upload summaries) and, since
+    2026-11-05, also Erik's direct chat with the bot. Never raises."""
     try:
         u._send_telegram_message(msg, parse_mode=None)
     except Exception:
         pass
+    dm = _dm_chat()
+    if dm and dm != u._telegram_creds()[1]:
+        try:
+            u._send_telegram_message(msg, parse_mode=None, chat_id=dm)
+        except Exception:
+            pass
 
 
 def now_local():
