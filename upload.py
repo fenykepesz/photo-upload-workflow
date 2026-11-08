@@ -1630,11 +1630,14 @@ def upload_to_500px(page, row, desc_full, tags, image_path, no_submit=False):
 
 
 # ── 35photo Upload ────────────────────────────────────────────
-# "Upload photo (now)" — publishes immediately. The header "Upload" button
-# leads to the delayed-publication page (beta), which QUEUES a photo for 24h
-# whenever the previous one was published <24h ago ("publish photos every
-# day"); PH-2026-218..220 were queued there and never appeared (2026-10-15..17).
-P35_UPLOAD_NOW_URL = "https://35photo.pro/profile/photo/add_photo/?new=true"
+# 2026-11-08: 35photo merged its uploaders into one "UPLOAD PHOTOS" page
+# (add_photo/?ver=1; the old add_photo/?new=true "Upload photo (now)" form
+# now redirects there). After choosing a file a card appears with Genre,
+# Title, Tags and "More options" (Description, Camera, "Adult content 18+"),
+# plus a per-photo "Publish now" button (publish immediately, out of the
+# queue) and a page-level "Add to queue" (interval publishing). We always use
+# "Publish now" — queued photos never appeared in Oct (PH-2026-218..220).
+P35_UPLOAD_URL = "https://35photo.pro/profile/photo/add_photo/?ver=1"
 P35_MAX_ATTEMPTS = 3
 
 
@@ -1690,17 +1693,15 @@ def _35p_find_new(page, handle, before, title):
 
 
 def _35p_attempt(page, row, desc_full, tags, image_path, no_submit):
-    """One pass through the "Upload photo (now)" form. Returns "published"
-    (the form POST came back OK), "no_submit", "limit", or an error message.
-
-    This form has no "Adult content 18+" checkbox (nor does the photo's edit
-    page); Erik's call 2026-10-17: rely on the "Fine Nudes" style, which all
-    NSFW rows use, instead of the delayed page's checkbox."""
+    """One pass through the "UPLOAD PHOTOS" page (2026-11-08 layout).
+    Returns "published" (clicked "Publish now" and 35photo answered),
+    "no_submit", "limit", or an error message."""
     category = row.get("category_35p", "").strip()
     title = get_effective_title(row)
+    nsfw = row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE"
 
-    print("  Opening 35photo upload page (publish now)...")
-    if not _35p_goto(page, P35_UPLOAD_NOW_URL):
+    print("  Opening 35photo upload page...")
+    if not _35p_goto(page, P35_UPLOAD_URL):
         return "35photo upload page did not load (connection dropped)"
     page.wait_for_timeout(2000)
     if "login" in page.url.lower():
@@ -1709,88 +1710,107 @@ def _35p_attempt(page, row, desc_full, tags, image_path, no_submit):
         body = page.inner_text("body", timeout=10000)
     except Exception:
         body = ""
-    m = re.search(r"You can upload\s+(\d+)\s+Photo", body, re.I)
+    m = re.search(r"Today you can:\s*(\d+)", body, re.I)
     if m and int(m.group(1)) == 0:
         return "limit"
 
-    file_input = page.locator('input[type="file"][name="userfile"], input[type="file"]').first
+    file_input = page.locator('input[type="file"]#fileupload, input[type="file"][name="Filedata"]').first
     try:
         file_input.wait_for(state="attached", timeout=20000)
     except Exception:
         return "No file input found on 35photo upload page"
     print("  Choosing file...")
     file_input.set_input_files(str(image_path))
-    page.wait_for_timeout(1000)
 
-    print("  Setting metadata: title, style, tags, description...")
+    # The photo's card (Genre/Title/Tags) appears once 35photo has the file
+    title_box = page.locator('input.photoData[placeholder="Title"], input[placeholder="Title"]').first
     try:
-        page.locator("#photo_name, input[name='photo_name']").first.fill(title, timeout=8000)
-    except Exception as e:
-        return f"Could not fill title: {e}"
+        title_box.wait_for(state="visible", timeout=90000)
+    except Exception:
+        return "photo card did not appear after choosing the file (upload not accepted?)"
+    page.wait_for_timeout(1500)
 
+    print("  Setting metadata: genre, title, tags, description, adult flag...")
     if category:
-        picked = page.evaluate("""(cat) => {
-            for (const r of document.querySelectorAll('input[type=radio][name=genre_id]')) {
-                const lab = ((r.closest('label') || r.parentElement || {}).innerText || '').trim();
-                if (lab.toLowerCase() === cat.toLowerCase()) { r.click(); return r.checked ? lab : ''; }
-            }
-            return '';
-        }""", category)
-        if picked:
-            print(f"    Style: {picked}")
-        else:
-            print(f"    WARNING: style '{category}' not found on the form")
-
-    # Tags: chip input ("Add a tag...") feeding the hidden photo_keywords field
+        try:
+            page.locator("select.photoData").first.select_option(label=category, timeout=8000)
+            print(f"    Genre: {category}")
+        except Exception as e:
+            print(f"    WARNING: genre '{category}' not set: {str(e).splitlines()[0][:80]}")
     try:
-        tag_input = page.locator('input[placeholder="Add a tag..."]').first
+        title_box.fill(title, timeout=8000)
+    except Exception as e:
+        return f"Could not fill title: {str(e).splitlines()[0][:100]}"
+
+    try:
+        tag_input = page.locator('input.upload-tags-input, input[placeholder="Add a tag..."]').first
         tag_input.click(timeout=5000)
         for tag in tags:
             page.keyboard.type(tag, delay=30)
             page.keyboard.press("Enter")
             page.wait_for_timeout(200)
     except Exception as e:
-        print(f"    WARNING: could not type tags: {e}")
-    kw = page.evaluate("() => (document.querySelector('#photo_keywords') || {}).value || ''")
-    if tags and not kw.strip():
-        page.evaluate("(v) => { const e = document.querySelector('#photo_keywords'); if (e) e.value = v; }", ", ".join(tags))
-        print("    Tags set directly on the keywords field")
+        print(f"    WARNING: could not type tags: {str(e).splitlines()[0][:80]}")
 
+    # Description and the 18+ checkbox are behind "More options"
     try:
-        page.locator("#photo_comm, textarea[name='photo_comm']").first.fill(desc_full, timeout=8000)
+        page.get_by_role("button", name="More options").first.click(timeout=5000)
+        page.wait_for_timeout(1000)
+    except Exception:
+        pass
+    try:
+        page.locator('textarea.photoData[placeholder="Description"], textarea[placeholder="Description"]').first.fill(desc_full, timeout=8000)
     except Exception as e:
-        print(f"    WARNING: could not fill description: {e}")
-
-    if row.get("da_nsfw_flag", "FALSE").strip().upper() == "TRUE":
-        print(f"    NSFW row — no 18+ checkbox on this form; style '{category}' marks it")
+        print(f"    WARNING: could not fill description: {str(e).splitlines()[0][:80]}")
+    if nsfw:
+        try:
+            adult = page.locator("input.checkboxOne").first
+            if not adult.is_checked():
+                adult.check(timeout=5000)
+            print(f"    Adult content 18+: {'on' if adult.is_checked() else 'NOT SET'}")
+            if not adult.is_checked():
+                return "Could not tick 'Adult content 18+' — not publishing"
+        except Exception as e:
+            return f"Could not tick 'Adult content 18+' — not publishing ({str(e).splitlines()[0][:80]})"
     page.wait_for_timeout(1000)
 
     if no_submit:
         print("  --no-submit: skipping publish")
         return "no_submit"
 
-    # ── Publish: plain multipart form POST (the file goes up with it) ──
-    print("  Publishing (Add)...")
-    btn = page.locator('form[enctype="multipart/form-data"] button[type="submit"], '
-                       'form[enctype="multipart/form-data"] input[type="submit"]').first
-    if btn.count() == 0:
-        return "No Add button found"
+    # ── Publish now (this photo only, out of the queue) ──
+    print("  Publishing (Publish now)...")
+    answered = {}
+
+    def _resp(r):
+        if r.request.method == "POST" and "35photo" in r.url:
+            answered.setdefault("status", r.status)
+
+    page.on("response", _resp)
+    page.once("dialog", lambda d: d.accept())
     try:
-        with page.expect_navigation(wait_until="domcontentloaded", timeout=180000) as nav:
-            btn.click(timeout=8000)
-        resp = nav.value
-        status = resp.status if resp else 0
+        page.get_by_role("button", name="Publish now", exact=True).first.click(timeout=8000)
+        deadline = time.time() + 60
+        while "status" not in answered and time.time() < deadline:
+            page.wait_for_timeout(500)
     except Exception as e:
-        return f"publish request failed ({str(e).splitlines()[0][:100]})"
-    if status and status >= 400:
-        return f"35photo rejected the upload (HTTP {status})"
-    page.wait_for_timeout(3000)
+        return f"could not click 'Publish now' ({str(e).splitlines()[0][:100]})"
+    finally:
+        try:
+            page.remove_listener("response", _resp)
+        except Exception:
+            pass
+    page.wait_for_timeout(5000)
+    if "status" not in answered:
+        return "publish request got no answer from 35photo (connection dropped?)"
+    if answered["status"] >= 400:
+        return f"35photo rejected the publish (HTTP {answered['status']})"
     return "published"
 
 
 def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False, handle="rozmanerik"):
     """
-    Automate 35photo.pro photo upload via "Upload photo (now)".
+    Automate 35photo.pro photo upload via the "UPLOAD PHOTOS" page's "Publish now".
     Returns {"success": bool, "url_35p": str, "error": str, "attempt": int}
 
     Rebuilt 2026-10-17: the old flow went through the delayed-publication
@@ -1822,7 +1842,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False, h
         if outcome == "no_submit":
             return {"success": True, "url_35p": "NO_SUBMIT", "error": ""}
         if outcome == "limit":
-            return {"success": False, "url_35p": "", "error": "35photo daily upload limit reached (\"You can upload 0 Photo\")"}
+            return {"success": False, "url_35p": "", "error": "35photo daily upload limit reached (\"Today you can: 0\")"}
         if outcome.startswith("Not logged"):
             return {"success": False, "url_35p": "", "error": outcome}
 
@@ -3979,33 +3999,43 @@ def upload_to_fb(page, caption, image_path, location="", feeling="", tag_people=
     print("  Uploading photo...")
     attach_err = None
     try:
+        # 2026-11-08: the composer's file input can render a moment after the
+        # dialog opens (a fixed 2s wait missed it), and the old "Photo/video"
+        # aria-label button is gone — it's now an "Add photos or videos" area.
         dlg_input = fb_composer().locator('input[type="file"][accept*="image"]')
+        try:
+            dlg_input.first.wait_for(state="attached", timeout=15000)
+        except Exception:
+            pass
         if dlg_input.count() > 0:
             dlg_input.first.set_input_files(image_path)
             print("    Photo attached via composer file input")
         else:
-            with page.expect_file_chooser(timeout=5000) as fc_info:
+            with page.expect_file_chooser(timeout=8000) as fc_info:
                 fb_composer().locator(
+                    '[role="button"]:has-text("Add photos or videos"), '
                     '[aria-label="Photo/video"], [aria-label="Photo/Video"], '
                     '[aria-label*="photo" i]'
-                ).first.click(timeout=3000)
+                ).first.click(timeout=5000)
             fc_info.value.set_files(image_path)
             print("    Photo attached via file chooser")
     except Exception as e:
         attach_err = e
-        print(f"    WARNING: scoped attach failed: {e}")
+        print(f"    WARNING: scoped attach failed: {str(e).splitlines()[0][:120]}")
 
     # Wait for photo to upload/process
     print("  Waiting for photo to process...")
     page.wait_for_timeout(WAIT_TIMES["facebook"])
 
     if not fb_photo_attached():
-        # Last resort: any image file input on the page, then re-check
+        # Last resort: an image file input INSIDE the composer dialog (the
+        # page's first input is the feed's hidden one — setting a file there
+        # attaches nothing, which is what failed on 2026-11-08), then re-check
         try:
-            any_input = page.locator('input[type="file"]')
+            any_input = page.locator('[role="dialog"] input[type="file"][accept*="image"]')
             if any_input.count() > 0:
-                any_input.first.set_input_files(image_path)
-                print("    Fallback: photo set on page-level input")
+                any_input.last.set_input_files(image_path)
+                print("    Fallback: photo set on the dialog's file input")
                 page.wait_for_timeout(WAIT_TIMES["facebook"])
         except Exception as e:
             print(f"    WARNING: fallback attach failed: {e}")
