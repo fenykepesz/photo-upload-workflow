@@ -1109,15 +1109,35 @@ def download_stash_image(page, stash_url, upload_id):
             return None
         page.wait_for_timeout(1500)
 
-        # Click "Download" in the menu
-        dl_el = page.locator('text="Download"').first
-        if dl_el.count() == 0:
+        # Click "Download" in the menu. Not just the first "Download" on the
+        # page: since 2026-11-09 another one sits elsewhere, and scrolling to it
+        # puts it under DA's sticky header, which swallows the click. Prefer one
+        # that is on screen and not covered; otherwise click via the DOM.
+        dl_all = page.locator('text="Download"')
+        if dl_all.count() == 0:
             print("    WARNING: 'Download' not found in menu")
             page.keyboard.press("Escape")
             return None
+        dl_el = None
+        for i in range(dl_all.count()):
+            cand = dl_all.nth(i)
+            try:
+                if cand.is_visible() and cand.evaluate("""e => {
+                        const r = e.getBoundingClientRect();
+                        if (!r.width || r.top < 0 || r.bottom > innerHeight) return false;
+                        const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                        return !!t && (e.contains(t) || t.contains(e));
+                    }"""):
+                    dl_el = cand
+                    break
+            except Exception:
+                continue
 
         with page.expect_download(timeout=30000) as download_info:
-            dl_el.click()
+            if dl_el is not None:
+                dl_el.click()
+            else:
+                dl_all.last.evaluate("e => e.click()")
         download = download_info.value
         download.save_as(str(dest))
         print(f"    Downloaded: {dest.name} ({dest.stat().st_size / 1024:.0f} KB)")
@@ -3353,6 +3373,8 @@ _IG_MIN_DIM = 320                        # shortest side minimum
 
 def validate_ig_image(image_path):
     """Return (True, '') or (False, reason) before spending Cloudinary credits."""
+    if not image_path:
+        return False, "No image file available"
     p = Path(image_path)
     if not p.exists():
         return False, "image file not found"
