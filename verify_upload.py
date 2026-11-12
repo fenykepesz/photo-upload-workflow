@@ -22,8 +22,10 @@ Usage:
 
 import argparse
 import html
+import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -406,10 +408,11 @@ def main():
         plats, skipped = platforms_to_check(row, only)
         todo += [(row, p) for p in plats]
         if skipped:
-            notes.append(f"{row['upload_id']}: {', '.join(LABEL[p] for p in skipped)} not checked (upload already reported failed)")
+            notes.append(f"{row['upload_id']}: {', '.join(LABEL[p] for p in skipped)} not checked (no upload recorded — failed or deferred)")
         dup = ambiguous_title(row, all_rows)
         if dup and any(p in ("35P", "X", "500PX") for p in plats):
             notes.append(f"{row['upload_id']}: title also matches {', '.join(dup[:3])} — title checks are less certain")
+    _AUTOFIX["since"] = args.since
     if not todo:
         print("Nothing to verify.")
         return 0
@@ -458,6 +461,8 @@ def main():
     for (uid, p), (status, detail, pass_no) in results.items():
         log(f"{uid}  {p:<6} {status:<16} pass={pass_no}  {detail}")
     bad = {k: v for k, v in results.items() if v[0] != OK}
+    _AUTOFIX["missing"] = [{"row": uid, "platform": p, "detail": d} for (uid, p), (st, d, _n) in bad.items()
+                           if st == MISSING]
     n_ok = len(results) - len(bad)
     if not bad:
         header = f"✅ Verified. All {len(results)} posts found on the live profiles."
@@ -489,5 +494,26 @@ def main():
     return 1 if bad else 0
 
 
+_AUTOFIX = {"since": None, "missing": []}
+
+
+def autofix_hook():
+    """After a scheduled run (--since), hand failures to the upload doctor
+    (autofix.py), detached. Manual --row checks never trigger it. Never raises."""
+    try:
+        if not _AUTOFIX["since"]:
+            return
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "autofix.py"), "trigger",
+                          "--since", _AUTOFIX["since"], "--missing-json", json.dumps(_AUTOFIX["missing"])],
+                         cwd=str(Path(__file__).resolve().parent), stdin=subprocess.DEVNULL,
+                         stdout=open(Path(__file__).resolve().parent / "logs" / "autofix.log", "a"),
+                         stderr=subprocess.STDOUT, start_new_session=True)
+        print("  Upload doctor: checked for failures (logs/autofix.log).")
+    except Exception as e:
+        print(f"  Upload doctor hook failed: {e}")
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    autofix_hook()
+    sys.exit(_rc)
