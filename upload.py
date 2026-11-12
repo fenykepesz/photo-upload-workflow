@@ -1730,7 +1730,7 @@ def _35p_attempt(page, row, desc_full, tags, image_path, no_submit):
         body = page.inner_text("body", timeout=10000)
     except Exception:
         body = ""
-    m = re.search(r"Today you can:\s*(\d+)", body, re.I)
+    m = re.search(r"(?:Publication slots available now|Can publish now today:|Today you can:)\s*(\d+)", body, re.I)
     if m and int(m.group(1)) == 0:
         return "limit"
 
@@ -1798,33 +1798,45 @@ def _35p_attempt(page, row, desc_full, tags, image_path, no_submit):
         print("  --no-submit: skipping publish")
         return "no_submit"
 
-    # ── Publish now (this photo only, out of the queue) ──
-    print("  Publishing (Publish now)...")
-    answered = {}
+    # ── Publish immediately (never queue) ──
+    # 2026-11-12: the button is now "Publish photo" (next to "Queue photo");
+    # it sends POST ...type2=ajaxUploaderVer1_dataSave. Only THAT request's
+    # answer counts — the page's tracking pings (ga_beacon/growth_beacon)
+    # answer too and made PH-2026-245 look published when the save request
+    # had actually been dropped on the flaky route to 35photo (2026-11-11).
+    print("  Publishing (Publish photo)...")
+    save = {}
 
     def _resp(r):
-        if r.request.method == "POST" and "35photo" in r.url:
-            answered.setdefault("status", r.status)
+        if "ajaxUploaderVer1_dataSave" in r.url:
+            save.setdefault("status", r.status)
+
+    def _fail(r):
+        if "ajaxUploaderVer1_dataSave" in r.url:
+            save.setdefault("fail", r.failure or "request failed")
 
     page.on("response", _resp)
+    page.on("requestfailed", _fail)
     page.once("dialog", lambda d: d.accept())
     try:
-        page.get_by_role("button", name="Publish now", exact=True).first.click(timeout=8000)
-        deadline = time.time() + 60
-        while "status" not in answered and time.time() < deadline:
+        btn = page.locator('button:text-is("Publish photo"), button.up-publish-now, button:text-is("Publish now")').first
+        btn.click(timeout=8000)
+        deadline = time.time() + 90
+        while not save and time.time() < deadline:
             page.wait_for_timeout(500)
     except Exception as e:
-        return f"could not click 'Publish now' ({str(e).splitlines()[0][:100]})"
+        return f"could not click 'Publish photo' ({str(e).splitlines()[0][:100]})"
     finally:
-        try:
-            page.remove_listener("response", _resp)
-        except Exception:
-            pass
+        for ev, fn in (("response", _resp), ("requestfailed", _fail)):
+            try:
+                page.remove_listener(ev, fn)
+            except Exception:
+                pass
+    if "status" not in save:
+        return f"publish request got no answer from 35photo ({save.get('fail', 'no response in 90s')} — connection dropped)"
+    if save["status"] >= 400:
+        return f"35photo rejected the publish (HTTP {save['status']})"
     page.wait_for_timeout(5000)
-    if "status" not in answered:
-        return "publish request got no answer from 35photo (connection dropped?)"
-    if answered["status"] >= 400:
-        return f"35photo rejected the publish (HTTP {answered['status']})"
     return "published"
 
 
@@ -1862,7 +1874,7 @@ def upload_to_35photo(page, row, desc_full, tags, image_path, no_submit=False, h
         if outcome == "no_submit":
             return {"success": True, "url_35p": "NO_SUBMIT", "error": ""}
         if outcome == "limit":
-            return {"success": False, "url_35p": "", "error": "35photo daily upload limit reached (\"Today you can: 0\")"}
+            return {"success": False, "url_35p": "", "error": "35photo daily upload limit reached (no publication slots left today)"}
         if outcome.startswith("Not logged"):
             return {"success": False, "url_35p": "", "error": outcome}
 
